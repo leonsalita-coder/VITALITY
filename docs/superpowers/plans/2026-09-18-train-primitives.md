@@ -13,7 +13,8 @@
 - Tiles are **sealed `srcDoc` sandboxed iframes**: opaque origin, no network, no external files. Everything ships inlined in one HTML file.
 - **No AI or API keys** in the tile or engine. AI calls go only through the `window.Vitality.*` bridge.
 - The engine must be **DOM-free and dashboard-free** — no `window`, `document`, or `window.Vitality` references inside `lib/train/*.ts`. This is what makes it portable to a native app later.
-- **Canonical storage unit is POUNDS (`lb`).** kg is a display-time conversion only. Never store kg.
+- **Canonical storage unit is POUNDS (`lb`).** kg is a display-time conversion only — never stored. This is enforced by `lib/train/units.ts` (Task 2): the tile converts on render and on input, and the migration converts any legacy `unit: 'kg'` store. Today no user can be in kg (the tile has no unit toggle — `STATE.unit` is written once as `'lb'` in `buildState()` and never reassigned), which is exactly why this is cheap to establish now rather than after a kg toggle ships.
+- **Estimated data must be marked.** Anything the system inferred rather than recorded carries a flag — `atEstimated` on a backfilled timestamp, `contributionsEstimated` on a guessed muscle split. The intelligence layer must be able to tell what it measured from what it guessed, or it will confidently report artifacts.
 - **Dates are local-time `YYYY-MM-DD`**, produced the way the tile already does it (`ymd()`), never `toISOString()`.
 - **Never destroy user data.** Migration is versioned (`STATE.v`), idempotent, and writes a one-time `_v0Backup` before converting.
 - After any build, `tiles-library/train.html` and `public/tiles/train.html` must be **byte-identical**.
@@ -29,6 +30,7 @@
 | File | Responsibility |
 |---|---|
 | `lib/train/types.ts` | All shared types: `SetKind`, `LoggedSet`, `Muscle`, `MovementPattern`, `Equipment`, `ExerciseDef`, `TrainStateV1` |
+| `lib/train/units.ts` | The kg↔lb boundary — canonical pounds in, display unit out |
 | `lib/train/sets.ts` | Set constructors, type guards, per-kind field validation |
 | `lib/train/volume.ts` | Per-set-kind volume strategies, aggregates, warm-up exclusion |
 | `lib/train/timing.ts` | Rest-taken and session-density derivations from set timestamps |
@@ -45,7 +47,7 @@
 |---|---|
 | `vitest.config.ts` | Test config, node environment |
 | `scripts/build-tile.mjs` | Bundle engine to IIFE, inline into both tile HTML files |
-| `tests/train/*.test.ts` | One test file per engine module |
+| `tests/train/*.test.ts` | One test file per engine module, plus source-level contract tests asserting the sealed tile's wiring |
 
 **Modified:**
 
@@ -241,17 +243,19 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 2: Core types and set constructors
+### Task 2: Core types, units, and set constructors
 
 **Files:**
 - Create: `lib/train/types.ts`
+- Create: `lib/train/units.ts`
 - Create: `lib/train/sets.ts`
 - Create: `tests/train/sets.test.ts`
+- Create: `tests/train/units.test.ts`
 - Modify: `lib/train/index.ts`
 
 **Interfaces:**
 - Consumes: `ENGINE_VERSION` (Task 1).
-- Produces: types `SetKind`, `LoggedSet`, `DropSet`, `Muscle`, `MovementPattern`, `Plane`, `Equipment`, `LoadingScheme`, `MuscleContribution`, `ExerciseDef`, `HistoryEntry`, `SessionExercise`, `Session`, `TrainStateV1`; functions `makeSet(kind, fields)`, `isWorkingSet(set)`, `setIsValid(set)`, `measuresFor(kind)`, `totalReps(set)`.
+- Produces: types `SetKind`, `LoggedSet`, `DropSet`, `Muscle`, `MovementPattern`, `Plane`, `Equipment`, `LoadingScheme`, `MuscleContribution`, `ExerciseDef`, `HistoryEntry`, `SessionExercise`, `Session`, `TrainStateV1`; functions `makeSet(kind, fields)`, `isWorkingSet(set)`, `setIsValid(set)`, `measuresFor(kind)`, `totalReps(set)`; `Unit`, `LB_PER_KG`, `kgToLb`, `lbToKg`, `displayWeight(lb, unit)`, `storeWeight(entered, unit)`, `formatWeight(lb, unit)`.
 
 - [ ] **Step 1: Create `lib/train/types.ts`**
 
@@ -285,6 +289,14 @@ export interface LoggedSet {
   fail: boolean
   /** Epoch ms when the set was logged. Powers rest-taken and density. */
   at: number
+  /**
+   * True when `at` was backfilled rather than observed — migrated history
+   * has no real timestamps. Every timing derivation excludes these, because
+   * a synthesized stamp would otherwise read as a perfectly regular rest
+   * interval and become a finding.
+   */
+  atEstimated?: boolean
+  /** Pounds, always. kg never reaches storage — see lib/train/units.ts. */
   weight?: number
   reps?: number
   seconds?: number
@@ -352,6 +364,13 @@ export interface ExerciseDef {
   bodyweightFactor?: number
   /** True when the AI classified it rather than the seed catalog. */
   custom?: boolean
+  /**
+   * True when primary/secondary shares were guessed (split evenly across
+   * whatever muscles were named) rather than authored. Muscle-volume views
+   * must surface this — an even split renders as a confident number built
+   * on no information.
+   */
+  contributionsEstimated?: boolean
 }
 
 export interface HistoryEntry {
@@ -577,7 +596,128 @@ export function totalReps(set: LoggedSet): number {
 Run: `npx vitest run tests/train/sets.test.ts`
 Expected: PASS — all 11 assertions green.
 
-- [ ] **Step 6: Re-export from `lib/train/index.ts`**
+- [ ] **Step 6: Write the failing units test `tests/train/units.test.ts`**
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { LB_PER_KG, kgToLb, lbToKg, displayWeight, storeWeight, formatWeight } from '../../lib/train/units'
+
+describe('conversion', () => {
+  it('uses the exact factor, not a rounded one', () => {
+    expect(LB_PER_KG).toBeCloseTo(2.20462262185, 10)
+  })
+
+  it('round-trips within display precision', () => {
+    const lb = 225
+    expect(lbToKg(kgToLb(100))).toBeCloseTo(100, 6)
+    expect(kgToLb(lbToKg(lb))).toBeCloseTo(lb, 6)
+  })
+
+  it('converts known values', () => {
+    expect(kgToLb(100)).toBeCloseTo(220.462, 2)
+    expect(lbToKg(225)).toBeCloseTo(102.058, 2)
+  })
+})
+
+describe('displayWeight', () => {
+  it('passes pounds through for an lb user', () => {
+    expect(displayWeight(225, 'lb')).toBe(225)
+  })
+
+  it('converts to kg for a kg user', () => {
+    expect(displayWeight(220.46, 'kg')).toBe(100)
+  })
+
+  it('rounds display to one decimal so the UI never shows noise', () => {
+    expect(displayWeight(100, 'kg')).toBe(45.4)
+  })
+})
+
+describe('storeWeight', () => {
+  it('stores what an lb user typed, unchanged', () => {
+    expect(storeWeight(225, 'lb')).toBe(225)
+  })
+
+  it('converts what a kg user typed into canonical pounds', () => {
+    expect(storeWeight(100, 'kg')).toBeCloseTo(220.46, 2)
+  })
+
+  it('survives a display/store round trip at the precision the UI shows', () => {
+    const stored = storeWeight(100, 'kg')
+    expect(displayWeight(stored, 'kg')).toBe(100)
+  })
+})
+
+describe('formatWeight', () => {
+  it('drops a trailing zero decimal', () => {
+    expect(formatWeight(225, 'lb')).toBe('225')
+    expect(formatWeight(220.46, 'kg')).toBe('100')
+  })
+
+  it('keeps a meaningful decimal', () => {
+    expect(formatWeight(2.5, 'lb')).toBe('2.5')
+  })
+})
+```
+
+- [ ] **Step 7: Run it to verify it fails**
+
+Run: `npx vitest run tests/train/units.test.ts`
+Expected: FAIL — cannot resolve `../../lib/train/units`.
+
+- [ ] **Step 8: Create `lib/train/units.ts`**
+
+```ts
+/**
+ * Units. Storage is ALWAYS pounds; kg exists only at the edges — what is
+ * rendered, and what the user typed.
+ *
+ * The reason is not tidiness. If weight were stored in whatever unit was
+ * selected at the time, switching units would silently make every
+ * historical comparison incoherent: progression, plateau detection and PRs
+ * would compare 100 (kg) against 225 (lb) as raw numbers and conclude the
+ * lifter had regressed. Canonical storage makes a unit switch cosmetic.
+ */
+export type Unit = 'lb' | 'kg'
+
+export const LB_PER_KG = 2.20462262185
+
+export function kgToLb(kg: number): number {
+  return kg * LB_PER_KG
+}
+
+export function lbToKg(lb: number): number {
+  return lb / LB_PER_KG
+}
+
+const round = (n: number, places: number): number => {
+  const f = 10 ** places
+  return Math.round(n * f) / f
+}
+
+/** Canonical pounds → the number to show, in the user's unit. */
+export function displayWeight(lb: number, unit: Unit): number {
+  return round(unit === 'kg' ? lbToKg(lb) : lb, 1)
+}
+
+/** A number the user typed, in their unit → canonical pounds. */
+export function storeWeight(entered: number, unit: Unit): number {
+  return round(unit === 'kg' ? kgToLb(entered) : entered, 2)
+}
+
+/** Display string with no trailing ".0". */
+export function formatWeight(lb: number, unit: Unit): string {
+  const n = displayWeight(lb, unit)
+  return Number.isInteger(n) ? String(n) : String(n)
+}
+```
+
+- [ ] **Step 9: Run the test to verify it passes**
+
+Run: `npx vitest run tests/train/units.test.ts`
+Expected: PASS — all 11 assertions green.
+
+- [ ] **Step 10: Re-export from `lib/train/index.ts`**
 
 Replace the contents of `lib/train/index.ts` with:
 
@@ -592,22 +732,24 @@ Replace the contents of `lib/train/index.ts` with:
 export const ENGINE_VERSION = '1.0.0'
 
 export * from './types'
+export * from './units'
 export * from './sets'
 ```
 
-- [ ] **Step 7: Rebuild and run the full suite**
+- [ ] **Step 11: Rebuild and run the full suite**
 
 Run: `npm run build:tiles && npx vitest run`
 Expected: PASS — build test and sets tests all green.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
-git add lib/train/types.ts lib/train/sets.ts lib/train/index.ts tests/train/sets.test.ts public/tiles/train.html tiles-library/train.html
+git add lib/train/types.ts lib/train/units.ts lib/train/sets.ts lib/train/index.ts tests/train/sets.test.ts tests/train/units.test.ts public/tiles/train.html tiles-library/train.html
 git commit -m "feat(train): add typed sets and core data model
 
 Five set kinds, warm-up and per-side/assisted/banded flags, optional RPE
-or RIR, and a timestamp on every set.
+or RIR, and a timestamp on every set. Weight is canonical pounds; kg is a
+display-time conversion so switching units stays cosmetic.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -893,14 +1035,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `LoggedSet` (Task 2).
-- Produces: `restTaken(sets)`, `sessionSpanSeconds(sets)`, `sessionDensity(sets)`, `medianRest(sets)`.
+- Produces: `restTaken(sets)`, `sessionSpanSeconds(sets)`, `sessionDensity(sets)`, `medianRest(sets)`, `hasObservedTiming(sets)`.
 
 - [ ] **Step 1: Write the failing test `tests/train/timing.test.ts`**
 
 ```ts
 import { describe, it, expect } from 'vitest'
 import { makeSet } from '../../lib/train/sets'
-import { restTaken, sessionSpanSeconds, sessionDensity, medianRest } from '../../lib/train/timing'
+import { restTaken, sessionSpanSeconds, sessionDensity, medianRest, hasObservedTiming } from '../../lib/train/timing'
 
 const at = (seconds: number) => seconds * 1000
 
@@ -933,6 +1075,45 @@ describe('restTaken', () => {
       makeSet('reps_weight', { weight: 135, reps: 5 }, at(60)),
     ]
     expect(restTaken(sets)).toEqual([60])
+  })
+
+  it('ignores backfilled timestamps — migrated history has no real timing', () => {
+    const synthetic = [
+      { ...makeSet('reps_weight', { weight: 100, reps: 5 }, at(0)), atEstimated: true },
+      { ...makeSet('reps_weight', { weight: 100, reps: 5 }, at(180)), atEstimated: true },
+      { ...makeSet('reps_weight', { weight: 100, reps: 5 }, at(360)), atEstimated: true },
+    ]
+    expect(restTaken(synthetic)).toEqual([])
+    expect(medianRest(synthetic)).toBeNull()
+    expect(sessionDensity(synthetic)).toBe(0)
+    expect(sessionSpanSeconds(synthetic)).toBe(0)
+  })
+
+  it('measures only the observed portion of a mixed list', () => {
+    const mixed = [
+      { ...makeSet('reps_weight', { weight: 100, reps: 5 }, at(0)), atEstimated: true },
+      makeSet('reps_weight', { weight: 100, reps: 5 }, at(600)),
+      makeSet('reps_weight', { weight: 100, reps: 5 }, at(690)),
+    ]
+    expect(restTaken(mixed)).toEqual([90])
+  })
+})
+
+describe('hasObservedTiming', () => {
+  it('is false when every stamp was backfilled', () => {
+    const synthetic = [
+      { ...makeSet('reps_weight', { weight: 100, reps: 5 }, at(0)), atEstimated: true },
+      { ...makeSet('reps_weight', { weight: 100, reps: 5 }, at(180)), atEstimated: true },
+    ]
+    expect(hasObservedTiming(synthetic)).toBe(false)
+  })
+
+  it('is true once two real stamps exist', () => {
+    const real = [
+      makeSet('reps_weight', { weight: 100, reps: 5 }, at(0)),
+      makeSet('reps_weight', { weight: 100, reps: 5 }, at(90)),
+    ]
+    expect(hasObservedTiming(real)).toBe(true)
   })
 })
 
@@ -999,11 +1180,23 @@ import type { LoggedSet } from './types'
  * — the interpretation layer sits above them, not here.
  */
 
+/**
+ * Only OBSERVED stamps. Migrated history carries synthesized ones spaced a
+ * fixed interval apart; including them would make every pre-migration
+ * session report a suspiciously perfect rest cadence, and the intelligence
+ * layer would faithfully report that artifact as a finding.
+ */
 function stamps(sets: Array<LoggedSet | null | undefined>): number[] {
   return sets
-    .filter((s): s is LoggedSet => !!s && Number.isFinite(s.at))
+    .filter((s): s is LoggedSet => !!s && Number.isFinite(s.at) && s.atEstimated !== true)
     .map((s) => s.at)
     .sort((a, b) => a - b)
+}
+
+/** True when a set list has no observed timing at all — caller should not
+ *  render a rest or density figure for it. */
+export function hasObservedTiming(sets: Array<LoggedSet | null | undefined>): boolean {
+  return stamps(sets).length >= 2
 }
 
 /** Gaps between consecutive sets, in seconds, oldest first. */
@@ -1043,7 +1236,7 @@ export function medianRest(sets: Array<LoggedSet | null | undefined>): number | 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run tests/train/timing.test.ts`
-Expected: PASS — all 11 assertions green.
+Expected: PASS — all 16 assertions green.
 
 - [ ] **Step 5: Re-export from `lib/train/index.ts`**
 
@@ -1058,6 +1251,9 @@ export * from './timing'
 ```bash
 git add lib/train/timing.ts lib/train/index.ts tests/train/timing.test.ts
 git commit -m "feat(train): derive rest taken and session density from timestamps
+
+Backfilled timestamps are excluded, so migrated history cannot report a
+synthesized rest cadence as if it were measured.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -2374,7 +2570,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: everything above — `TrainStateV1`, `LoggedSet` (Task 2), `makeSet` (Task 2), `CATALOG` (Task 6), `resolveExercise`, `slugFromName`, `normalizeName` (Task 7).
-- Produces: `STATE_VERSION`, `migrate(raw)`, `emptyStateV1(today)`, `isV1(raw)`.
+- Produces: `STATE_VERSION`, `migrate(raw, todayKey)`, `emptyStateV1(today)`, `isV1(raw)`.
+
+`migrate` takes `todayKey` rather than calling `new Date()` — the whole point of putting this logic in `lib/train/` is that it is pure and testable, and a hidden clock read is the one crack that makes a time-dependent test flaky at midnight.
 
 The old shape (from the live tile) is:
 - `STATE.history[id] = [{ date, kg, sets: [{ r, fail }], off? }]`
@@ -2387,6 +2585,8 @@ The old shape (from the live tile) is:
 ```ts
 import { describe, it, expect } from 'vitest'
 import { migrate, STATE_VERSION, emptyStateV1, isV1 } from '../../lib/train/migrate'
+
+const TODAY = '2026-09-18'
 
 const v0 = () => ({
   unit: 'lb',
@@ -2420,11 +2620,11 @@ const v0 = () => ({
 
 describe('migrate', () => {
   it('stamps the version', () => {
-    expect(migrate(v0()).v).toBe(STATE_VERSION)
+    expect(migrate(v0(), TODAY).v).toBe(STATE_VERSION)
   })
 
   it('converts history sets to typed working sets', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     const entries = out.history.barbell_bench_press
     expect(entries).toBeDefined()
     const first = entries[0]
@@ -2434,20 +2634,20 @@ describe('migrate', () => {
   })
 
   it('preserves failed sets as failures, not as zero-rep successes', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     const sep15 = out.history.barbell_bench_press.find((e) => e.date === '2026-09-15')!
     expect(sep15.sets[1].fail).toBe(true)
   })
 
   it('backfills timestamps from the entry date so ordering is stable', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     const sets = out.history.barbell_bench_press[0].sets
     expect(sets[0].at).toBeLessThan(sets[1].at)
     expect(Number.isFinite(sets[0].at)).toBe(true)
   })
 
   it('marks nothing as a warm-up — v0 had no such concept', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     for (const entries of Object.values(out.history)) {
       for (const entry of entries) {
         for (const set of entry.sets) expect(set.warmup).toBe(false)
@@ -2456,14 +2656,14 @@ describe('migrate', () => {
   })
 
   it('resolves the typed id onto a canonical catalog id', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     expect(out.history.barbell_bench_press).toBeDefined()
     expect(out.history.bb_bench_press).toBeUndefined()
     expect(out.session.ex[0].id).toBe('barbell_bench_press')
   })
 
   it('converts the live session log, keeping drops', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     const log = out.session.ex[0].log
     expect(log[0]).toMatchObject({ kind: 'reps_weight', weight: 185, reps: 5 })
     expect(log[1]!.drops).toEqual([{ weight: 155, reps: 5 }])
@@ -2471,45 +2671,89 @@ describe('migrate', () => {
   })
 
   it('carries customLib into an exercise definition with closed-list muscles', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     const def = out.exercises.barbell_bench_press
     expect(def).toBeDefined()
     expect(def.primary.some((c) => c.muscle === 'chest')).toBe(true)
   })
 
   it('learns an alias from the old display name', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     expect(out.aliases['barbell bench press']).toBe('barbell_bench_press')
   })
 
   it('keeps a one-time backup of the original state', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     expect(out._v0Backup).toBeDefined()
   })
 
+  it('marks every backfilled timestamp as estimated', () => {
+    const out = migrate(v0(), TODAY)
+    for (const entries of Object.values(out.history)) {
+      for (const entry of entries) {
+        for (const set of entry.sets) expect(set.atEstimated).toBe(true)
+      }
+    }
+  })
+
+  it('flags guessed muscle contributions so they never read as data', () => {
+    const out = migrate(v0(), TODAY)
+    const custom = Object.values(out.exercises).filter((d) => d.custom)
+    for (const def of custom) expect(def.contributionsEstimated).toBe(true)
+  })
+
+  it('takes the day as a parameter rather than reading the clock', () => {
+    const out = migrate({ session: { date: '2026-01-01', off: false, ex: [] } }, '2030-06-15')
+    expect(out.session.date).toBe('2026-01-01')
+    const fresh = migrate(null, '2030-06-15')
+    expect(fresh.session.date).toBe('2030-06-15')
+  })
+
+  it('leaves an lb store\'s numbers untouched', () => {
+    const out = migrate(v0(), TODAY)
+    expect(out.session.ex[0].weight).toBe(185)
+    expect(out.history.barbell_bench_press[0].sets[0].weight).toBe(180)
+  })
+
+  it('converts a legacy kg store into canonical pounds', () => {
+    const kgState = { ...v0(), unit: 'kg' }
+    const out = migrate(kgState, TODAY)
+    // 185 kg → 407.86 lb; the display preference is kept, the storage is not
+    expect(out.unit).toBe('kg')
+    expect(out.session.ex[0].weight).toBeCloseTo(407.86, 1)
+    expect(out.history.barbell_bench_press[0].sets[0].weight).toBeCloseTo(396.83, 1)
+  })
+
+  it('converts drop-set weights too', () => {
+    const kgState = { ...v0(), unit: 'kg' }
+    const out = migrate(kgState, TODAY)
+    const withDrop = out.session.ex[0].log[1]!
+    expect(withDrop.drops![0].weight).toBeCloseTo(341.72, 1)
+  })
+
   it('preserves the fields it does not transform', () => {
-    const out = migrate(v0())
+    const out = migrate(v0(), TODAY)
     expect(out.shortTermGoal).toBe('Add 20lb to bench')
     expect(out.finishedDates).toEqual(['2026-09-11', '2026-09-15'])
     expect(out.sessionDurations).toEqual([{ date: '2026-09-15', minutes: 62 }])
   })
 
   it('is idempotent — migrating twice changes nothing and keeps one backup', () => {
-    const once = migrate(v0())
-    const twice = migrate(once)
+    const once = migrate(v0(), TODAY)
+    const twice = migrate(once, TODAY)
     expect(twice).toEqual(once)
   })
 
   it('returns an empty v1 state for junk input', () => {
-    expect(migrate(null).v).toBe(STATE_VERSION)
-    expect(migrate([]).v).toBe(STATE_VERSION)
-    expect(migrate({ days: {} }).history).toEqual({})
+    expect(migrate(null, TODAY).v).toBe(STATE_VERSION)
+    expect(migrate([], TODAY).v).toBe(STATE_VERSION)
+    expect(migrate({ days: {} }, TODAY).history).toEqual({})
   })
 })
 
 describe('isV1', () => {
   it('recognizes a migrated state', () => {
-    expect(isV1(migrate(v0()))).toBe(true)
+    expect(isV1(migrate(v0(), TODAY))).toBe(true)
     expect(isV1(v0())).toBe(false)
     expect(isV1(null)).toBe(false)
   })
@@ -2540,6 +2784,7 @@ import type {
 import { makeSet } from './sets'
 import { ALL_MUSCLES } from './taxonomy'
 import { normalizeName, resolveExercise, slugFromName } from './identity'
+import { kgToLb } from './units'
 
 export const STATE_VERSION = 1 as const
 
@@ -2599,21 +2844,34 @@ function stampFor(date: string, index: number): number {
   return base + index * 180_000 // 3 min apart, preserving order
 }
 
-function v0SetToLogged(raw: unknown, weight: number, date: string, index: number): LoggedSet {
+/**
+ * v0 stored weight in whatever unit the display label happened to say, so a
+ * legacy kg store has to be converted on the way in — after this, every
+ * number in the system is pounds.
+ */
+type ToLb = (n: number) => number
+
+function v0SetToLogged(raw: unknown, weight: number, date: string, index: number, toLb: ToLb): LoggedSet {
   const set = (raw || {}) as { r?: number; reps?: number; fail?: boolean; kg?: number; drops?: unknown }
   const reps = typeof set.r === 'number' ? set.r : typeof set.reps === 'number' ? set.reps : 0
   const w = typeof set.kg === 'number' ? set.kg : weight
   const drops = Array.isArray(set.drops)
     ? (set.drops as Array<{ kg?: number; reps?: number }>).map((d) => ({
-        weight: typeof d.kg === 'number' ? d.kg : undefined,
+        weight: typeof d.kg === 'number' ? toLb(d.kg) : undefined,
         reps: typeof d.reps === 'number' ? d.reps : undefined,
       }))
     : undefined
-  return makeSet(
+  /* v0 never recorded reps on a miss — doLog wrote {kg, reps:0, fail:true}
+     and the rollup wrote {r:0, fail:true} — so there is nothing to recover
+     here. Task 11 stops discarding it for new sets. */
+  const built = makeSet(
     'reps_weight',
-    { weight: w, reps: set.fail ? 0 : reps, fail: set.fail === true, warmup: false, drops },
+    { weight: toLb(w), reps: set.fail ? 0 : reps, fail: set.fail === true, warmup: false, drops },
     stampFor(date, index),
   )
+  /* the stamp was synthesized, not observed — timing derivations skip it */
+  built.atEstimated = true
+  return built
 }
 
 interface IdMap { [oldId: string]: string }
@@ -2626,11 +2884,16 @@ interface IdMap { [oldId: string]: string }
  * Idempotent: an already-v1 state is returned untouched, and the one-time
  * backup is never written twice.
  */
-export function migrate(raw: unknown): TrainStateV1 {
+export function migrate(raw: unknown, todayKey: string): TrainStateV1 {
   if (isV1(raw)) return raw
-  const today = new Date()
-  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   const blank = emptyStateV1(todayKey)
+
+  /* v0 numbers are in whatever unit was displayed. Convert once, here, so
+     everything downstream can assume pounds. No shipped build could set
+     unit:'kg' (the tile has no toggle), so in practice this is a guard for
+     hand-edited stores — and the reason a future kg toggle stays cosmetic. */
+  const wasKg = (raw as Record<string, unknown> | null)?.['unit'] === 'kg'
+  const toLb: ToLb = wasKg ? (n) => Math.round(kgToLb(n) * 100) / 100 : (n) => n
 
   const old = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, any>
   // the pre-rewrite `days` shape is structurally incompatible — start fresh
@@ -2676,6 +2939,9 @@ export function migrate(raw: unknown): TrainStateV1 {
         loading: 'free',
         incrementLb: 5,
         custom: true,
+        /* contributionsFrom() splits evenly across whatever muscle names the
+           old classifier returned — a guess, and it must not read as data */
+        contributionsEstimated: true,
       }
     }
     aliases[normalizeName(display)] = idMap[oldId]
@@ -2690,7 +2956,7 @@ export function migrate(raw: unknown): TrainStateV1 {
         date: String(e.date),
         exerciseId: newId,
         sets: (Array.isArray(e.sets) ? e.sets : []).map((s: unknown, i: number) =>
-          v0SetToLogged(s, typeof e.kg === 'number' ? e.kg : 0, String(e.date), i),
+          v0SetToLogged(s, typeof e.kg === 'number' ? e.kg : 0, String(e.date), i, toLb),
         ),
       }))
     history[newId] = [...(history[newId] || []), ...converted].sort((a, b) => a.date.localeCompare(b.date))
@@ -2714,7 +2980,7 @@ export function migrate(raw: unknown): TrainStateV1 {
         tier: typeof ex.tier === 'number' ? ex.tier : 2,
         sets: typeof ex.sets === 'number' ? ex.sets : 3,
         reps: typeof ex.reps === 'number' ? ex.reps : 10,
-        weight: typeof ex.kg === 'number' ? ex.kg : 0,
+        weight: typeof ex.kg === 'number' ? toLb(ex.kg) : 0,
         rest: typeof ex.rest === 'number' ? ex.rest : 90,
         perSide: ex.perHand === true,
         pinned: ex.pinned === true,
@@ -2722,9 +2988,9 @@ export function migrate(raw: unknown): TrainStateV1 {
         deload: ex.deload === true,
         note: typeof ex.note === 'string' ? ex.note : '',
         group: ex.group,
-        lastWeight: typeof ex.lastKg === 'number' ? ex.lastKg : null,
+        lastWeight: typeof ex.lastKg === 'number' ? toLb(ex.lastKg) : null,
         log: (Array.isArray(ex.log) ? ex.log : []).map((entry: unknown, i: number) =>
-          entry ? v0SetToLogged(entry, typeof ex.kg === 'number' ? ex.kg : 0, String(oldSession.date || todayKey), i) : null,
+          entry ? v0SetToLogged(entry, typeof ex.kg === 'number' ? ex.kg : 0, String(oldSession.date || todayKey), i, toLb) : null,
         ),
       }
     }),
@@ -2733,12 +2999,13 @@ export function migrate(raw: unknown): TrainStateV1 {
   const deloadOverrides: Record<string, { weight: number; date: string }> = {}
   for (const [oldId, ov] of Object.entries((old.deloadOverrides || {}) as Record<string, any>)) {
     if (ov && typeof ov.kg === 'number') {
-      deloadOverrides[idMap[oldId] || oldId] = { weight: ov.kg, date: String(ov.date) }
+      deloadOverrides[idMap[oldId] || oldId] = { weight: toLb(ov.kg), date: String(ov.date) }
     }
   }
 
   return {
     v: STATE_VERSION,
+    /* display preference is preserved; the stored numbers are now pounds */
     unit: old.unit === 'kg' ? 'kg' : 'lb',
     submitted: old.submitted === true,
     session,
@@ -2760,7 +3027,7 @@ export function migrate(raw: unknown): TrainStateV1 {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run tests/train/migrate.test.ts`
-Expected: PASS — all 17 assertions green.
+Expected: PASS — all 23 assertions green.
 
 - [ ] **Step 5: Re-export from `lib/train/index.ts`**
 
@@ -2782,8 +3049,9 @@ git add lib/train/migrate.ts lib/train/index.ts tests/train/migrate.test.ts publ
 git commit -m "feat(train): migrate saved state v0 to v1
 
 Converts untyped sets to typed ones, folds customLib into real exercise
-definitions, resolves old slugs onto canonical ids, and keeps a one-time
-backup. Idempotent.
+definitions, resolves old slugs onto canonical ids, converts a legacy kg
+store to canonical pounds, and marks backfilled timestamps and guessed
+muscle splits as estimated. Pure: takes the day as a parameter. Idempotent.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -2821,7 +3089,7 @@ const loggerScript = () => {
 
 describe('tile boot contract', () => {
   it('migrates whatever the bridge returns', () => {
-    expect(loggerScript()).toContain('TrainEngine.migrate(')
+    expect(loggerScript()).toContain('T.migrate(d, today)')
   })
 
   it('exposes the engine under a short alias', () => {
@@ -2837,6 +3105,10 @@ describe('tile boot contract', () => {
     const script = loggerScript()
     expect(script).not.toMatch(/\.lastKg\b/)
     expect(script).not.toMatch(/\.perHand\b/)
+  })
+
+  it('passes the day into migrate rather than letting it read the clock', () => {
+    expect(loggerScript()).toContain('T.migrate(d, today)')
   })
 })
 ```
@@ -2919,7 +3191,7 @@ Find the boot block at the end of the logger script (it begins `(async()=>{` and
   /* One entry point for every shape the store has ever held: v1 passes
      through untouched, v0 converts, anything else starts clean. A one-time
      backup of the pre-migration payload rides along inside the result. */
-  STATE = T.migrate(d);
+  STATE = T.migrate(d, today);
   try{
     const profile = await window.Vitality.read('vitality:profile');
     const w = profile && (profile.weightLb || profile.weight);
@@ -3130,6 +3402,16 @@ describe('logging path', () => {
     expect(tile()).toContain('data-act="rpe"')
   })
 
+  it('converts typed weight to canonical pounds on the way in', () => {
+    expect(tile()).toContain('T.storeWeight(')
+  })
+
+  it('keeps the reps actually completed on a missed set', () => {
+    const script = tile()
+    expect(script).toMatch(/partial/)
+    expect(script).not.toMatch(/doLog\(e, idx, kg, 0, true\)/)
+  })
+
   it('no longer writes untyped {kg, reps} set literals', () => {
     const script = tile()
     expect(script).not.toMatch(/e\.log\[idx\]\s*=\s*fail\s*\?/)
@@ -3236,17 +3518,29 @@ Then, still inside `renderPill`, replace the `commit` closure and add the two ne
 Replace with:
 
 ```js
+  /* The input shows the user's unit; storage is always pounds. storeWeight
+     is the only place that conversion happens on the way in, displayWeight
+     the only place on the way out. */
   const commit=()=>{
-    const weight=parseFloat(wIn.value); const reps=Math.round(parseFloat(rIn.value));
-    if(!Number.isFinite(weight)||weight<0||!Number.isFinite(reps)||reps<0) return;
-    doLog(e, idx, { weight, reps }, { fail: reps===0 });
+    const typed=parseFloat(wIn.value); const reps=Math.round(parseFloat(rIn.value));
+    if(!Number.isFinite(typed)||typed<0||!Number.isFinite(reps)||reps<0) return;
+    doLog(e, idx, { weight: T.storeWeight(typed, STATE.unit), reps }, { fail: reps===0 });
   };
 ```
 
 And find the miss handler (already carrying Task 10's renamed fields):
 
 ```js
-  const miss=row.querySelector('.pillMiss'); if(miss) miss.addEventListener('click',ev=>{ stop(ev); const kg=parseFloat(wIn.value)|| (e.lastWeight!=null?e.lastWeight:rx.weight); doLog(e, idx, kg, 0, true); });
+  /* A miss keeps whatever reps were actually completed. v0 threw this away;
+     "failed at 3 of 5" and "failed at 0 of 5" are different signals, and
+     autoregulation will want the difference. */
+  const miss=row.querySelector('.pillMiss'); if(miss) miss.addEventListener('click',ev=>{
+    stop(ev);
+    const typed=parseFloat(wIn.value);
+    const weight=Number.isFinite(typed)? T.storeWeight(typed, STATE.unit) : (e.lastWeight!=null?e.lastWeight:rx.weight);
+    const partial=Math.round(parseFloat(rIn.value));
+    doLog(e, idx, { weight, reps: Number.isFinite(partial)&&partial>0 ? partial : 0 }, { fail:true });
+  });
 ```
 
 Replace with:
@@ -3305,7 +3599,50 @@ function addDrop(e, idx){
 
 In `renderDropRow`, replace every `dr.kg` with `dr.weight` (three occurrences: the input `value`, and both sides of the `commit` closure).
 
-- [ ] **Step 8: Add CSS for the new controls**
+- [ ] **Step 8: Convert weight at every input and display point**
+
+Storage is canonical pounds, so every number the user sees or types crosses a
+boundary. There are exactly two functions for it — `T.displayWeight(lb, unit)`
+on the way out and `T.storeWeight(typed, unit)` on the way in — and no other
+code may do arithmetic on units.
+
+In `renderPill`, the prefill must be converted for display. Find:
+
+```js
+  const prefillKg = s?s.kg:(suggestion!=null?suggestion:rx.kg);
+```
+
+Replace with:
+
+```js
+  const prefillWeight = T.displayWeight(s? (s.weight||0) : (suggestion!=null?suggestion:rx.weight), STATE.unit);
+```
+
+Then update the input that reads it — change `value="'+prefillKg+'"` to
+`value="'+prefillWeight+'"`.
+
+In `renderCard`, the "last" chip: change `metaBits.push('last '+e.lastWeight+' '+STATE.unit)`
+to `metaBits.push('last '+T.displayWeight(e.lastWeight, STATE.unit)+' '+STATE.unit)`.
+
+In `openTune`, the weight field shows and writes a value — convert on render
+(`T.displayWeight(draft.weight, STATE.unit)`) and on commit
+(`draft.weight = T.storeWeight(parseFloat(input.value), STATE.unit)`).
+
+In `renderDropRow`, convert the same way: display `T.displayWeight(dr.weight, STATE.unit)`,
+and in its `commit` store `dr.weight = T.storeWeight(kg, STATE.unit)`.
+
+Verify with a grep — every remaining bare weight interpolation next to a
+`STATE.unit` label is a bug:
+
+```bash
+grep -n "STATE.unit" public/tiles/train.html
+```
+
+Read-only display paths in the Progress sheet (`drawChart`, `drawTable`,
+`drawStats`, `drawRecords`, `drawGoals`, `drawAggChart`, `renderCalQuarter`,
+`celebrate`) are converted in Task 12 alongside their other changes.
+
+- [ ] **Step 9: Add CSS for the new controls**
 
 Add to the `<style>` block, after the `.noteBar` rules:
 
@@ -3333,16 +3670,16 @@ to:
   const row=document.createElement('div'); row.className='pill '+(kind==='failed'?'failed':(kind==='done'||kind==='warmup'?'done':''))+(kind==='warmup'?' warmup':'')+(logged?'':' tappable');
 ```
 
-- [ ] **Step 9: Rebuild and test**
+- [ ] **Step 10: Rebuild and test**
 
 Run: `npm run build:tiles && npx vitest run`
 Expected: PASS — all suites green.
 
-- [ ] **Step 10: Verify by hand**
+- [ ] **Step 11: Verify by hand**
 
 Run `npm run dev`, open Train, add a lift. Confirm: logging a set works; tapping **W** dims the row and marks it a warm-up; the session volume in the rail drops when a set becomes a warm-up; tapping **RPE** on a logged set opens the picker and the chosen value shows on the row; a drop set still adds and edits.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add public/tiles/train.html tiles-library/train.html tests/train/logging-contract.test.ts
@@ -3397,6 +3734,15 @@ describe('aggregates', () => {
   it('exports every measure, not just weight and reps', () => {
     expect(tile()).toContain('rpe')
     expect(tile()).toContain('warmup')
+    expect(tile()).toContain('at_estimated')
+  })
+
+  it('converts weight for display rather than printing raw pounds', () => {
+    expect(tile()).toContain('T.displayWeight(')
+  })
+
+  it('says so when the muscle split is guessed', () => {
+    expect(tile()).toContain('muscleSplitIsEstimated')
   })
 })
 ```
@@ -3452,7 +3798,7 @@ function aggregateVolumeByDate(){
    across whatever strings the classifier returned. Secondary muscles get
    partial credit; hard sets are the comparable unit across set kinds. */
 function muscleVolumeBreakdown(){
-  const totals={};
+  const totals={}, estimated={};
   Object.keys(STATE.history||{}).forEach(id=>{
     const def=STATE.exercises[id]; if(!def) return;
     const opts=volOpts(id);
@@ -3462,16 +3808,32 @@ function muscleVolumeBreakdown(){
         totals[m]=totals[m]||{tonnage:0, hardSets:0};
         totals[m].tonnage+=split[m].tonnage;
         totals[m].hardSets+=split[m].hardSets;
+        if(def.contributionsEstimated) estimated[m]=true;
       });
     });
   });
   return Object.keys(totals)
-    .map(m=>({ m:m.replace(/_/g,' '), vol:r1(totals[m].tonnage), sets:r1(totals[m].hardSets) }))
+    .map(m=>({ m:m.replace(/_/g,' '), vol:r1(totals[m].tonnage), sets:r1(totals[m].hardSets),
+               estimated:!!estimated[m] }))
     .sort((a,b)=>b.sets-a.sets);
+}
+/* How much of this breakdown rests on guessed splits. Migrated and
+   AI-classified lifts divide their muscles evenly because nobody authored
+   real shares — the chart has to say so rather than render a confident bar
+   over a uniform guess. */
+function muscleSplitIsEstimated(){
+  return Object.keys(STATE.history||{})
+    .filter(id=>STATE.exercises[id])
+    .some(id=>STATE.exercises[id].contributionsEstimated);
 }
 ```
 
-In `drawMuscles`, change the bar value from tonnage to hard sets (the comparable unit) by replacing `Math.round(d.vol/max*100)` inputs — set `const max=Math.max(...data.map(d=>d.sets),1);` and render `d.sets` in `.mbVal`. Update the caption to `'Hard sets by muscle, weighted by how much each lift actually works it'`.
+In `drawMuscles`, change the bar value from tonnage to hard sets (the comparable unit) by replacing `Math.round(d.vol/max*100)` inputs — set `const max=Math.max(...data.map(d=>d.sets),1);` and render `d.sets` in `.mbVal`. Update the caption to name its own uncertainty:
+
+```js
+  cap.textContent = 'Hard sets by muscle, weighted by how much each lift actually works it'
+    + (muscleSplitIsEstimated() ? ' — some lifts have estimated splits, so read the shape, not the numbers.' : '');
+```
 
 - [ ] **Step 6: Replace `detectPlateau`**
 
@@ -3517,13 +3879,35 @@ function suggestedWeight(e, rx){
 
 Rename the two call sites in `renderPill` (`suggestedKg(e, rx)` → `suggestedWeight(e, rx)`). `prescription()` and the `rx.weight` reads were already converted in Task 10.
 
-- [ ] **Step 8: Replace `exportCSV`**
+- [ ] **Step 8: Convert weights in the read-only display paths**
+
+Every place the Progress sheet prints a weight is reading canonical pounds and
+must convert. In `drawChart`, `drawTable`, `drawStats`, `drawRecords`,
+`drawGoals`, `drawAggChart`, `renderCalQuarter` and `celebrate`, wrap each
+weight with `T.displayWeight(value, STATE.unit)`.
+
+`drawGoals` also needs its input side converted — a target the user types is in
+their own unit, so `openAddGoal` must store
+`T.storeWeight(parseFloat(input.value), STATE.unit)`.
+
+Volume figures (the rail, the overview cards, the calendar quarter totals) are
+tonnage in pounds and carry a `STATE.unit` label, so convert those the same way.
+
+Verify: set `STATE.unit='kg'` in the iframe console and re-render. Every number
+should change, every label should read `kg`, and nothing in `STATE.history`
+should differ — that is the whole point of canonical storage.
+
+- [ ] **Step 9: Replace `exportCSV`**
 
 ```js
 /* Export carries every measure the new model records, so an export is a
    real backup rather than a lossy summary. */
 function exportCSV(){
-  const rows=[['date','exercise','kind','warmup','failed','weight_lb','reps','seconds','meters','rpe','logged_at']];
+  /* Always exported in canonical pounds regardless of display unit, and the
+     column name says so — an export that silently changed units between two
+     downloads would be worse than useless. `at_estimated` marks rows whose
+     timestamp the migration backfilled rather than observed. */
+  const rows=[['date','exercise','kind','warmup','failed','weight_lb','reps','seconds','meters','rpe','logged_at','at_estimated']];
   Object.keys(STATE.history||{}).forEach(id=>{
     const def=STATE.exercises[id];
     const name=def?def.name:id;
@@ -3532,7 +3916,7 @@ function exportCSV(){
         rows.push([entry.date, name, s.kind, s.warmup?'1':'0', s.fail?'1':'0',
           s.weight!=null?s.weight:'', s.reps!=null?s.reps:'',
           s.seconds!=null?s.seconds:'', s.meters!=null?s.meters:'',
-          s.rpe!=null?s.rpe:'', s.at?new Date(s.at).toISOString():'']);
+          s.rpe!=null?s.rpe:'', s.at?new Date(s.at).toISOString():'', s.atEstimated?'1':'0']);
       });
     });
   });
@@ -3544,7 +3928,7 @@ function exportCSV(){
 }
 ```
 
-- [ ] **Step 9: Update `buildInsightContext`**
+- [ ] **Step 10: Update `buildInsightContext`**
 
 Replace its per-exercise line construction so it reads the new accessors and reports RPE, which is what lets the intelligence layer tell a program problem from a recovery problem:
 
@@ -3568,16 +3952,16 @@ Replace its per-exercise line construction so it reads the new accessors and rep
 
 And in `applyAutomaticDeloads`, rename `e.kg=newKg` to `e.weight=newWeight` and the override shape to `{ weight:newWeight, date:today }` to match `TrainStateV1`.
 
-- [ ] **Step 10: Rebuild and test**
+- [ ] **Step 11: Rebuild and test**
 
 Run: `npm run build:tiles && npx vitest run`
 Expected: PASS.
 
-- [ ] **Step 11: Verify by hand**
+- [ ] **Step 12: Verify by hand**
 
 Run `npm run dev`, open Train. Confirm: Progress → Volume shows a sane series; Muscles shows hard sets split by contribution (not one bar per free-text string); marking a past set a warm-up lowers volume; Records and the per-exercise History chart still draw; CSV export downloads with the new columns.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
 git add public/tiles/train.html tiles-library/train.html tests/train/aggregates-contract.test.ts
