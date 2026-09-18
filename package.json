@@ -9,7 +9,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "build:tiles": "node scripts/build-tile.mjs",
+    "prebuild": "npm run build:tiles"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.26.0",
@@ -26,8 +29,13 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/three": "^0.184.1",
+    "esbuild": "^0.24.2",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.9"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.63.3"
   }
 }

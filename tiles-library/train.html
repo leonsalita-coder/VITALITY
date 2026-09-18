@@ -89,6 +89,14 @@
   .note-gold { color:var(--gold); }
   .note-fail { color:var(--fail); }
   .note-plain { color:var(--muted); }
+
+  /* why a weight is being suggested — quiet by default, because it is an
+     explanation and not a call to action. Only a layoff or a deload earns
+     colour, since those are the two the lifter would otherwise misread as
+     the app losing their progress. */
+  .pillWhy { margin:5px 0 0 34px; font-size:11px; line-height:1.35; font-family:var(--sans); color:var(--muted); letter-spacing:.005em; }
+  .pillWhy.why-clean { color:var(--signal); }
+  .pillWhy.why-layoff, .pillWhy.why-deload { color:var(--gold); }
 </style>
 </head>
 <body>
@@ -191,6 +199,246 @@
     <div class="tap">tap to close</div>
   </div>
 </div>
+<!-- TRAIN-ENGINE:START -->
+<script>
+"use strict";
+var TrainEngine = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // lib/train/index.ts
+  var index_exports = {};
+  __export(index_exports, {
+    ENGINE_VERSION: () => ENGINE_VERSION,
+    LAYOFF_DAYS: () => LAYOFF_DAYS,
+    suggestWeight: () => suggestWeight
+  });
+
+  // lib/train/progression.ts
+  var LAYOFF_DAYS = 14;
+  var DEFAULT_INCREMENT = {
+    barbell: 5,
+    // 2.5 lb plate pairs
+    dumbbell: 5,
+    // racks jump in 5s, and only in pairs
+    stack: 10,
+    // typical selectorized machine
+    free: 0
+  };
+  function stepFor(weight, exercise) {
+    if (typeof exercise.incrementLb === "number" && exercise.incrementLb > 0) {
+      return exercise.incrementLb;
+    }
+    const preset = DEFAULT_INCREMENT[exercise.loading || "free"];
+    if (preset > 0) return preset;
+    if (weight >= 135) return 5;
+    if (weight >= 45) return 2.5;
+    return 1;
+  }
+  function tidy(n) {
+    return Math.round(n * 100) / 100;
+  }
+  function snapWeight(weight, exercise, reference) {
+    if (weight <= 0) return 0;
+    const step = stepFor(reference, exercise);
+    return tidy(Math.round(weight / step) * step);
+  }
+  function localMidnight(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m || 1) - 1, d || 1).getTime();
+  }
+  function daysSince(dateStr, now) {
+    const then = localMidnight(dateStr);
+    const nowDate = new Date(now);
+    const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+    return Math.round((today - then) / 864e5);
+  }
+  function layoffFactor(days) {
+    if (days >= 84) return 0.7;
+    if (days >= 42) return 0.8;
+    if (days >= 21) return 0.85;
+    return 0.95;
+  }
+  function describeWeight(weight) {
+    return weight > 0 ? `${tidy(weight)} lb` : "bodyweight";
+  }
+  function realSessions(history) {
+    return (history || []).filter((entry) => entry && !entry.off);
+  }
+  function rangeFor(exercise) {
+    const r = exercise.repRange;
+    if (Array.isArray(r) && r.length === 2 && r[1] >= r[0]) return [r[0], r[1]];
+    return [exercise.reps, exercise.reps];
+  }
+  function findLayoff(sessions, now) {
+    if (!sessions.length) return null;
+    const last = sessions[sessions.length - 1];
+    const trailing = daysSince(last.date, now);
+    if (trailing >= LAYOFF_DAYS) {
+      return { days: trailing, priorWeight: last.kg, sessionsSince: 0 };
+    }
+    for (let i = sessions.length - 1; i > 0; i--) {
+      const gap = daysSince(sessions[i - 1].date, localMidnight(sessions[i].date));
+      if (gap >= LAYOFF_DAYS) {
+        return { days: gap, priorWeight: sessions[i - 1].kg, sessionsSince: sessions.length - i };
+      }
+    }
+    return null;
+  }
+  function rampWeights(prior, days, exercise) {
+    if (prior <= 0) return [0];
+    const dropped = snapWeight(prior * layoffFactor(days), exercise, prior);
+    const mid = snapWeight(dropped + (prior - dropped) / 2, exercise, prior);
+    const target = tidy(prior);
+    const plan = [];
+    for (const w of [dropped, dropped, mid, target]) {
+      if (plan.length >= 2 && plan[plan.length - 1] === w) continue;
+      plan.push(w);
+    }
+    const done = plan.indexOf(target);
+    return done >= 0 ? plan.slice(0, done + 1) : plan;
+  }
+  function suggestWeight(history, exercise, now) {
+    const sessions = realSessions(history);
+    const last = sessions.length ? sessions[sessions.length - 1] : null;
+    const [minReps, maxReps] = rangeFor(exercise);
+    const hasRange = maxReps > minReps;
+    const override = exercise.deloadOverride;
+    if (override && !sessions.some((entry) => entry.date > override.date)) {
+      const weight = snapWeight(override.kg, exercise, override.kg);
+      return {
+        weight,
+        reps: minReps,
+        basis: "deload",
+        reason: `dropping to ${describeWeight(weight)} \u2014 deload after a plateau`
+      };
+    }
+    if (!last) {
+      const weight = tidy(exercise.lastKg != null ? exercise.lastKg : exercise.kg || 0);
+      return {
+        weight,
+        reps: minReps,
+        basis: "new",
+        reason: `starting at ${describeWeight(weight)} \u2014 first time logging this`
+      };
+    }
+    const sets = last.sets || [];
+    const missedLast = sets.some((set) => set.fail);
+    const held = tidy(last.kg);
+    const layoff = findLayoff(sessions, now);
+    if (layoff) {
+      const ramp = rampWeights(layoff.priorWeight, layoff.days, exercise);
+      const step2 = layoff.sessionsSince;
+      const alreadyBack = step2 > 0 && held >= layoff.priorWeight;
+      if (step2 < ramp.length && !alreadyBack) {
+        if (step2 > 0 && missedLast) {
+          return {
+            weight: held,
+            reps: minReps,
+            basis: "miss",
+            reason: `holding at ${describeWeight(held)} \u2014 missed the last set`
+          };
+        }
+        const weight = ramp[step2];
+        if (step2 === 0) {
+          return {
+            weight,
+            reps: minReps,
+            basis: "layoff",
+            reason: `back to ${describeWeight(weight)} \u2014 first session after ${layoff.days} days off`
+          };
+        }
+        if (weight === ramp[step2 - 1]) {
+          return {
+            weight,
+            reps: minReps,
+            basis: "layoff",
+            reason: `holding at ${describeWeight(weight)} \u2014 second session back`
+          };
+        }
+        const delta2 = tidy(weight - ramp[step2 - 1]);
+        return {
+          weight,
+          reps: minReps,
+          basis: "layoff",
+          reason: `+${delta2} lb \u2014 easing back to your ${describeWeight(layoff.priorWeight)} working weight`
+        };
+      }
+    }
+    if (!sets.length) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 nothing logged last time`
+      };
+    }
+    if (missedLast) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 missed the last set`
+      };
+    }
+    const lowest = Math.min(...sets.map((set) => set.r || 0));
+    if (lowest < minReps) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 short of ${minReps} reps last time`
+      };
+    }
+    const shape = `${lowest}\xD7${sets.length}`;
+    if (lowest < maxReps) {
+      return {
+        weight: held,
+        reps: lowest + 1,
+        basis: "clean",
+        reason: `same weight, chase ${lowest + 1} reps \u2014 hit ${shape} last time`
+      };
+    }
+    if (held <= 0) {
+      return {
+        weight: 0,
+        reps: minReps,
+        basis: "clean",
+        reason: `bodyweight \u2014 clean ${sets.length}\xD7${lowest} last time`
+      };
+    }
+    const step = stepFor(held, exercise);
+    const next = snapWeight(held + step, exercise, held);
+    const delta = tidy(next - held);
+    return {
+      weight: next,
+      reps: minReps,
+      basis: "clean",
+      reason: hasRange ? `+${delta} lb, back to ${minReps} reps \u2014 hit ${shape} last time` : `+${delta} lb \u2014 clean ${sets.length}\xD7${lowest} last time`
+    };
+  }
+
+  // lib/train/index.ts
+  var ENGINE_VERSION = "1.0.0";
+  return __toCommonJS(index_exports);
+})();
+</script>
+<!-- TRAIN-ENGINE:END -->
 <script>
 /* ====================================================================
    THE LOGGER. One session per real calendar day — no fixed splits, no
@@ -733,6 +981,18 @@ function renderPillGroup(e, rx, idx){
   const s=e.log[idx];
   const frag=document.createElement('div'); frag.className='pillWrap';
   frag.appendChild(renderPill(e, rx, idx));
+  /* One reason per lift, under the first unlogged set — every empty set in
+     an exercise prefills the same suggestion, so repeating the sentence
+     three times would be noise, not explanation. */
+  if(!s && idx===e.log.findIndex(x=>!x)){
+    const sug=suggestionFor(e, rx);
+    if(sug && sug.reason){
+      const why=document.createElement('div');
+      why.className='pillWhy why-'+sug.basis;
+      why.textContent=sug.reason;
+      frag.appendChild(why);
+    }
+  }
   if(s && !s.fail){
     const drops=document.createElement('div'); drops.className='drops';
     (s.drops||[]).forEach((dr,di)=> drops.appendChild(renderDropRow(e, idx, di)));
@@ -740,33 +1000,43 @@ function renderPillGroup(e, rx, idx){
   }
   return frag;
 }
-/* ---- progression suggestion: no banner, no extra copy — the prefilled
-   weight IS the suggestion, lightly tinted when it's a bump. Held steady
-   after any miss or a partial session; bumped a small, weight-scaled step
-   (in pounds) after a session where every set hit its rep target. */
-function suggestedKg(e, rx){
-  // an automatic deload overrides the normal suggestion exactly once —
-  // until a new real session lands after the override, then it clears
-  // itself and normal progression resumes from that fresh data point.
-  const ov=STATE.deloadOverrides && STATE.deloadOverrides[e.id];
-  if(ov && !histFor(e).some(s=>!s.off && s.date>ov.date)) return ov.kg;
-  const real=histFor(e).filter(s=>!s.off);
-  if(!real.length) return e.lastKg!=null ? e.lastKg : rx.kg;
-  const last=real[real.length-1];
-  const sets=last.sets||[];
-  if(!sets.length || last.kg<=0) return last.kg;
-  const anyFail=sets.some(s=>s.fail);
-  const allHit=sets.every(s=>!s.fail && (s.r||0)>=rx.reps);
-  if(anyFail || !allHit) return last.kg;
-  const bump = last.kg>=135?5:(last.kg>=45?2.5:1);
-  return r1(last.kg+bump);
+/* ---- progression suggestion ----------------------------------------
+   The engine decides BOTH the number and the sentence. The tile renders
+   `reason` verbatim and never composes progression copy — the wording is
+   covered by tests in lib/train/progression.ts, not by DOM code here.
+   `now` is passed in because lib/train never reads the clock. */
+function suggestionFor(e, rx){
+  const ov = STATE.deloadOverrides && STATE.deloadOverrides[e.id];
+  return TrainEngine.suggestWeight(histFor(e), {
+    kg: rx.kg,
+    lastKg: e.lastKg,
+    reps: rx.reps,
+    repRange: e.repRange,
+    sets: rx.sets,
+    loading: loadingFor(e),
+    incrementLb: e.incrementLb,
+    deloadOverride: ov || null,
+  }, Date.now());
+}
+/* What this lift can actually be loaded with, read off the equipment the
+   classifier already recorded. Anything unrecognised stays 'free', which
+   keeps the old weight-scaled step — so a lift with no equipment on file
+   behaves exactly as it did before. */
+function loadingFor(e){
+  const info = STATE.customLib && STATE.customLib[e.id];
+  const eq = String((info && info.equipment) || '').toLowerCase();
+  if(eq.indexOf('barbell')>=0 || eq.indexOf('smith')>=0) return 'barbell';
+  if(eq.indexOf('dumbbell')>=0 || eq.indexOf('kettlebell')>=0) return 'dumbbell';
+  if(eq.indexOf('machine')>=0 || eq.indexOf('cable')>=0) return 'stack';
+  return 'free';
 }
 function renderPill(e, rx, idx){
   const kind=classifySet(e, idx); const s=e.log[idx]; const logged=kind!=='empty';
-  const suggestion = logged ? null : suggestedKg(e, rx);
-  const prefillKg = s?s.kg:(suggestion!=null?suggestion:rx.kg);
-  const bumped = !logged && e.lastKg!=null && suggestion!=null && suggestion>e.lastKg;
-  const prefillR = s?s.reps:rx.reps;
+  const suggestion = logged ? null : suggestionFor(e, rx);
+  const prefillKg = s?s.kg:(suggestion?suggestion.weight:rx.kg);
+  /* tint the input only when the suggestion is an actual step up */
+  const bumped = !logged && !!suggestion && suggestion.basis==='clean' && suggestion.weight>0;
+  const prefillR = s?s.reps:(suggestion?suggestion.reps:rx.reps);
   const pr = isPR(e, idx);
   const row=document.createElement('div'); row.className='pill '+(kind==='failed'?'failed':(kind==='done'?'done':''))+(logged?'':' tappable');
   let status='done';
