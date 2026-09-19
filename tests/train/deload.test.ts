@@ -231,3 +231,101 @@ describe('limitDeloads', () => {
     expect(limitDeloads([cand('a', 1, 9), cand('b', 1, 8), cand('c', 1, 7)], 1)).toEqual(['a'])
   })
 })
+
+/* ────────────────────────────────────────────────────────────────────
+   RPE is what separates a programming stall from a fatigue stall. The
+   same flat weights and reps mean opposite things at RPE 7 and RPE 10.
+   ──────────────────────────────────────────────────────────────────── */
+const rpeSession = (date: string, w: number, rpe: number | null, reps = 5, sets = 3): HistoryEntry => ({
+  date,
+  kg: w,
+  sets: Array.from({ length: sets }, () => ({ w, r: reps, ...(rpe == null ? {} : { rpe }) })),
+})
+
+describe('plateau cause from RPE', () => {
+  const flat = (rpes: Array<number | null>) =>
+    ['2026-08-20', '2026-08-27', '2026-09-03', '2026-09-10'].map((d, i) => rpeSession(d, 185, rpes[i]))
+
+  it('reads rising RPE at a flat load as fatigue', () => {
+    const p = detectPlateau(flat([7, 8, 9, 9.5]))
+    expect(p!.cause).toBe('fatigue')
+  })
+
+  it('reads steady low RPE at a flat load as a programming stall', () => {
+    const p = detectPlateau(flat([7, 7, 7, 7]))
+    expect(p!.cause).toBe('programming')
+  })
+
+  it('reads steady high RPE as fatigue — grinding every session', () => {
+    const p = detectPlateau(flat([9.5, 9.5, 9.5, 9.5]))
+    expect(p!.cause).toBe('fatigue')
+  })
+
+  it('says unknown when RPE was never logged', () => {
+    const p = detectPlateau(flat([null, null, null, null]))
+    expect(p!.cause).toBe('unknown')
+  })
+
+  it('says unknown on a single data point — a trend needs two', () => {
+    const p = detectPlateau(flat([null, null, null, 9]))
+    expect(p!.cause).toBe('unknown')
+  })
+
+  it('never takes RPE from a warm-up', () => {
+    const warmOnly: HistoryEntry[] = ['2026-08-20', '2026-08-27', '2026-09-03', '2026-09-10'].map((d) => ({
+      date: d, kg: 185,
+      sets: [{ w: 95, r: 5, rpe: 10, warmup: true }, { w: 185, r: 5 }],
+    }))
+    expect(detectPlateau(warmOnly)!.cause).toBe('unknown')
+  })
+
+  it('produces different causes from otherwise identical histories', () => {
+    const tired = detectPlateau(flat([7, 8.5, 9.5, 10]))!
+    const bored = detectPlateau(flat([7, 7, 7, 7]))!
+    expect(tired.weight).toBe(bored.weight)
+    expect(tired.sessions).toBe(bored.sessions)
+    expect(tired.cause).not.toBe(bored.cause)
+  })
+})
+
+describe('RPE drives the deload diagnosis', () => {
+  const flat = (rpes: number[]) =>
+    ['2026-08-20', '2026-08-27', '2026-09-03', '2026-09-10'].map((d, i) => rpeSession(d, 185, rpes[i]))
+
+  const walk = (history: HistoryEntry[], over = {}) => {
+    const base = { history, today: '2026-09-17', recovery: null as number | null, rpe: null as number | null, excluded: [], ...over }
+    const flagged = nextDeloadState(null, base)
+    return nextDeloadState(flagged, { ...base, today: '2026-09-18' })
+  }
+
+  it('cuts intensity when the lifter is grinding', () => {
+    const r = walk(flat([7, 8.5, 9.5, 10]), { rpe: 9.5 })
+    expect(r.kind).toBe('intensity')
+    expect(r.confidence).toBe('measured')
+  })
+
+  it('does not deload a programming stall at all — the answer is more, not less', () => {
+    const r = walk(flat([7, 7, 7, 7]), { rpe: 7 })
+    expect(r.state).toBe('normal')
+  })
+
+  it('still prefers a recovery signal when there is one', () => {
+    const r = walk(flat([7, 8.5, 9.5, 10]), { rpe: 9.5, recovery: 40 })
+    expect(r.kind).toBe('volume')
+  })
+
+  it('gives identical histories opposite plans on RPE alone', () => {
+    const grinding = deloadPlan(walk(flat([7, 8.5, 9.5, 10]), { rpe: 9.5 }))
+    const coasting = walk(flat([7, 7, 7, 7]), { rpe: 7 })
+    expect(grinding.weight).toBeLessThan(185)
+    expect(coasting.state).toBe('normal')
+    expect(deloadPlan(coasting).weight).toBeNull()
+  })
+
+  it('behaves exactly as before for a history with no RPE at all', () => {
+    const r = walk(flat([]).map((e) => ({ ...e, sets: (e.sets || []).map(({ rpe, ...rest }) => rest) })))
+    expect(r.state).toBe('deloading')
+    expect(r.confidence).toBe('inferred')
+    expect(r.kind).toBe('intensity')
+  })
+})

@@ -275,19 +275,33 @@ var TrainEngine = (() => {
   // lib/train/index.ts
   var index_exports = {};
   __export(index_exports, {
+    DEFAULT_WEEKLY_TARGET: () => DEFAULT_WEEKLY_TARGET,
+    DELOAD_HOLD_SESSIONS: () => DELOAD_HOLD_SESSIONS,
     E1RM_MAX_REPS: () => E1RM_MAX_REPS,
     ENGINE_VERSION: () => ENGINE_VERSION,
+    HIGH_RPE: () => HIGH_RPE,
     LAYOFF_DAYS: () => LAYOFF_DAYS,
+    RECOVERY_FLOOR: () => RECOVERY_FLOOR,
     ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
     bestE1RM: () => bestE1RM,
     classifyPR: () => classifyPR,
+    currentWeekStreak: () => currentWeekStreak,
+    deloadPlan: () => deloadPlan,
+    detectPlateau: () => detectPlateau,
     epley1RM: () => epley1RM,
+    isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
+    limitDeloads: () => limitDeloads,
+    longestWeekStreak: () => longestWeekStreak,
     nearMissCue: () => nearMissCue,
+    nextDeloadState: () => nextDeloadState,
+    sessionsPerWeek: () => sessionsPerWeek,
     setWeight: () => setWeight,
+    streakLabel: () => streakLabel,
     suggestWeight: () => suggestWeight,
     topWorkingReps: () => topWorkingReps,
     topWorkingWeight: () => topWorkingWeight,
+    workingRpe: () => workingRpe,
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
@@ -317,9 +331,126 @@ var TrainEngine = (() => {
     const reps = workingSets(entry).map((set) => set.r || 0);
     return reps.length ? Math.max(...reps) : 0;
   }
+  function workingRpe(entry) {
+    const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
+    if (!values.length) return null;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
 
   // lib/train/deload.ts
   var DELOAD_HOLD_SESSIONS = 2;
+  var RECOVERY_FLOOR = 55;
+  var HIGH_RPE = 9;
+  var PLATEAU_WINDOW = 3;
+  var COOLDOWN_DAYS = 14;
+  function isExcluded(date, windows = []) {
+    return (windows || []).some((w) => date >= w.from && date <= w.to);
+  }
+  var RPE_RISE = 1;
+  function readCause(window) {
+    const values = window.map(workingRpe).filter((v) => v != null);
+    if (values.length < 2) return { cause: "unknown", rpe: values.length ? values[0] : null };
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const rising = values[values.length - 1] - values[0] >= RPE_RISE;
+    if (rising || mean >= HIGH_RPE) return { cause: "fatigue", rpe: mean };
+    return { cause: "programming", rpe: mean };
+  }
+  function detectPlateau(history, opts = {}) {
+    const usable = (history || []).filter(
+      (entry) => entry && !entry.off && !isExcluded(entry.date, opts.excluded)
+    );
+    if (usable.length < PLATEAU_WINDOW + 1) return null;
+    const recent = usable.slice(-PLATEAU_WINDOW);
+    const weights = recent.map((e) => topWorkingWeight(e) || e.kg || 0);
+    const reps = recent.map((e) => topWorkingReps(e));
+    const flat = (arr) => arr.every((v, i) => i === 0 || v <= arr[i - 1]);
+    if (flat(weights) && flat(reps)) {
+      const { cause, rpe } = readCause(recent);
+      return { sessions: PLATEAU_WINDOW, weight: weights[weights.length - 1], cause, rpe };
+    }
+    return null;
+  }
+  function addDays(date, days) {
+    const [y, m, d] = date.split("-").map(Number);
+    const dt = new Date(y, (m || 1) - 1, d || 1);
+    dt.setDate(dt.getDate() + days);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  }
+  function diagnose(ctx, plateau) {
+    if (typeof ctx.recovery === "number" && ctx.recovery < RECOVERY_FLOOR) {
+      return { kind: "volume", confidence: "measured" };
+    }
+    if (typeof ctx.rpe === "number" && ctx.rpe >= HIGH_RPE) {
+      return { kind: "intensity", confidence: "measured" };
+    }
+    if (plateau && plateau.cause === "fatigue") {
+      return { kind: "intensity", confidence: "measured" };
+    }
+    return { kind: "intensity", confidence: "inferred" };
+  }
+  var NORMAL = (weight, today) => ({
+    state: "normal",
+    kind: null,
+    priorWeight: weight,
+    since: today,
+    sessions: 0,
+    confidence: "measured"
+  });
+  function nextDeloadState(current, ctx) {
+    const plateau = detectPlateau(ctx.history, { excluded: ctx.excluded });
+    const record = current || NORMAL(plateau ? plateau.weight : 0, ctx.today);
+    switch (record.state) {
+      case "normal": {
+        if (!plateau) return record;
+        if (record.cooldownUntil && ctx.today < record.cooldownUntil) return record;
+        if (plateau.cause === "programming") return record;
+        const flagDx = diagnose(ctx, plateau);
+        return {
+          ...record,
+          state: "flagged",
+          kind: flagDx.kind,
+          confidence: flagDx.confidence,
+          priorWeight: plateau.weight,
+          since: ctx.today,
+          sessions: 0
+        };
+      }
+      case "flagged": {
+        if (!plateau) return { ...record, state: "normal", kind: null, since: ctx.today, sessions: 0 };
+        const { kind, confidence } = diagnose(ctx, plateau);
+        return {
+          ...record,
+          state: "deloading",
+          kind,
+          confidence,
+          priorWeight: plateau.weight,
+          since: ctx.today,
+          sessions: 0
+        };
+      }
+      case "deloading": {
+        if (!ctx.sessionLogged) return record;
+        const sessions = record.sessions + 1;
+        if (sessions < DELOAD_HOLD_SESSIONS) return { ...record, sessions };
+        return { ...record, state: "reapproach", since: ctx.today, sessions: 0 };
+      }
+      case "reapproach": {
+        if (!ctx.sessionLogged) return record;
+        return {
+          ...record,
+          state: "normal",
+          kind: null,
+          since: ctx.today,
+          sessions: 0,
+          // a lift that just finished a deload must not immediately re-flag,
+          // or the machine oscillates instead of resolving
+          cooldownUntil: addDays(ctx.today, COOLDOWN_DAYS)
+        };
+      }
+    }
+    return record;
+  }
   var INTENSITY_CUT = { measured: 0.9, inferred: 0.95 };
   var VOLUME_CUT = 2 / 3;
   var REAPPROACH = 0.95;
@@ -338,6 +469,9 @@ var TrainEngine = (() => {
       setsFactor: 1
     };
   }
+  function limitDeloads(candidates, max = 2) {
+    return (candidates || []).slice().sort((a, b) => b.plateauLength - a.plateauLength || b.weight - a.weight).slice(0, max).map((c) => c.id);
+  }
 
   // lib/train/progression.ts
   var LAYOFF_DAYS = 14;
@@ -350,6 +484,8 @@ var TrainEngine = (() => {
     // typical selectorized machine
     free: 0
   };
+  var EASY_RPE = 7;
+  var GRIND_RPE = 9;
   function stepFor(weight, exercise) {
     if (typeof exercise.incrementLb === "number" && exercise.incrementLb > 0) {
       return exercise.incrementLb;
@@ -455,16 +591,6 @@ var TrainEngine = (() => {
         reason: `holding at ${describeWeight(weight)} \u2014 deload, ${exercise.deload.sessions + 1} of ${DELOAD_HOLD_SESSIONS}`
       };
     }
-    const override = exercise.deloadOverride;
-    if (override && !sessions.some((entry) => entry.date > override.date)) {
-      const weight = snapWeight(override.kg, exercise, override.kg);
-      return {
-        weight,
-        reps: minReps,
-        basis: "deload",
-        reason: `dropping to ${describeWeight(weight)} \u2014 deload after a plateau`
-      };
-    }
     if (!last) {
       const weight = tidy(exercise.lastKg != null ? exercise.lastKg : exercise.kg || 0);
       return {
@@ -560,8 +686,26 @@ var TrainEngine = (() => {
       };
     }
     const step = stepFor(held, exercise);
-    const next = snapWeight(held + step, exercise, held);
+    const rpe = workingRpe(last);
+    if (rpe != null && rpe >= GRIND_RPE) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "clean",
+        reason: `holding at ${describeWeight(held)} \u2014 clean ${shape} but grinding at RPE ${tidy(rpe)}`
+      };
+    }
+    const multiplier = rpe != null && rpe <= EASY_RPE ? 2 : 1;
+    const next = snapWeight(held + step * multiplier, exercise, held);
     const delta = tidy(next - held);
+    if (multiplier > 1) {
+      return {
+        weight: next,
+        reps: minReps,
+        basis: "clean",
+        reason: `+${delta} lb \u2014 ${shape} at RPE ${tidy(rpe)}, room to move`
+      };
+    }
     return {
       weight: next,
       reps: minReps,
@@ -672,6 +816,64 @@ var TrainEngine = (() => {
     return `${Math.round(deficit * 10) / 10} lb under your best`;
   }
 
+  // lib/train/streaks.ts
+  var DEFAULT_WEEKLY_TARGET = 4;
+  var DAY_MS = 864e5;
+  function localMidnight2(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m || 1) - 1, d || 1).getTime();
+  }
+  function startOfDay(ms) {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  }
+  function sessionsPerWeek(finishedDates, now, weeks) {
+    const today = startOfDay(now);
+    const buckets = new Array(weeks).fill(0);
+    const seen = /* @__PURE__ */ new Set();
+    for (const date of finishedDates || []) {
+      if (!date || seen.has(date)) continue;
+      seen.add(date);
+      const age = Math.round((today - localMidnight2(date)) / DAY_MS);
+      if (age < 0) continue;
+      const bucket = Math.floor(age / 7);
+      if (bucket < weeks) buckets[bucket] += 1;
+    }
+    return buckets;
+  }
+  var MAX_WEEKS = 260;
+  function currentWeekStreak(finishedDates, target = DEFAULT_WEEKLY_TARGET, now = Date.now()) {
+    const weeks = sessionsPerWeek(finishedDates, now, MAX_WEEKS);
+    let streak = 0;
+    let start = 0;
+    if (weeks[0] < target) start = 1;
+    for (let i = start; i < weeks.length; i++) {
+      if (weeks[i] >= target) streak++;
+      else break;
+    }
+    return streak;
+  }
+  function longestWeekStreak(finishedDates, target = DEFAULT_WEEKLY_TARGET, now = Date.now()) {
+    const weeks = sessionsPerWeek(finishedDates, now, MAX_WEEKS);
+    let last = weeks.length - 1;
+    while (last >= 0 && weeks[last] === 0) last--;
+    let best = 0;
+    let run = 0;
+    for (let i = 0; i <= last; i++) {
+      if (weeks[i] >= target) {
+        run++;
+        if (run > best) best = run;
+      } else {
+        run = 0;
+      }
+    }
+    return Math.max(best, currentWeekStreak(finishedDates, target, now));
+  }
+  function streakLabel(streak, target = DEFAULT_WEEKLY_TARGET) {
+    if (streak <= 0) return "";
+    return `${streak} ${streak === 1 ? "week" : "weeks"} at ${target}+`;
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -708,6 +910,28 @@ function fullGoalContext(){
   return g ? ATHLETE_GOAL+'. Right now, short-term focus: '+g : ATHLETE_GOAL;
 }
 
+/* A pre-state-machine store carried { kg, date } overrides. Those were real
+   prescriptions the lifter was already following, so they are converted
+   rather than dropped. priorWeight is reconstructed by inverting the cut
+   deloadPlan applies, so the migrated record reproduces exactly the weight
+   that was already being shown. Runs once; the old key is then removed. */
+function migrateDeloadOverrides(){
+  const old = STATE.deloadOverrides;
+  if(!old || typeof old!=='object') return;
+  Object.keys(old).forEach(id=>{
+    if(STATE.deloadStates[id]) return;
+    const ov=old[id];
+    if(!ov || typeof ov.kg!=='number') return;
+    STATE.deloadStates[id]={
+      state:'deloading', kind:'intensity',
+      priorWeight: Math.round((ov.kg/0.9)*100)/100,
+      since: ov.date||today, sessions:0, confidence:'measured',
+    };
+  });
+  delete STATE.deloadOverrides;
+  saveState();
+}
+
 /* ---- build / load state ---------------------------------------------
    ONE session, keyed by today's real date — rolls over to a fresh, empty
    session automatically at midnight. Per-exercise history lives globally
@@ -719,7 +943,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, finishedDates:[], templates:[], deloadOverrides:{},
+    history:{}, customLib:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[],
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -1079,23 +1303,19 @@ function renderFinish(session){
   };
   renderInsight(session);
 }
-/* ---- plateau detection: deterministic, computed here (not left to the
-   AI to eyeball from a text dump) — weight AND reps both flat-or-down
-   across the last WINDOW real sessions. Needs one extra session beyond
-   the window so a plateau is never called from someone's very first
-   few times logging a lift. */
-function detectPlateau(e){
-  const WINDOW=3;
-  const h=histFor(e).filter(s=>!s.off);
-  if(h.length<WINDOW+1) return null;
-  const recent=h.slice(-WINDOW);
-  const weights=recent.map(s=>TrainEngine.topWorkingWeight(s)||s.kg||0);
-  const flatOrDown=weights.every((w,i)=> i===0 || w<=weights[i-1]);
-  const topReps=s=>TrainEngine.topWorkingReps(s);
-  const reps=recent.map(topReps);
-  const repsFlatOrDown=reps.every((r,i)=> i===0 || r<=reps[i-1]);
-  if(flatOrDown && repsFlatOrDown) return { sessions:WINDOW, weight:weights[weights.length-1] };
-  return null;
+/* ---- plateau detection lives in the engine. There is exactly one
+   implementation, and this is not it — a second copy here would drift from
+   the canonical one and disagree with it silently. Exclusion windows let a
+   sick or travelling stretch be skipped by the maths. */
+/* Average RPE across the working sets logged today, or null when the
+   lifter did not record any. Warm-ups are excluded by construction. */
+function sessionRpe(e){
+  const rpes=logWorking(e).map(s=>s.rpe).filter(v=>typeof v==='number');
+  if(!rpes.length) return null;
+  return Math.round((rpes.reduce((a,b)=>a+b,0)/rpes.length)*10)/10;
+}
+function plateauFor(e){
+  return TrainEngine.detectPlateau(histFor(e).filter(x=>!x.off), { excluded: STATE.deloadExclusions||[] });
 }
 /* ---- recovery cross-reference: Vitals is a whitelisted cross-tile read
    (window.Vitality.read), same recovery formula Vitals itself uses
@@ -1132,7 +1352,7 @@ async function buildInsightContext(session){
     const h=histFor(e).filter(s=>!s.off);
     const misses=e.log.filter(s=>s&&s.fail).length;
     const pr=exHasPR(e)?' (PR today)':'';
-    const plateau=detectPlateau(e);
+    const plateau=plateauFor(e);
     if(plateau) plateaus.push({ e, plateau });
     if(h.length>=2){
       const delta=r1(h[h.length-1].kg-h[0].kg);
@@ -1156,25 +1376,52 @@ async function buildInsightContext(session){
    auto-adjusts without asking. The note then REPORTS the action (never
    silent), and it's a one-time nudge: the very next real session on that
    lift clears the override and normal progression resumes from there. */
-function applyAutomaticDeloads(session, recoveryAvg, plateaus){
-  if(recoveryAvg==null || recoveryAvg>=RECOVERY_FLOOR) return [];
+/* Advancing the state machine, once per finished session. The engine owns
+   every decision here: which lifts are stalled, what kind of deload each
+   needs, and — through limitDeloads — which of them actually drop today.
+   A session where four lifts came down reads as failure however defensible
+   each one was, so at most two move. */
+function advanceDeloads(session, recoveryAvg){
+  STATE.deloadStates = STATE.deloadStates || {};
+  const ctx = e => ({
+    history: histFor(e).filter(x=>!x.off),
+    today,
+    recovery: recoveryAvg,
+    rpe: sessionRpe(e),
+    excluded: STATE.deloadExclusions||[],
+    sessionLogged: true,
+  });
+
+  /* Lifts not already mid-deload compete for the two available slots. */
+  const candidates=[];
+  session.ex.forEach(e=>{
+    const cur=STATE.deloadStates[e.id]||null;
+    if(cur && cur.state!=='normal') return;
+    const p=plateauFor(e);
+    if(p && p.weight>0) candidates.push({ id:e.id, weight:p.weight, plateauLength:p.sessions });
+  });
+  const allowed=new Set(TrainEngine.limitDeloads(candidates));
+
   const applied=[];
-  plateaus.forEach(({e,plateau})=>{
-    if(plateau.weight<=0) return; // bodyweight-only lift — nothing to deload
-    const newKg=r1(plateau.weight*0.88);
-    STATE.deloadOverrides=STATE.deloadOverrides||{};
-    STATE.deloadOverrides[e.id]={ kg:newKg, date:today };
-    e.kg=newKg;
-    applied.push({ name:e.name, from:plateau.weight, to:newKg });
+  session.ex.forEach(e=>{
+    const cur=STATE.deloadStates[e.id]||null;
+    const mid = cur && cur.state!=='normal';
+    if(!mid && !allowed.has(e.id)) return;
+    const next=TrainEngine.nextDeloadState(cur, ctx(e));
+    STATE.deloadStates[e.id]=next;
+    if(cur && cur.state!==next.state && next.state==='deloading'){
+      const plan=TrainEngine.deloadPlan(next);
+      if(plan.weight!=null) applied.push({ name:e.name, from:next.priorWeight, to:plan.weight, kind:next.kind });
+    }
   });
   return applied;
 }
 async function fetchInsight(session){
   try{
     const ctx=await buildInsightContext(session);
-    const applied=applyAutomaticDeloads(session, ctx.recoveryAvg, ctx.plateaus);
+    const applied=advanceDeloads(session, ctx.recoveryAvg);
     const lines=ctx.lines.slice();
-    applied.forEach(a=> lines.push('AUTO-DELOAD APPLIED: '+a.name+' automatically dropped from '+a.from+' to '+a.to+' '+STATE.unit+' due to the plateau + low recovery — report this as a fact that already happened, not a suggestion.'));
+    applied.forEach(a=> lines.push('AUTO-DELOAD APPLIED: '+a.name+' entered a '+(a.kind==='volume'?'volume':'intensity')+' deload, '+a.from+' → '+a.to+' '+STATE.unit+' — report this as a fact that already happened, not a suggestion.'));
     const digest=lines.join('\n');
     const note=await window.Vitality.getInsight({ goal:fullGoalContext(), digest });
     session.insight={ date:today, text:(typeof note==='string'&&note.trim())?note.trim():null };
@@ -1262,7 +1509,7 @@ function renderPillGroup(e, rx, idx){
    covered by tests in lib/train/progression.ts, not by DOM code here.
    `now` is passed in because lib/train never reads the clock. */
 function suggestionFor(e, rx){
-  const ov = STATE.deloadOverrides && STATE.deloadOverrides[e.id];
+  const deload = (STATE.deloadStates && STATE.deloadStates[e.id]) || null;
   return TrainEngine.suggestWeight(histFor(e), {
     kg: rx.kg,
     lastKg: e.lastKg,
@@ -1271,7 +1518,7 @@ function suggestionFor(e, rx){
     sets: rx.sets,
     loading: loadingFor(e),
     incrementLb: e.incrementLb,
-    deloadOverride: ov || null,
+    deload,
   }, Date.now());
 }
 /* The rep range is a property of the LIFT, not of today's session, so it
@@ -2955,7 +3202,9 @@ function spawnParticles(root){
   STATE.finishedDates = STATE.finishedDates || [];
   STATE.templates = STATE.templates || [];
   STATE.history = STATE.history || {};
-  STATE.deloadOverrides = STATE.deloadOverrides || {};
+  STATE.deloadStates = STATE.deloadStates || {};
+  STATE.deloadExclusions = STATE.deloadExclusions || [];
+  migrateDeloadOverrides();
   STATE.exerciseNames = STATE.exerciseNames || {};
   STATE.shortTermGoal = STATE.shortTermGoal || '';
   STATE.photos = STATE.photos || [];

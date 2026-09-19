@@ -19,7 +19,7 @@
  * UNITS: pounds.
  */
 
-import { topWorkingReps, topWorkingWeight, type HistoryEntry } from './sets'
+import { topWorkingReps, topWorkingWeight, workingRpe, type HistoryEntry } from './sets'
 
 /** Sessions to sit at the reduced load before climbing back. */
 export const DELOAD_HOLD_SESSIONS = 2
@@ -87,9 +87,32 @@ export function isExcluded(date: string, windows: ExclusionWindow[] = []): boole
   return (windows || []).some((w) => date >= w.from && date <= w.to)
 }
 
+/**
+ * Why the lift stopped moving. Flat weight at RPE 7 and flat weight at
+ * RPE 10 are the same chart and opposite problems: one lifter is not being
+ * pushed, the other cannot absorb what they are already doing.
+ */
+export type PlateauCause = 'fatigue' | 'programming' | 'unknown'
+
 export interface Plateau {
   sessions: number
   weight: number
+  cause: PlateauCause
+  /** Mean RPE across the window, or null when it was never logged. */
+  rpe: number | null
+}
+
+/** A rise of this much across the window reads as accumulating fatigue. */
+const RPE_RISE = 1
+
+function readCause(window: HistoryEntry[]): { cause: PlateauCause; rpe: number | null } {
+  const values = window.map(workingRpe).filter((v): v is number => v != null)
+  // a trend needs at least two points; one lonely RPE proves nothing
+  if (values.length < 2) return { cause: 'unknown', rpe: values.length ? values[0] : null }
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  const rising = values[values.length - 1] - values[0] >= RPE_RISE
+  if (rising || mean >= HIGH_RPE) return { cause: 'fatigue', rpe: mean }
+  return { cause: 'programming', rpe: mean }
 }
 
 /**
@@ -110,7 +133,8 @@ export function detectPlateau(
   const reps = recent.map((e) => topWorkingReps(e))
   const flat = (arr: number[]) => arr.every((v, i) => i === 0 || v <= arr[i - 1])
   if (flat(weights) && flat(reps)) {
-    return { sessions: PLATEAU_WINDOW, weight: weights[weights.length - 1] }
+    const { cause, rpe } = readCause(recent)
+    return { sessions: PLATEAU_WINDOW, weight: weights[weights.length - 1], cause, rpe }
   }
   return null
 }
@@ -123,11 +147,18 @@ function addDays(date: string, days: number): string {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
 }
 
-function diagnose(ctx: DeloadContext): { kind: DeloadKind; confidence: DeloadConfidence } {
+function diagnose(
+  ctx: DeloadContext,
+  plateau: Plateau | null,
+): { kind: DeloadKind; confidence: DeloadConfidence } {
   if (typeof ctx.recovery === 'number' && ctx.recovery < RECOVERY_FLOOR) {
     return { kind: 'volume', confidence: 'measured' }
   }
   if (typeof ctx.rpe === 'number' && ctx.rpe >= HIGH_RPE) {
+    return { kind: 'intensity', confidence: 'measured' }
+  }
+  /* RPE across the stall itself, when the lifter has been logging it. */
+  if (plateau && plateau.cause === 'fatigue') {
     return { kind: 'intensity', confidence: 'measured' }
   }
   /**
@@ -161,10 +192,17 @@ export function nextDeloadState(
     case 'normal': {
       if (!plateau) return record
       if (record.cooldownUntil && ctx.today < record.cooldownUntil) return record
+      /**
+       * Steady, comfortable RPE at a flat load is not fatigue — the lifter
+       * has capacity and is simply not being asked for it. Deloading them
+       * would take away stimulus they already are not getting enough of.
+       * Only act when there is real evidence; 'unknown' still flags.
+       */
+      if (plateau.cause === 'programming') return record
       /* Diagnose on the way in as well as on the way out, so a flagged
          record already says what it thinks is wrong. It is re-diagnosed at
          the moment of acting, which is where the freshest data lives. */
-      const flagDx = diagnose(ctx)
+      const flagDx = diagnose(ctx, plateau)
       return {
         ...record,
         state: 'flagged',
@@ -179,7 +217,7 @@ export function nextDeloadState(
     case 'flagged': {
       // the stall broke on its own — nothing to treat
       if (!plateau) return { ...record, state: 'normal', kind: null, since: ctx.today, sessions: 0 }
-      const { kind, confidence } = diagnose(ctx)
+      const { kind, confidence } = diagnose(ctx, plateau)
       return {
         ...record,
         state: 'deloading',

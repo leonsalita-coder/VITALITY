@@ -21,7 +21,7 @@ export type ProgressionBasis = 'clean' | 'miss' | 'deload' | 'layoff' | 'new'
 /** How weight can physically be added to this movement. */
 export type LoadingStyle = 'barbell' | 'dumbbell' | 'stack' | 'free'
 
-import { topWorkingWeight, workingSets, type HistoryEntry, type HistorySet } from './sets'
+import { topWorkingWeight, workingRpe, workingSets, type HistoryEntry, type HistorySet } from './sets'
 import { deloadPlan, DELOAD_HOLD_SESSIONS as DELOAD_HOLD, type DeloadRecord } from './deload'
 
 export type { HistoryEntry, HistorySet }
@@ -45,8 +45,6 @@ export interface ProgressionExercise {
   incrementLb?: number
   /** Defaults to 'free', which keeps the legacy weight-scaled step. */
   loading?: LoadingStyle
-  /** An automatic deload, applied until a newer session supersedes it. */
-  deloadOverride?: { kg: number; date: string } | null
   /**
    * The lift's deload state machine. While deloading or re-approaching it
    * owns the suggestion outright — otherwise a clean session at the reduced
@@ -84,6 +82,18 @@ const DEFAULT_INCREMENT: Record<LoadingStyle, number> = {
   stack: 10, // typical selectorized machine
   free: 0,
 }
+
+/**
+ * Autoregulation thresholds.
+ *
+ * A clean session only says the weight was manageable. RPE says by how
+ * much: at or below EASY the lifter left several reps in reserve and has
+ * earned more than the default nudge, while a clean session at GRIND was
+ * exactly that, and adding to it invites the miss next time. Both degrade
+ * to the plain increment when RPE was never logged.
+ */
+const EASY_RPE = 7
+const GRIND_RPE = 9
 
 /**
  * Smallest jump worth making. An explicit increment wins, then the
@@ -261,18 +271,6 @@ export function suggestWeight(
     }
   }
 
-  // an automatic deload stands until a session lands after it
-  const override = exercise.deloadOverride
-  if (override && !sessions.some((entry) => entry.date > override.date)) {
-    const weight = snapWeight(override.kg, exercise, override.kg)
-    return {
-      weight,
-      reps: minReps,
-      basis: 'deload',
-      reason: `dropping to ${describeWeight(weight)} — deload after a plateau`,
-    }
-  }
-
   if (!last) {
     const weight = tidy(exercise.lastKg != null ? exercise.lastKg : exercise.kg || 0)
     return {
@@ -393,8 +391,30 @@ export function suggestWeight(
     }
   }
   const step = stepFor(held, exercise)
-  const next = snapWeight(held + step, exercise, held)
+  const rpe = workingRpe(last)
+
+  /* Grinding every set at the top of the range is not a green light. */
+  if (rpe != null && rpe >= GRIND_RPE) {
+    return {
+      weight: held,
+      reps: minReps,
+      basis: 'clean',
+      reason: `holding at ${describeWeight(held)} — clean ${shape} but grinding at RPE ${tidy(rpe)}`,
+    }
+  }
+
+  const multiplier = rpe != null && rpe <= EASY_RPE ? 2 : 1
+  const next = snapWeight(held + step * multiplier, exercise, held)
   const delta = tidy(next - held)
+
+  if (multiplier > 1) {
+    return {
+      weight: next,
+      reps: minReps,
+      basis: 'clean',
+      reason: `+${delta} lb — ${shape} at RPE ${tidy(rpe as number)}, room to move`,
+    }
+  }
   return {
     weight: next,
     reps: minReps,

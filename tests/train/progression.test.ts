@@ -158,27 +158,18 @@ describe('basis: layoff', () => {
 })
 
 describe('basis: deload', () => {
-  it('honours an active override and says it is a deload', () => {
-    const history = [clean('2026-09-16', 185)]
-    const e = ex({ reps: 5, deloadOverride: { kg: 165, date: '2026-09-16' } })
-    const s = suggestWeight(history, e, at('2026-09-18'))
+  const deloading = {
+    state: 'deloading', kind: 'intensity', priorWeight: 185,
+    since: '2026-09-16', sessions: 0, confidence: 'measured',
+  }
+
+  it('reports a live deload as the deload basis', () => {
+    const s = suggestWeight([clean('2026-09-16', 165)], ex({ reps: 5, deload: deloading as never }), at('2026-09-18'))
     expect(s.basis).toBe('deload')
-    expect(s.weight).toBe(165)
-    expect(s.reason).toBe('dropping to 165 lb — deload after a plateau')
   })
 
-  it('clears itself once a newer session lands', () => {
-    const history = [clean('2026-09-16', 165), clean('2026-09-17', 165)]
-    const e = ex({ reps: 8, deloadOverride: { kg: 165, date: '2026-09-16' } })
-    const s = suggestWeight(history, e, at('2026-09-18'))
-    expect(s.basis).toBe('clean')
-    expect(s.weight).toBe(170)
-  })
-
-  it('outranks a layoff — an explicit instruction beats an inference', () => {
-    const history = [clean('2026-05-01', 185)]
-    const e = ex({ reps: 5, deloadOverride: { kg: 165, date: '2026-05-01' } })
-    const s = suggestWeight(history, e, at('2026-09-18'))
+  it('outranks a layoff — a live prescription beats an inference', () => {
+    const s = suggestWeight([clean('2026-05-01', 185)], ex({ reps: 5, deload: deloading as never }), at('2026-09-18'))
     expect(s.basis).toBe('deload')
   })
 })
@@ -218,7 +209,7 @@ describe('purity', () => {
       suggestWeight([clean('2026-09-16', 135)], ex(), at('2026-09-18')),
       suggestWeight([{ date: '2026-09-16', kg: 135, sets: [{ r: 0, fail: true }] }], ex(), at('2026-09-18')),
       suggestWeight([clean('2026-05-01', 135)], ex(), at('2026-09-18')),
-      suggestWeight([clean('2026-09-16', 135)], ex({ deloadOverride: { kg: 120, date: '2026-09-16' } }), at('2026-09-18')),
+      suggestWeight([clean('2026-09-16', 135)], ex({ deload: { state: 'deloading', kind: 'intensity', priorWeight: 135, since: '2026-09-16', sessions: 0, confidence: 'measured' } as never }), at('2026-09-18')),
     ]
     const bases = cases.map((c) => c.basis)
     expect(new Set(bases)).toEqual(new Set(['new', 'clean', 'miss', 'layoff', 'deload']))
@@ -548,5 +539,61 @@ describe('suggestWeight honours deload state', () => {
     const first = suggestWeight(sessions.slice(0, 1), ex({ reps: 5, deload: rec() as never }), at('2026-09-15'))
     const second = suggestWeight(sessions, ex({ reps: 5, deload: rec({ sessions: 1 }) as never }), at('2026-09-17'))
     expect(second.weight).toBe(first.weight)
+  })
+})
+
+/* ────────────────────────────────────────────────────────────────────
+   Autoregulation. A clean session says the weight was manageable; RPE
+   says by how much, and a session with four reps in reserve has earned
+   more than the default nudge.
+   ──────────────────────────────────────────────────────────────────── */
+describe('RPE autoregulation', () => {
+  const withRpe = (rpe: number | null, w = 185): HistoryEntry => ({
+    date: '2026-09-16', kg: w,
+    sets: Array.from({ length: 3 }, () => ({ w, r: 5, ...(rpe == null ? {} : { rpe }) })),
+  })
+  const bar = () => ex({ reps: 5, loading: 'barbell' })
+
+  it('takes a bigger jump when the session was clearly easy', () => {
+    const s = suggestWeight([withRpe(6.5)], bar(), at('2026-09-18'))
+    expect(s.weight).toBe(195) // two increments, not one
+    expect(s.reason).toContain('RPE 6.5')
+  })
+
+  it('takes the normal jump in the usual working range', () => {
+    const s = suggestWeight([withRpe(8)], bar(), at('2026-09-18'))
+    expect(s.weight).toBe(190)
+  })
+
+  it('holds when every set was a grind, clean or not', () => {
+    const s = suggestWeight([withRpe(9.5)], bar(), at('2026-09-18'))
+    expect(s.weight).toBe(185)
+    expect(s.reason).toContain('RPE 9.5')
+  })
+
+  it('behaves exactly as before when RPE was never logged', () => {
+    const without = suggestWeight([withRpe(null)], bar(), at('2026-09-18'))
+    expect(without.weight).toBe(190)
+    expect(without.reason).toBe('+5 lb — clean 3×5 last time')
+  })
+
+  it('never reads RPE off a warm-up', () => {
+    const entry: HistoryEntry = {
+      date: '2026-09-16', kg: 185,
+      sets: [{ w: 95, r: 5, rpe: 6, warmup: true }, { w: 185, r: 5, rpe: 9.5 }, { w: 185, r: 5, rpe: 9.5 }],
+    }
+    // the easy warm-up must not pull the average down into a double bump
+    const s = suggestWeight([entry], bar(), at('2026-09-18'))
+    expect(s.weight).toBe(185)
+  })
+
+  it('still respects the rep range before touching the weight', () => {
+    const entry: HistoryEntry = {
+      date: '2026-09-16', kg: 185,
+      sets: Array.from({ length: 3 }, () => ({ w: 185, r: 8, rpe: 6 })),
+    }
+    const s = suggestWeight([entry], ex({ reps: 8, repRange: [8, 10] as [number, number], loading: 'barbell' }), at('2026-09-18'))
+    expect(s.weight).toBe(185)
+    expect(s.reps).toBe(9)
   })
 })

@@ -19,6 +19,12 @@ export interface HistorySet {
    * setWeight().
    */
   w?: number
+  /**
+   * Rate of perceived exertion, 6-10 in half steps. Optional forever —
+   * logging a set must never require it, and every consumer degrades to
+   * its pre-RPE behaviour when it is absent.
+   */
+  rpe?: number
   fail?: boolean
   /**
    * Excluded from volume, PRs, progression and plateau detection.
@@ -84,4 +90,19 @@ export function topWorkingWeight(entry: HistoryEntry): number {
 export function topWorkingReps(entry: HistoryEntry): number {
   const reps = workingSets(entry).map((set) => set.r || 0)
   return reps.length ? Math.max(...reps) : 0
+}
+
+/**
+ * Mean RPE across the working sets that carry one, or null.
+ *
+ * Warm-ups cannot contribute by construction — they are not working sets —
+ * which matters because a warm-up is easy by design and would drag the
+ * average toward "plenty left in the tank" on every single session.
+ */
+export function workingRpe(entry: HistoryEntry): number | null {
+  const values = workingSets(entry)
+    .map((set) => set.rpe)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+  if (!values.length) return null
+  return values.reduce((a, b) => a + b, 0) / values.length
 }
