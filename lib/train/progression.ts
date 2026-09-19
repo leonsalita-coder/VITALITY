@@ -537,13 +537,24 @@ export function suggestTarget(
   exercise: ProgressionExercise,
   now: number,
 ): Suggestion {
-  const sessions = realSessions(history)
-  const last = sessions.length ? sessions[sessions.length - 1] : null
-  const kind: SetKind = last ? entryKind(last) : exercise.kind || DEFAULT_SET_KIND
+  const all = realSessions(history)
+  /**
+   * A declared kind wins over what history happens to contain, because
+   * changing a lift's kind is a statement about what it is NOW.
+   *
+   * History under the old kind is then deliberately filtered out rather
+   * than reinterpreted: 185 lb and 60 seconds are not comparable
+   * quantities, and quietly treating one as the other is how a plank ends
+   * up being told to add five pounds. The rows themselves are never
+   * rewritten — they stay readable under the kind they were logged with.
+   */
+  const declared = exercise.kind
+  const kind: SetKind = declared || (all.length ? entryKind(all[all.length - 1]) : DEFAULT_SET_KIND)
+  const sessions = declared ? all.filter((entry) => entryKind(entry) === kind) : all
 
   if (kind !== 'reps_weight') return suggestNonLoad(kind, sessions, exercise)
 
-  const answer = suggestLoad(history, exercise, now)
+  const answer = suggestLoad(sessions, exercise, now)
   return {
     kind: 'reps_weight',
     weight: answer.weight,

@@ -689,3 +689,50 @@ describe('assisted progression removes assistance', () => {
     expect(s.basis).toBe('miss')
   })
 })
+
+/* ────────────────────────────────────────────────────────────────────
+   Changing a lift's kind. Old rows keep their own kind and are never
+   rewritten, so they stay readable — but they stop feeding progression,
+   because seconds and pounds are not comparable quantities.
+   ──────────────────────────────────────────────────────────────────── */
+describe('changing kind on a lift that has history', () => {
+  const asWeight: HistoryEntry[] = [
+    { date: '2026-09-10', kg: 185, sets: [{ w: 185, r: 5 }, { w: 185, r: 5 }] },
+    { date: '2026-09-16', kg: 185, sets: [{ w: 185, r: 5 }, { w: 185, r: 5 }] },
+  ]
+
+  it('does not carry a pounds history into a seconds suggestion', () => {
+    const s = suggestTarget(asWeight, ex({ kind: 'time' as never, reps: 1 }), at('2026-09-18'))
+    expect(s.kind).toBe('time')
+    expect(s.weight).toBeNull()
+    expect(s.basis).toBe('new')
+  })
+
+  it('leaves the stored rows untouched, still readable under their own kind', () => {
+    const before = JSON.stringify(asWeight)
+    suggestTarget(asWeight, ex({ kind: 'time' as never, reps: 1 }), at('2026-09-18'))
+    expect(JSON.stringify(asWeight)).toBe(before)
+  })
+
+  it('picks up again from rows logged under the NEW kind', () => {
+    const mixed = [
+      ...asWeight,
+      { date: '2026-09-17', kg: 0, sets: [{ s: 60, kind: 'time' } as never] },
+    ]
+    const s = suggestTarget(mixed, ex({ kind: 'time' as never, reps: 1 }), at('2026-09-18'))
+    expect(s.seconds).toBe(65)
+    expect(s.basis).toBe('clean')
+  })
+
+  it('still lets the exercise definition declare the kind up front', () => {
+    const s = suggestTarget([], ex({ kind: 'distance' as never, reps: 1 }), at('2026-09-18'))
+    expect(s.kind).toBe('distance')
+    expect(s.basis).toBe('new')
+  })
+
+  it('leaves a lift with no declared kind reading its history, as before', () => {
+    const s = suggestTarget(asWeight, ex({ reps: 5, loading: 'barbell' }), at('2026-09-18'))
+    expect(s.kind).toBe('reps_weight')
+    expect(s.weight).toBe(190)
+  })
+})

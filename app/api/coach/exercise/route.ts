@@ -30,9 +30,12 @@ export async function GET(req: Request): Promise<Response> {
   "startingSets": 3,
   "startingReps": 10,
   "startingKg": 20,
-  "restSeconds": 90
+  "restSeconds": 90,
+  "defaultSetKind": "reps_weight",
+  "perSide": false,
+  "assisted": false
 }
-Rules: "tier" is 1 for a primary compound/heavy lift, 2 for a secondary compound/moderate lift, 3 for an isolation/accessory lift. "steps" has exactly 3 short entries. "cues" has exactly 2 short entries. "startingKg" is actually POUNDS (lb) — a reasonable STARTING weight for an intermediate lifter (0 if bodyweight-only, ignore for cardio/mobility movements and just estimate a token value). Keep every string short and plain.
+Rules: "tier" is 1 for a primary compound/heavy lift, 2 for a secondary compound/moderate lift, 3 for an isolation/accessory lift. "defaultSetKind" is EXACTLY one of "reps_weight" (loaded reps — most lifts), "reps_only" (bodyweight reps, e.g. push-ups, box jumps), "time" (held or worked for a duration, e.g. plank, dead hang), "distance" (covered a distance, e.g. farmer's carry, sled push) or "time_distance" (both matter, e.g. a sprint or a timed run). "perSide" is true when one side is logged at a time (single-arm rows, lunges, a one-arm carry). "assisted" is true when a machine or band REMOVES weight (assisted pull-up or dip) — in that case the logged number is the assistance, not the load. "steps" has exactly 3 short entries. "cues" has exactly 2 short entries. "startingKg" is actually POUNDS (lb) — a reasonable STARTING weight for an intermediate lifter (0 if bodyweight-only, ignore for cardio/mobility movements and just estimate a token value). Keep every string short and plain.
 
 Exercise name: "${name.replace(/"/g, "'")}"
 

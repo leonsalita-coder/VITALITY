@@ -284,9 +284,11 @@ var TrainEngine = (() => {
     LAYOFF_DAYS: () => LAYOFF_DAYS,
     RECOVERY_FLOOR: () => RECOVERY_FLOOR,
     ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
+    SET_KINDS: () => SET_KINDS,
     bestE1RM: () => bestE1RM,
     classifyPR: () => classifyPR,
     currentWeekStreak: () => currentWeekStreak,
+    defaultRepRange: () => defaultRepRange,
     deloadPlan: () => deloadPlan,
     detectPlateau: () => detectPlateau,
     emptyVolume: () => emptyVolume,
@@ -299,6 +301,7 @@ var TrainEngine = (() => {
     longestWeekStreak: () => longestWeekStreak,
     nearMissCue: () => nearMissCue,
     nextDeloadState: () => nextDeloadState,
+    normalizeClassification: () => normalizeClassification,
     sessionsPerWeek: () => sessionsPerWeek,
     setKind: () => setKind,
     setWeight: () => setWeight,
@@ -842,11 +845,12 @@ var TrainEngine = (() => {
     return put(current + step, "clean", `+${step}${unit} \u2014 clean ${sets}\xD7${current}${unit} last time`);
   }
   function suggestTarget(history, exercise, now) {
-    const sessions = realSessions(history);
-    const last = sessions.length ? sessions[sessions.length - 1] : null;
-    const kind = last ? entryKind(last) : exercise.kind || DEFAULT_SET_KIND;
+    const all = realSessions(history);
+    const declared = exercise.kind;
+    const kind = declared || (all.length ? entryKind(all[all.length - 1]) : DEFAULT_SET_KIND);
+    const sessions = declared ? all.filter((entry) => entryKind(entry) === kind) : all;
     if (kind !== "reps_weight") return suggestNonLoad(kind, sessions, exercise);
-    const answer = suggestLoad(history, exercise, now);
+    const answer = suggestLoad(sessions, exercise, now);
     return {
       kind: "reps_weight",
       weight: answer.weight,
@@ -1062,6 +1066,50 @@ var TrainEngine = (() => {
     return `${streak} ${streak === 1 ? "week" : "weeks"} at ${target}+`;
   }
 
+  // lib/train/classify.ts
+  var SET_KINDS = [
+    "reps_weight",
+    "reps_only",
+    "time",
+    "distance",
+    "time_distance"
+  ];
+  function defaultRepRange(tier, kind) {
+    if (kind !== "reps_weight") return null;
+    if (tier <= 1) return [4, 6];
+    if (tier >= 3) return [10, 15];
+    return [6, 10];
+  }
+  function asKind(raw) {
+    return typeof raw === "string" && SET_KINDS.includes(raw) ? raw : DEFAULT_SET_KIND;
+  }
+  function asFlag(raw) {
+    return raw === true;
+  }
+  function asNumber(raw, fallback, min, max) {
+    const n = typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
+    return Math.min(max, Math.max(min, n));
+  }
+  function normalizeClassification(raw) {
+    const info = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const kind = asKind(info.defaultSetKind);
+    const tier = info.tier === 1 || info.tier === 2 || info.tier === 3 ? info.tier : 2;
+    const repRange = defaultRepRange(tier, kind);
+    return {
+      kind,
+      perSide: asFlag(info.perSide),
+      assisted: asFlag(info.assisted),
+      repRange,
+      tier,
+      sets: Math.round(asNumber(info.startingSets, 3, 1, 8)),
+      // the bottom of the range and the starting reps must agree, or the very
+      // first session reads as already short of target
+      reps: repRange ? repRange[0] : Math.round(asNumber(info.startingReps, 10, 1, 50)),
+      weight: asNumber(info.startingKg, 0, 0, 2e3),
+      rest: Math.round(asNumber(info.restSeconds, 90, 30, 600))
+    };
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -1187,7 +1235,10 @@ function logIsWorking(s){ return !!s && !s.fail && s.warmup!==true; }
 function logWorking(e){ return e.log.filter(logIsWorking); }
 /* Today's session as a history entry, so engine readers see one shape. */
 function todayEntry(e){
-  return { date:today, kg:e.kg, sets:e.log.filter(Boolean).map(s=>({ w:s.kg, r:s.reps, fail:s.fail, warmup:s.warmup })) };
+  return { date:today, kg:e.kg, sets:e.log.filter(Boolean).map(s=>({
+    w:s.kg, r:s.reps, s:s.s, m:s.m, kind:s.kind, perSide:s.perSide, assisted:s.assisted,
+    fail:s.fail, warmup:s.warmup,
+  })) };
 }
 /* Estimated 1RM is the canonical record — it ranks 245×3 above 225×5 the
    way a lifter already reads their own training, and it does not fire
@@ -1768,8 +1819,8 @@ function suggestionFor(e, rx){
     sets: rx.sets,
     loading: loadingFor(e),
     incrementLb: e.incrementLb,
-    kind: e.kind,
-    assisted: e.assisted,
+    kind: kindFor(e),
+    assisted: flagFor(e,'assisted'),
     incrementSeconds: e.incrementSeconds,
     incrementMetres: e.incrementMetres,
     deload,
@@ -1779,6 +1830,37 @@ function suggestionFor(e, rx){
    lives beside the exercise definition and survives the session rolling
    over at midnight. Absent means linear — the engine treats a missing
    range as [reps, reps], which is exactly the old behaviour. */
+/* Kind, perSide and assisted live with the exercise definition rather than
+   the session, so they survive the day rolling over. Absent means
+   reps_weight and false — exactly how every existing lift already reads. */
+/* Plain names for the five kinds, and the unit each one logs in. */
+const KIND_LABELS = {
+  reps_weight:'Weight x reps', reps_only:'Reps only', time:'Time',
+  distance:'Distance', time_distance:'Time + distance',
+};
+const KIND_UNITS = { time:'s', distance:'m', time_distance:'s / m', reps_only:'reps', reps_weight:'lb' };
+function kindFor(e){
+  const info = STATE.customLib && STATE.customLib[e.id];
+  const k = info && info.kind;
+  return TrainEngine.SET_KINDS.indexOf(k)>=0 ? k : 'reps_weight';
+}
+function flagFor(e, name){
+  const info = STATE.customLib && STATE.customLib[e.id];
+  return !!(info && info[name] === true);
+}
+function setExerciseField(e, name, value){
+  STATE.customLib = STATE.customLib || {};
+  const info = STATE.customLib[e.id] || (STATE.customLib[e.id] = {});
+  if(value === undefined || value === null || value === false) delete info[name];
+  else info[name] = value;
+}
+/* Which kinds this lift has actually been logged under. Changing to a kind
+   that is not already in here is the case that needs a warning. */
+function historyKinds(e){
+  const seen={};
+  histFor(e).filter(x=>!x.off).forEach(entry=>{ seen[TrainEngine.entryKind(entry)]=true; });
+  return Object.keys(seen);
+}
 function repRangeFor(e){
   const info = STATE.customLib && STATE.customLib[e.id];
   const r = info && info.repRange;
@@ -1802,6 +1884,20 @@ function loadingFor(e){
   if(eq.indexOf('machine')>=0 || eq.indexOf('cable')>=0) return 'stack';
   return 'free';
 }
+/* The logged number follows the kind: seconds for a plank, metres for a
+   carry, reps alone for bodyweight work. Same classes throughout — this is
+   which fields exist, not how they look. */
+function pillInputsFor(e, kind, pre, bumped){
+  const num=(cls,val,label,mode)=>'<input class="pillInput '+cls+'" type="number" inputmode="'+(mode||'numeric')+'" value="'+val+'" aria-label="'+label+'" />';
+  const unit=txt=>'<span class="pillUnit">'+txt+(e.perHand?'<span class="pillPerHand">/ea</span>':'')+'</span>';
+  const times='<span class="pillTimes">×</span>';
+  if(kind==='time') return num('sec',pre.seconds,'Seconds')+unit('s');
+  if(kind==='distance') return num('met',pre.metres,'Metres')+unit('m');
+  if(kind==='time_distance') return num('met',pre.metres,'Metres')+unit('m')+times+num('sec',pre.seconds,'Seconds')+unit('s');
+  if(kind==='reps_only') return num('r',pre.reps,'Reps')+unit('reps');
+  return num('w'+(bumped?' bump':''),pre.weight,'Weight','decimal')
+    + unit(flagFor(e,'assisted')?'lb help':STATE.unit) + times + num('r',pre.reps,'Reps');
+}
 function renderPill(e, rx, idx){
   const kind=classifySet(e, idx); const s=e.log[idx]; const logged=kind!=='empty';
   const suggestion = logged ? null : suggestionFor(e, rx);
@@ -1817,18 +1913,18 @@ function renderPill(e, rx, idx){
     histFor(e).filter(x=>!x.off), { weight:prefillKg, reps:prefillR },
     (STATE.customLib&&STATE.customLib[e.id]&&STATE.customLib[e.id].incrementLb)||5, Date.now());
   const pr = prFor(e, idx);
+  const setK=kindFor(e);
   const row=document.createElement('div'); row.className='pill '+(kind==='failed'?'failed':(kind==='done'?'done':''))+((s&&s.warmup)?' warmup':'')+(logged?'':' tappable');
   let status='done';
   if(kind==='done'){ const dr=s.reps-rx.reps; if(dr>0) status='done <span class="sub">· +'+dr+'</span>'; else if(dr<0) status='done <span class="sub">· '+s.reps+' reps</span>'; else status='done'; }
   else if(kind==='failed') status='missed';
   row.innerHTML =
     '<span class="pillIdx">'+(ROMAN[idx]||idx+1)+'</span>'
-    + '<span class="pillValue">'
-    +   '<input class="pillInput w'+(bumped?' bump':'')+'" type="number" inputmode="decimal" value="'+prefillKg+'" aria-label="Weight" />'
-    +   '<span class="pillUnit">'+STATE.unit+(e.perHand?'<span class="pillPerHand">/ea</span>':'')+'</span>'
-    +   '<span class="pillTimes">×</span>'
-    +   '<input class="pillInput r" type="number" inputmode="numeric" value="'+prefillR+'" aria-label="Reps" />'
-    + '</span>'
+    + '<span class="pillValue">'+pillInputsFor(e, setK, {
+        weight:prefillKg, reps:prefillR,
+        seconds:(s&&s.s!=null)?s.s:(suggestion&&suggestion.seconds!=null?suggestion.seconds:0),
+        metres:(s&&s.m!=null)?s.m:(suggestion&&suggestion.metres!=null?suggestion.metres:0),
+      }, bumped)+'</span>'
     + '<span class="pillSpacer"></span>'
     + '<div class="pillActions">'
     /* one tap, on the row, mid-session — a warm-up flag buried in a popup
@@ -1844,13 +1940,43 @@ function renderPill(e, rx, idx){
         : (nearMiss?'<span class="pillNear">'+escapeHtml(nearMiss)+'</span>':'')
           + '<button class="pillHit" aria-label="Log set">Hit it →</button><button class="pillMiss" aria-label="Mark missed">Miss</button>')
     + '</div>';
-  const wIn=row.querySelector('.w'), rIn=row.querySelector('.r');
-  const commit=()=>{ const kg=parseFloat(wIn.value); const reps=Math.round(parseFloat(rIn.value)); if(!Number.isFinite(kg)||kg<0||!Number.isFinite(reps)||reps<0) return; if(reps===0){ doLog(e, idx, kg, 0, true); } else { doLog(e, idx, kg, reps, false); } };
+  const readNum=el=>el?parseFloat(el.value):NaN;
+  const commit=()=>{
+    const values={ kind:setK, perSide:flagFor(e,'perSide')||undefined, assisted:flagFor(e,'assisted')||undefined };
+    if(setK==='time' || setK==='time_distance'){
+      const sec=readNum(row.querySelector('.sec'));
+      if(!Number.isFinite(sec)||sec<0) return;
+      values.s=Math.round(sec);
+    }
+    if(setK==='distance' || setK==='time_distance'){
+      const met=readNum(row.querySelector('.met'));
+      if(!Number.isFinite(met)||met<0) return;
+      values.m=met;
+    }
+    if(setK==='reps_weight' || setK==='reps_only'){
+      const reps=Math.round(readNum(row.querySelector('.r')));
+      if(!Number.isFinite(reps)||reps<0) return;
+      values.reps=reps;
+      if(setK==='reps_weight'){
+        const kg=readNum(row.querySelector('.w'));
+        if(!Number.isFinite(kg)||kg<0) return;
+        values.kg=kg;
+      }
+      /* zero reps is a miss in the kinds that count reps; a plank held for
+         zero seconds is just an empty entry, not a failed attempt */
+      if(reps===0){ doLog(e, idx, values, true); return; }
+    }
+    doLog(e, idx, values, false);
+  };
   const stop=ev=>ev.stopPropagation();
-  [wIn,rIn].forEach(inp=>{ inp.addEventListener('click',stop); inp.addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); commit(); inp.blur(); } }); });
+  row.querySelectorAll('.pillInput').forEach(inp=>{ inp.addEventListener('click',stop); inp.addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); commit(); inp.blur(); } }); });
   if(!logged) row.addEventListener('click', commit);
   const hit=row.querySelector('.pillHit'); if(hit) hit.addEventListener('click',ev=>{ stop(ev); commit(); });
-  const miss=row.querySelector('.pillMiss'); if(miss) miss.addEventListener('click',ev=>{ stop(ev); const kg=parseFloat(wIn.value)|| (e.lastKg!=null?e.lastKg:rx.kg); doLog(e, idx, kg, 0, true); });
+  const miss=row.querySelector('.pillMiss'); if(miss) miss.addEventListener('click',ev=>{
+    stop(ev);
+    const kg=readNum(row.querySelector('.w'));
+    doLog(e, idx, { kind:setK, kg:Number.isFinite(kg)?kg:(e.lastKg!=null?e.lastKg:rx.kg), reps:0 }, true);
+  });
   const reset=row.querySelector('.pillReset'); if(reset) reset.addEventListener('click',ev=>{ stop(ev); e.log[idx]=null; stopRest(e.id); render(); });
   const dropBtn=row.querySelector('.pillDrop'); if(dropBtn) dropBtn.addEventListener('click',ev=>{ stop(ev); addDrop(e, idx); });
   const rpeBtn=row.querySelector('[data-act="rpe"]');
@@ -1859,7 +1985,16 @@ function renderPill(e, rx, idx){
   if(warmBtn) warmBtn.addEventListener('click',ev=>{
     stop(ev);
     if(e.log[idx]) e.log[idx].warmup = !e.log[idx].warmup;
-    else e.log[idx] = { kg:parseFloat(wIn.value)||0, reps:Math.round(parseFloat(rIn.value))||0, warmup:true };
+    else {
+      /* a plank row has no weight or rep input to read */
+      const w=row.querySelector('.w'), r=row.querySelector('.r');
+      const sec=row.querySelector('.sec'), met=row.querySelector('.met');
+      e.log[idx]={ kind:setK, warmup:true };
+      if(w) e.log[idx].kg=parseFloat(w.value)||0;
+      if(r) e.log[idx].reps=Math.round(parseFloat(r.value))||0;
+      if(sec) e.log[idx].s=Math.round(parseFloat(sec.value))||0;
+      if(met) e.log[idx].m=parseFloat(met.value)||0;
+    }
     rollupToday(e); render();
   });
   return row;
@@ -1895,10 +2030,13 @@ function renderDropRow(e, idx, di){
 }
 function IC_reset(){ return '<svg viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="currentColor"><path d="M3.5 6.5 A6 6 0 1 0 6 3.2"/><polyline points="2.4 2.4 3.7 6.6 8 5.2"/></svg>'; }
 
-function doLog(e, idx, kg, reps, fail){
+function doLog(e, idx, values, fail){
   const _sess=curSession(); if(!_sess.startedAt) _sess.startedAt=Date.now();
   const wasComplete = exComplete(e);
-  e.log[idx] = fail ? {kg, reps:0, fail:true} : {kg, reps};
+  const entry={};
+  ['kind','kg','reps','s','m','perSide','assisted'].forEach(k=>{ if(values[k]!==undefined) entry[k]=values[k]; });
+  if(fail){ entry.reps=0; entry.fail=true; }
+  e.log[idx]=entry;
   rollupToday(e);
   render();
   // re-find the live card + pill for the shimmer / celebration
@@ -1938,12 +2076,26 @@ function rollupToday(e){
     /* Per-set weight and the warm-up flag are written from here on, so
        volume and e1RM can tell a ramp-up from the work. Older rows have
        neither and are read with the entry weight and warmup:false. */
-    const sets=e.log.filter(s=>s).map(s=>({ w:s.kg, r:s.reps, fail:s.fail||undefined, warmup:s.warmup||undefined }));
+    /* Every field the kind uses travels into history, including the kind
+       itself — that is what lets an old row stay readable after the lift's
+       kind is changed, instead of being reinterpreted in a new unit. */
+    const sets=e.log.filter(s=>s).map(s=>{
+      const row={ fail:s.fail||undefined, warmup:s.warmup||undefined };
+      if(s.kind && s.kind!=='reps_weight') row.kind=s.kind;
+      if(s.kg!=null) row.w=s.kg;
+      if(s.reps!=null) row.r=s.reps;
+      if(s.s!=null) row.s=s.s;
+      if(s.m!=null) row.m=s.m;
+      if(s.perSide) row.perSide=true;
+      if(s.assisted) row.assisted=true;
+      if(s.rpe!=null) row.rpe=s.rpe;
+      return row;
+    });
     const working=logWorking(e);
-    const top=(working.length?working:done).reduce((a,b)=>b.kg>a.kg?b:a);
+    const top=(working.length?working:done).reduce((a,b)=>((b.kg||0)>(a.kg||0)?b:a));
     h.push({date:today, kg:top.kg, sets});
     h.sort((a,b)=>a.date.localeCompare(b.date));
-    e.lastKg=top.kg;
+    if(top.kg!=null) e.lastKg=top.kg;
   }
   STATE.history[e.id]=h;
   STATE.exerciseNames=STATE.exerciseNames||{}; STATE.exerciseNames[e.id]=e.name;
@@ -2349,11 +2501,23 @@ function openSwap(e){
         goBtn.disabled=true; status.style.color='var(--muted-strong)'; status.textContent='Looking that up…';
         try{
           const info=await window.Vitality.classify(nm);
+          /* The model's answer is untrusted input heading straight into the
+             data model. normalizeClassification checks the kind against a
+             closed list and clamps everything else, so a hallucinated kind
+             can never route a lift into the wrong strategy. */
+          const c=TrainEngine.normalizeClassification(info);
           const id=slugify(nm);
           STATE.customLib=STATE.customLib||{};
-          STATE.customLib[id]={ equipment:info.equipment||'', primary:info.primary||[], secondary:info.secondary||[], gist:info.gist||'', steps:info.steps||[], cues:info.cues||[] };
-          const sets=Math.max(1,Math.min(8,Math.round(info.startingSets)||3));
-          const def={ id, name:nm, tier:info.tier||2, sets, reps:Math.max(1,Math.round(info.startingReps)||10), kg:Number.isFinite(info.startingKg)?info.startingKg:0, perHand:false, rest:Math.max(30,Math.round(info.restSeconds)||90), lastKg:lastKgFromHistory(id), pinned:false, collapsed:false, deload:false, note:'', log:Array(sets).fill(null) };
+          /* This IS the cache — a name is classified once and never again. */
+          STATE.customLib[id]={
+            equipment:info.equipment||'', primary:info.primary||[], secondary:info.secondary||[],
+            gist:info.gist||'', steps:info.steps||[], cues:info.cues||[],
+            kind:c.kind,
+            perSide:c.perSide||undefined,
+            assisted:c.assisted||undefined,
+            repRange:c.repRange||undefined,
+          };
+          const def={ id, name:nm, tier:c.tier, sets:c.sets, reps:c.reps, kg:c.weight, perHand:c.perSide, rest:c.rest, lastKg:lastKgFromHistory(id), pinned:false, collapsed:false, deload:false, note:'', log:Array(c.sets).fill(null) };
           commitExercise(def, e, session, adding);
         }catch(err){
           status.style.color='var(--fail)';
@@ -2491,7 +2655,9 @@ function showApply(res, session, result){
 /* ---- tune popup --------------------------------------------------- */
 function openTune(e){
   const existing=repRangeFor(e);
-  const draft={ kg:e.kg, reps:e.reps, sets:e.sets, rest:e.rest, maxReps: existing?existing[1]:null };
+  const draft={ kg:e.kg, reps:e.reps, sets:e.sets, rest:e.rest, maxReps: existing?existing[1]:null,
+                kind:kindFor(e), perSide:flagFor(e,'perSide'), assisted:flagFor(e,'assisted') };
+  const startingKind=draft.kind;
   const loggedCount=e.log.filter(s=>s).length;
   const showMax=()=> draft.maxReps==null ? 'off' : String(draft.maxReps);
   openPop(popHead('Tune', e.name)
@@ -2502,6 +2668,11 @@ function openTune(e){
     + stepRow('Top reps','tmax', draft.maxReps==null?'off':draft.maxReps, 'maxReps')
     + '<p class="settingsNote">Off means every clean session adds weight. Set a top rep and you chase reps first, then add weight and drop back to '+draft.reps+'.</p>'
     + stepRow('Rest','trest', mmss(draft.rest), 'rest')
+    + '<div class="secLbl">How this is measured</div>'
+    + '<div class="swapList" id="kindList">'+TrainEngine.SET_KINDS.map(k=>'<button class="swapItem'+(draft.kind===k?' on':'')+'" data-kind="'+k+'"><span class="nm">'+KIND_LABELS[k]+'</span><span class="mu">'+KIND_UNITS[k]+'</span></button>').join('')+'</div>'
+    + '<div class="settingsRow"><span class="bouncyLabel'+(draft.perSide?' on':'')+'" id="psLbl">Logged one side at a time</span><button class="pbtn ghost" id="tps" style="padding:6px 12px">'+(draft.perSide?'Yes':'No')+'</button></div>'
+    + '<div class="settingsRow"><span class="bouncyLabel'+(draft.assisted?' on':'')+'" id="asLbl">Machine takes weight off</span><button class="pbtn ghost" id="tas" style="padding:6px 12px">'+(draft.assisted?'Yes':'No')+'</button></div>'
+    + '<p class="settingsNote">Assisted means the number you log is the help, not the load — so less of it is progress.</p>'
     + '<div class="popBtns"><button class="pbtn ghost" id="tcancel">Cancel</button><button class="pbtn save" id="tsave">Save</button></div>',
     scrim=>{
       /* The invariant, enforced in one place after every change rather
@@ -2530,13 +2701,50 @@ function openTune(e){
         }
         clampRange();
         sync(); });
+      scrim.querySelectorAll('.swapItem[data-kind]').forEach(b=> b.onclick=()=>{
+        draft.kind=b.dataset.kind;
+        scrim.querySelectorAll('.swapItem[data-kind]').forEach(x=>x.classList.toggle('on', x.dataset.kind===draft.kind));
+      });
+      const flagBtn=(sel,lbl,key)=>{
+        const btn=scrim.querySelector(sel);
+        btn.onclick=()=>{ draft[key]=!draft[key]; btn.textContent=draft[key]?'Yes':'No'; scrim.querySelector(lbl).classList.toggle('on', draft[key]); };
+      };
+      flagBtn('#tps','#psLbl','perSide');
+      flagBtn('#tas','#asLbl','assisted');
       scrim.querySelector('#tcancel').onclick=closePop;
-      scrim.querySelector('#tsave').onclick=()=>{ e.kg=Number.isFinite(draft.kg)?draft.kg:e.kg; e.reps=draft.reps; e.rest=draft.rest;
+      const commitTune=()=>{
+        setExerciseField(e,'kind', draft.kind==='reps_weight'?undefined:draft.kind);
+        setExerciseField(e,'perSide', draft.perSide);
+        setExerciseField(e,'assisted', draft.assisted);
+        e.perHand=draft.perSide;
+        doSave();
+      };
+      const doSave=()=>{ e.kg=Number.isFinite(draft.kg)?draft.kg:e.kg; e.reps=draft.reps; e.rest=draft.rest;
         setRepRange(e, (draft.maxReps!=null && draft.maxReps>draft.reps) ? [draft.reps, draft.maxReps] : null);
         // grow / shrink the set list, keeping logged sets
         if(draft.sets>e.log.length){ while(e.log.length<draft.sets) e.log.push(null); }
         else if(draft.sets<e.log.length){ e.log=e.log.slice(0,Math.max(loggedCount,draft.sets)); }
         e.sets=e.log.length; closePop(); render(); };
+      scrim.querySelector('#tsave').onclick=()=>{
+        const logged=historyKinds(e).filter(k=>k!==draft.kind);
+        /* Old rows are never rewritten — they stay readable under the kind
+           they were logged with. But they stop feeding progression, because
+           seconds and pounds are not comparable, so this is not something to
+           do silently to someone's training record. */
+        if(draft.kind!==startingKind && logged.length){
+          closePop();
+          openPop(popHead('Change how this is measured?', e.name)
+            + '<p class="formGist">'+escapeHtml(e.name)+' has '+histFor(e).filter(x=>!x.off).length+' session(s) logged as '+logged.map(k=>KIND_LABELS[k]).join(', ')+'. Those stay exactly as they are and remain visible in History.</p>'
+            + '<p class="formGist">They will stop counting toward progression, plateaus and records for this lift, because '+KIND_UNITS[startingKind]+' and '+KIND_UNITS[draft.kind]+' are not the same quantity. It starts fresh in the new unit.</p>'
+            + '<div class="popBtns"><button class="pbtn ghost" id="kcancel">Keep it as it is</button><button class="pbtn save" id="kgo">Change it</button></div>',
+            s2=>{
+              s2.querySelector('#kcancel').onclick=closePop;
+              s2.querySelector('#kgo').onclick=()=>{ commitTune(); };
+            });
+          return;
+        }
+        commitTune();
+      };
     });
 }
 function fieldRow(label, ctl, icon){ const ic={weight:'<path d="M7 9v6M17 9v6M4 12h3M17 12h3M9 9h6v6H9z"/>'}[icon]||''; return '<div class="field"><span class="lbl">'+svg(ic,' fill="none" stroke="currentColor"')+label+'</span><div class="stepper">'+ctl+'</div></div>'; }
