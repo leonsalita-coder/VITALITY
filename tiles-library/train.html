@@ -1308,18 +1308,27 @@ var TrainEngine = (() => {
   }
   function restTrend(history) {
     const medians = [];
+    const shapes = [];
     for (const entry of history || []) {
       const value = medianRest(entry);
-      if (value != null) medians.push(value);
+      if (value == null) continue;
+      medians.push(value);
+      shapes.push(entry.group ? `g:${entry.group}` : "none");
     }
     if (medians.length < MIN_TIMED_SESSIONS) return null;
+    const grouped = shapes.map((s) => s !== "none");
+    const groupingChanged = grouped.some((g) => g !== grouped[0]);
     const from = medians[0];
     const to = medians[medians.length - 1];
     return {
       from,
       to,
       sessions: medians.length,
-      compressing: from > 0 && to / from <= REST_COMPRESSION
+      /* A structural change makes the two ends incomparable. Reporting a
+         softened version — "rest fell, but you changed things" — would be
+         worse than silence, because the reader takes the headline. */
+      compressing: !groupingChanged && from > 0 && to / from <= REST_COMPRESSION,
+      groupingChanged
     };
   }
 
@@ -6529,7 +6538,12 @@ function rollupFor(e, date){
     const notWarm=done.filter(s=>!s.warmup);
     const pool=working.length?working:notWarm;
     const top=pool.length?pool.reduce((a,b)=>((b.kg||0)>(a.kg||0)?b:a)):null;
-    h.push({date, kg: top ? top.kg : prescription(e).kg, sets});
+    /* The superset this lift was in, recorded with the session. Rest is
+       only comparable between sessions of the same shape, and without
+       this a switch away from supersets reads as rushing the rest. */
+    const row={date, kg: top ? top.kg : prescription(e).kg, sets};
+    if(e.group) row.group=e.group;
+    h.push(row);
     h.sort((a,b)=>a.date.localeCompare(b.date));
     /* Only a session for TODAY may move the carried-over weight. Editing
        last month must not rewrite what the next session starts from. */

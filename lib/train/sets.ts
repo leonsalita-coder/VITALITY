@@ -116,6 +116,16 @@ export interface HistoryEntry {
   sets?: HistorySet[]
   /** A logged rest day — carries no training information. */
   off?: boolean
+  /**
+   * The superset this lift was part of, if any, on the day it was logged.
+   *
+   * Recorded because rest is only comparable between sessions of the SAME
+   * shape: a superset's gap contains the partner's set, so it reads about
+   * double. Without this, switching away from supersets looks exactly
+   * like rushing the rest. Absent means ungrouped, which is how every row
+   * logged before this existed reads — and correctly so.
+   */
+  group?: string
 }
 
 export interface VolumeOptions {

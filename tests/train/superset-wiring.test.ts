@@ -178,6 +178,45 @@ describe('timestamps interleave in time without interleaving the data', () => {
   })
 })
 
+describe('the grouping is recorded with the session', () => {
+  it('writes the group onto the history entry', () => {
+    const rows = run(`
+      (function(){
+        ${reset};
+        document.querySelector('.ex[data-id="a"] .pill .pillHit').click();
+        document.querySelector('.ex[data-id="solo"] .pill .pillHit').click();
+        return { a: STATE.history.a[0].group, solo: STATE.history.solo[0].group };
+      })()`)
+    expect(rows.a).toBe('A')
+    /* Absent, not empty — an ungrouped lift reads the same as every row
+       logged before this field existed, which is what stops the field
+       arriving from looking like a change of structure. */
+    expect(rows.solo).toBeUndefined()
+  })
+
+  it('so a switch away from supersets is not read as rushed rest', () => {
+    const trend = run(`
+      (function(){
+        ${reset};
+        var mk = function(back, gap, group){
+          var d = new Date(Date.now() - back * 86400000);
+          var date = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0')
+                   + '-' + String(d.getDate()).padStart(2,'0');
+          var start = new Date(date + 'T18:00:00').getTime();
+          var row = { date: date, kg: 200, sets: [0,1,2].map(function(i){
+            return { w:200, r:5, at: start + i * gap * 1000 }; }) };
+          if (group) row.group = group;
+          return row;
+        };
+        STATE.history.a = [mk(42,180,'A'), mk(35,180,'A'), mk(28,180,'A'),
+                           mk(21,90), mk(14,90), mk(7,90), mk(0,90)];
+        return TrainEngine.restTrend(STATE.history.a);
+      })()`)
+    expect(trend.groupingChanged).toBe(true)
+    expect(trend.compressing).toBe(false)
+  })
+})
+
 describe('ungrouping restores ordinary behaviour', () => {
   it('starts a timer on every lift again', () => {
     const timers = run(`

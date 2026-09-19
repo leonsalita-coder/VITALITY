@@ -128,6 +128,14 @@ export interface RestTrend {
   /** Timed sessions the trend rests on. */
   sessions: number
   compressing: boolean
+  /**
+   * The lift moved into or out of a superset inside this window.
+   *
+   * When true, `compressing` is always false: rest before and after a
+   * structural change is not the same measurement, and the drop is
+   * arithmetic rather than behaviour.
+   */
+  groupingChanged: boolean
 }
 
 /**
@@ -139,11 +147,27 @@ export interface RestTrend {
  */
 export function restTrend(history: HistoryEntry[] | null | undefined): RestTrend | null {
   const medians: number[] = []
+  const shapes: string[] = []
   for (const entry of history || []) {
     const value = medianRest(entry)
-    if (value != null) medians.push(value)
+    if (value == null) continue
+    medians.push(value)
+    /* Absent means ungrouped, which is what every row logged before
+       grouping was captured means — and what it actually was. Normalising
+       undefined and '' to the same token is what stops the arrival of the
+       field looking like a change of structure. */
+    shapes.push(entry.group ? `g:${entry.group}` : 'none')
   }
   if (medians.length < MIN_TIMED_SESSIONS) return null
+
+  /**
+   * Did the lift move into or out of a superset inside the window?
+   *
+   * Only grouped-versus-ungrouped matters, not WHICH group: a superset
+   * relabelled from A to B is the same structure and the same rest cost.
+   */
+  const grouped = shapes.map((s) => s !== 'none')
+  const groupingChanged = grouped.some((g) => g !== grouped[0])
 
   const from = medians[0]
   const to = medians[medians.length - 1]
@@ -151,6 +175,10 @@ export function restTrend(history: HistoryEntry[] | null | undefined): RestTrend
     from,
     to,
     sessions: medians.length,
-    compressing: from > 0 && to / from <= REST_COMPRESSION,
+    /* A structural change makes the two ends incomparable. Reporting a
+       softened version — "rest fell, but you changed things" — would be
+       worse than silence, because the reader takes the headline. */
+    compressing: !groupingChanged && from > 0 && to / from <= REST_COMPRESSION,
+    groupingChanged,
   }
 }

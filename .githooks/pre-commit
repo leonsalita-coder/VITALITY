@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# The gate, so it cannot be bypassed by forgetting.
+#
+# It was bypassed twice by forgetting: `npm run verify` was run as its own
+# command, came back red, and the commit went ahead anyway because nothing
+# connected the two. Chaining them is discipline, and discipline is the
+# thing that fails at 2am — the same class as every other bug this engine
+# has produced.
+#
+# Escape hatch: `git commit --no-verify`. It exists because a hook with no
+# way out gets deleted the first time somebody needs to commit a
+# work-in-progress on a branch. Using it on main is the thing to avoid,
+# not the flag itself.
+
+set -e
+
+if [ -n "$SKIP_VERIFY" ]; then
+  echo "pre-commit: SKIP_VERIFY set, gate skipped"
+  exit 0
+fi
+
+echo "pre-commit: build, typecheck, tests, mutation lint…"
+
+if ! npm run --silent verify; then
+  echo ""
+  echo "──────────────────────────────────────────────────────────────"
+  echo " COMMIT BLOCKED — verify failed."
+  echo ""
+  echo " One of: the tiles are out of sync, typecheck is red, a test"
+  echo " failed, or the mutation lint found more absence assertions"
+  echo " without a positive control than the baseline allows."
+  echo ""
+  echo " Run 'npm run verify' to see which."
+  echo " Deliberate and justified? 'git commit --no-verify'."
+  echo "──────────────────────────────────────────────────────────────"
+  exit 1
+fi
+
+# The tiles are generated. A commit where they disagree with lib/train is
+# one where the shipped app and the engine have quietly diverged.
+if ! git diff --quiet -- public/tiles/train.html tiles-library/train.html; then
+  echo ""
+  echo " COMMIT BLOCKED — build:tiles changed the tiles and they are not staged."
+  echo " Run 'git add public/tiles/train.html tiles-library/train.html'."
+  exit 1
+fi
+
+echo "pre-commit: clean"
