@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  GAP_DAYS, WEEKLY_SET_BAND, RAMP_LIMIT,
+  GAP_DAYS, WEEKLY_SET_BAND,
   indexFrom, frequencyGaps, weeklySets, ratios, volumeRamp, analyse,
 } from '../../lib/train/analysis'
 import type { History } from '../../lib/train/analysis'
@@ -53,9 +53,16 @@ describe('the constraint that was silently broken', () => {
     const found = weeklySets(history, INDEX, NOW)
     const chest = found.find((f) => f.muscle === 'chest')
     expect(chest).toBeUndefined() // 12 is inside the band, correctly quiet
-    // but the volume really did combine:
+    /* But the volume really did combine. Shown against a month of
+       baseline, because volumeRamp now delegates to the acute-versus-
+       chronic model and that model refuses to speak without one. */
+    const steady = (id: string, perWeek: number) =>
+      Array.from({ length: 10 }, (_, w) => sess(w * 7 + 1, perWeek))
     const ramp = volumeRamp(
-      { bench: [sess(8, 4), sess(1, 8)], pecdeck: [sess(9, 4), sess(2, 8)] },
+      {
+        bench: [...steady('bench', 3), sess(1, 14)],
+        pecdeck: [...steady('pecdeck', 3), sess(2, 14)],
+      },
       INDEX, NOW,
     )
     expect(ramp.some((f) => f.muscle === 'chest')).toBe(true)
@@ -149,20 +156,31 @@ describe('ratios', () => {
 })
 
 describe('volume ramp', () => {
-  it('flags a hard week-over-week jump', () => {
-    const history: History = { squat: [sess(9, 8), sess(2, Math.ceil(8 * RAMP_LIMIT) + 2)] }
+  /* volumeRamp now delegates to the acute-versus-chronic model, so every
+     case below needs a real baseline to be measured against — which is
+     the point of the replacement. A week-over-week threshold fired on two
+     sessions and said nothing about how used to the work the lifter was. */
+  const block = (perWeek: number, weeks = 10) =>
+    Array.from({ length: weeks }, (_, w) => sess((weeks - w) * 7, perWeek))
+
+  it('flags a load well above what the lifter is used to', () => {
+    const history: History = { squat: [...block(8), sess(2, 26), sess(5, 26)] }
     const found = volumeRamp(history, INDEX, NOW)
-    expect(found[0].text).toMatch(/jumped from .* to .* hard sets/)
+    expect(found.length).toBeGreaterThan(0)
+    expect(found[0].text).toMatch(/hard sets a week lately against a usual/)
   })
 
   it('stays quiet on a gentle increase', () => {
-    const history: History = { squat: [sess(9, 10), sess(2, 11)] }
+    // control: the same block with a big jump DOES fire
+    expect(volumeRamp({ squat: [...block(10), sess(2, 30)] }, INDEX, NOW).length)
+      .toBeGreaterThan(0)
+    const history: History = { squat: [...block(10), sess(2, 11)] }
     expect(volumeRamp(history, INDEX, NOW)).toEqual([])
   })
 
-  it('stays quiet when last week was too small to ramp from', () => {
-    // 2 -> 6 sets triples the load and means nothing
-    const history: History = { squat: [sess(9, 2), sess(2, 6)] }
+  it('stays quiet with no baseline to compare against', () => {
+    // two sessions is not a month of training, whatever the jump
+    const history: History = { squat: [sess(9, 2), sess(2, 20)] }
     expect(volumeRamp(history, INDEX, NOW)).toEqual([])
   })
 })
@@ -179,9 +197,14 @@ describe('the rules that govern all of it', () => {
   })
 
   it('marks findings that rest on guessed muscle splits', () => {
-    const history: History = { squat: [sess(9, 8), sess(2, 20)] }
-    const found = volumeRamp(history, INDEX, NOW)
-    expect(found[0].estimated).toBe(true)
+    /* weeklySets carries the same flag and needs no month of baseline,
+       so it is the cheaper place to hold this rule. */
+    const history: History = {
+      squat: [sess(1, 2)], bench: [sess(2, 12)], row: [sess(3, 12)], curl: [sess(3, 12)],
+    }
+    const found = weeklySets(history, INDEX, NOW, { trainingAge: 'intermediate' })
+    expect(found.length).toBeGreaterThan(0)
+    expect(found.some((f) => f.estimated)).toBe(true)
   })
 
   it('ignores exercises with no muscles on record rather than guessing', () => {

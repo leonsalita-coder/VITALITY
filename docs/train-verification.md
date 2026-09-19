@@ -89,6 +89,31 @@ present. An earlier version did, produced 179 findings, and was unactionable
   taken from HEAD is not a snapshot of what you were editing; that discarded
   uncommitted work in six files once already.
 
+## A heuristic that has paid for itself three times
+
+**A defensive check written near an existing one should immediately be
+asked whether either can fire alone.**
+
+Three times now, a pair of guards has turned out to be mutually masking —
+each catching exactly what the other would, so that removing either left
+the other covering and neither could be shown to matter:
+
+| Where | The pair |
+| --- | --- |
+| `sets.ts` | a `sidesOf` check inside `isPerSide`, when `workingVolume` already returned before reaching it |
+| `staleness.ts` | `!def` and `!candidates.length`, both catching the unknown-lift case |
+| `fitting.ts` | a per-step range filter and a range check on the resulting median |
+
+In all three the resolution was the same: **delete one.** The median of
+values already inside a range is always inside it; `rankSwaps` returns
+nothing for a null lift; `workingVolume` never reaches `isPerSide` for a
+per-limb set. A second guard that cannot fire is not defence in depth, it
+is a comment that looks like code — and worse, it reads as protection to
+the next person, who then does not add the check that would have worked.
+
+Mutation testing finds these, but the cheaper moment to catch one is while
+writing it.
+
 ## Reading a survivor
 
 A survivor is not automatically a bug. It is a change nothing objected to,

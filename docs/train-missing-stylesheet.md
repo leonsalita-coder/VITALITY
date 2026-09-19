@@ -28,3 +28,34 @@ Anything that needs a **tap target to be larger, or any other visual
 change, is blocked on this** — there is no rule to change. Work that
 concerns which controls *render* (see training mode vs edit mode in
 `renderExercise`) is unaffected and stands either way.
+
+---
+
+# Other deferred decisions
+
+## Minimum effective dose, and transfer between lifts
+
+Both were specified and both were **deliberately not built**, for the same
+reason: each needs within-person variation across many months before it
+can fire at all.
+
+- **Minimum effective dose** — "you progressed the same on 12 sets of
+  chest as on 18" — requires periods of genuinely different weekly volume
+  in the same person, long enough apart to compare.
+- **Transfer between lifts** — "your front squat went up and your back
+  squat followed three weeks later" — requires a lead-lag signal across
+  enough cycles to separate it from coincidence.
+
+Their gates would be pure guesswork today, with no way to validate them
+for close to a year. And they are the two findings a serious lifter is
+**most likely to act on** — someone who is told twelve sets is enough will
+drop six — which makes a guessed threshold expensive in a way a wrong
+volume warning is not.
+
+The engine already has everything they need: per-muscle volume
+attribution, e1RM series, `periodComparison`, the curated-hypothesis
+discipline from `weekly.ts`, and now `simulate()` for testing a fit
+against replayed history.
+
+**Revisit once there is real history to tune the gates against.** This is
+a deferred decision, not an oversight.

@@ -328,6 +328,8 @@ var TrainEngine = (() => {
     MAX_SNAPSHOTS: () => MAX_SNAPSHOTS,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
     MIN_ASYMMETRY_SESSIONS: () => MIN_ASYMMETRY_SESSIONS,
+    MIN_CHRONIC_DAYS: () => MIN_CHRONIC_DAYS,
+    MIN_CHRONIC_LOAD: () => MIN_CHRONIC_LOAD,
     MIN_LOAD_GAP: () => MIN_LOAD_GAP,
     MIN_PROJECTION_POINTS: () => MIN_PROJECTION_POINTS,
     MIN_SCORED_FOR_FEEDBACK: () => MIN_SCORED_FOR_FEEDBACK,
@@ -341,7 +343,6 @@ var TrainEngine = (() => {
     PULL_MUSCLES: () => PULL_MUSCLES,
     PUSH_MUSCLES: () => PUSH_MUSCLES,
     RAMP_LADDERS: () => RAMP_LADDERS,
-    RAMP_LIMIT: () => RAMP_LIMIT,
     RATIO_BAND: () => RATIO_BAND,
     RECENT_HEAVY_SETS: () => RECENT_HEAVY_SETS,
     RECOVERY_FLOOR: () => RECOVERY_FLOOR,
@@ -349,6 +350,7 @@ var TrainEngine = (() => {
     REST_COMPRESSION: () => REST_COMPRESSION,
     REST_FLOOR: () => REST_FLOOR,
     ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
+    SANE_BAND: () => SANE_BAND,
     SECONDARY_SHARE: () => SECONDARY_SHARE,
     SET_KINDS: () => SET_KINDS,
     SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
@@ -358,6 +360,7 @@ var TrainEngine = (() => {
     SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
     accuracyOver: () => accuracyOver,
+    acuteChronic: () => acuteChronic,
     amrapOf: () => amrapOf,
     amrapSignal: () => amrapSignal,
     amrapTrend: () => amrapTrend,
@@ -384,8 +387,8 @@ var TrainEngine = (() => {
     countsForProgression: () => countsForProgression,
     currentBodyweight: () => currentBodyweight,
     currentWeekStreak: () => currentWeekStreak,
-    dateKey: () => dateKey2,
-    daysBetween: () => daysBetween,
+    dateKey: () => dateKey,
+    daysBetween: () => daysBetween2,
     defaultPlateConfig: () => defaultPlateConfig,
     defaultRepRange: () => defaultRepRange,
     deloadCut: () => deloadCut,
@@ -417,6 +420,7 @@ var TrainEngine = (() => {
     isWorkingSet: () => isWorkingSet,
     lastSessionFor: () => lastSessionFor,
     limitDeloads: () => limitDeloads,
+    loadFindings: () => loadFindings,
     loadableWeights: () => loadableWeights,
     localMidnight: () => localMidnight2,
     loggedSetCount: () => loggedSetCount,
@@ -481,6 +485,7 @@ var TrainEngine = (() => {
     streakLabel: () => streakLabel,
     streakTarget: () => streakTarget,
     suggestTarget: () => suggestTarget,
+    systemicLoadNote: () => systemicLoadNote,
     templatePlan: () => templatePlan,
     tokenKey: () => tokenKey,
     topWorkingMetres: () => topWorkingMetres,
@@ -501,6 +506,863 @@ var TrainEngine = (() => {
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
+
+  // lib/train/muscles.ts
+  var MUSCLES = [
+    "chest",
+    "front_delts",
+    "side_delts",
+    "rear_delts",
+    "triceps",
+    "biceps",
+    "forearms",
+    "lats",
+    "traps",
+    "upper_back",
+    "lower_back",
+    "abs",
+    "obliques",
+    "glutes",
+    "quads",
+    "hamstrings",
+    "adductors",
+    "abductors",
+    "calves",
+    "neck",
+    "full_body",
+    "cardio"
+  ];
+  var SECONDARY_SHARE = 0.5;
+  var SYNONYMS = {
+    chest: "chest",
+    pecs: "chest",
+    pectorals: "chest",
+    pectoral: "chest",
+    front_delts: "front_delts",
+    front_delt: "front_delts",
+    anterior_deltoid: "front_delts",
+    side_delts: "side_delts",
+    lateral_deltoid: "side_delts",
+    medial_delts: "side_delts",
+    rear_delts: "rear_delts",
+    posterior_deltoid: "rear_delts",
+    rear_delt: "rear_delts",
+    triceps: "triceps",
+    tricep: "triceps",
+    tris: "triceps",
+    biceps: "biceps",
+    bicep: "biceps",
+    bis: "biceps",
+    forearms: "forearms",
+    forearm: "forearms",
+    grip: "forearms",
+    lats: "lats",
+    lat: "lats",
+    latissimus: "lats",
+    traps: "traps",
+    trapezius: "traps",
+    upper_back: "upper_back",
+    rhomboids: "upper_back",
+    mid_back: "upper_back",
+    lower_back: "lower_back",
+    erectors: "lower_back",
+    spinal_erectors: "lower_back",
+    abs: "abs",
+    core: "abs",
+    abdominals: "abs",
+    rectus_abdominis: "abs",
+    obliques: "obliques",
+    oblique: "obliques",
+    glutes: "glutes",
+    glute: "glutes",
+    butt: "glutes",
+    quads: "quads",
+    quadriceps: "quads",
+    quad: "quads",
+    hamstrings: "hamstrings",
+    hamstring: "hamstrings",
+    hams: "hamstrings",
+    adductors: "adductors",
+    inner_thigh: "adductors",
+    abductors: "abductors",
+    outer_thigh: "abductors",
+    calves: "calves",
+    calf: "calves",
+    soleus: "calves",
+    gastrocnemius: "calves",
+    neck: "neck",
+    full_body: "full_body",
+    total_body: "full_body",
+    cardio: "cardio",
+    conditioning: "cardio",
+    aerobic: "cardio"
+  };
+  var AMBIGUOUS = {
+    shoulders: "front_delts",
+    shoulder: "front_delts",
+    delts: "front_delts",
+    deltoids: "front_delts",
+    back: "upper_back",
+    upper_body: "full_body",
+    lower_body: "quads",
+    legs: "quads",
+    arms: "biceps",
+    hips: "glutes",
+    posterior_chain: "hamstrings"
+  };
+  function normalizeName(raw) {
+    return String(raw || "").toLowerCase().trim().replace(/[\s-]+/g, "_").replace(/[^a-z_]/g, "");
+  }
+  function mapMuscle(raw) {
+    const key = normalizeName(raw);
+    if (!key) return { muscle: null, exact: false };
+    if (SYNONYMS[key] && MUSCLES.includes(SYNONYMS[key])) return { muscle: SYNONYMS[key], exact: true };
+    if (AMBIGUOUS[key]) return { muscle: AMBIGUOUS[key], exact: false };
+    const singular = key.replace(/s$/, "");
+    if (SYNONYMS[singular] && MUSCLES.includes(SYNONYMS[singular])) {
+      return { muscle: SYNONYMS[singular], exact: true };
+    }
+    return { muscle: null, exact: false };
+  }
+  function normalizeShares(list) {
+    if (!list.length) return [];
+    const total = list.reduce((sum, c) => sum + (Number.isFinite(c.share) ? c.share : 0), 0);
+    if (total <= 0) {
+      const even = 1 / list.length;
+      return list.map((c) => ({ muscle: c.muscle, share: even }));
+    }
+    return list.map((c) => ({ muscle: c.muscle, share: c.share / total }));
+  }
+  function collect(raw) {
+    const entries = Array.isArray(raw) ? raw : [];
+    const seen = /* @__PURE__ */ new Map();
+    const unmapped = [];
+    let exact = true;
+    let authored = entries.length > 0;
+    for (const entry of entries) {
+      const isObject = !!entry && typeof entry === "object";
+      const name = isObject ? entry.muscle : entry;
+      const weight = isObject ? entry.share : void 0;
+      if (!isObject || typeof weight !== "number") authored = false;
+      const { muscle, exact: hit } = mapMuscle(name);
+      if (!muscle) {
+        const label2 = String(name || "").trim();
+        if (label2 && label2 !== "[object Object]") unmapped.push(label2);
+        else if (isObject) unmapped.push(JSON.stringify(entry));
+        continue;
+      }
+      if (!hit) exact = false;
+      seen.set(muscle, (seen.get(muscle) || 0) + (typeof weight === "number" ? weight : 1));
+    }
+    const list = [...seen.entries()].map(([muscle, share]) => ({ muscle, share }));
+    return { list: normalizeShares(list), unmapped, exact, authored };
+  }
+  function muscleSplitFrom(info) {
+    const def = info && typeof info === "object" ? info : {};
+    const primary = collect(def.primary);
+    const secondary = collect(def.secondary);
+    const authored = primary.authored && (!secondary.list.length || secondary.authored);
+    return {
+      primary: primary.list,
+      secondary: secondary.list,
+      estimated: !authored || !primary.exact || !secondary.exact,
+      unmapped: [...primary.unmapped, ...secondary.unmapped]
+    };
+  }
+  function distribute(sets, split) {
+    const out = {};
+    const add = (muscle, amount) => {
+      out[muscle] = (out[muscle] || 0) + amount;
+    };
+    split.primary.forEach((c) => add(c.muscle, sets * c.share));
+    split.secondary.forEach((c) => add(c.muscle, sets * c.share * SECONDARY_SHARE));
+    return out;
+  }
+  var PUSH_MUSCLES = ["chest", "front_delts", "side_delts", "triceps"];
+  var PULL_MUSCLES = ["lats", "upper_back", "rear_delts", "biceps", "traps"];
+
+  // lib/train/bodyweight.ts
+  function bodyweightAt(history, date) {
+    let best = null;
+    for (const entry of history || []) {
+      if (!entry || typeof entry.lb !== "number" || !Number.isFinite(entry.lb) || entry.lb <= 0) continue;
+      if (entry.date > date) continue;
+      if (!best || entry.date > best.date) best = entry;
+    }
+    return best ? best.lb : null;
+  }
+  function currentBodyweight(history) {
+    const sorted = (history || []).filter((e) => e && e.lb > 0).sort((a, b) => a.date.localeCompare(b.date));
+    return sorted.length ? sorted[sorted.length - 1].lb : null;
+  }
+  function recordBodyweight(history, date, lb) {
+    if (!Number.isFinite(lb) || lb <= 0) return history || [];
+    const rest = (history || []).filter((e) => e && e.date !== date);
+    return [...rest, { date, lb: Math.round(lb * 10) / 10 }].sort((a, b) => a.date.localeCompare(b.date));
+  }
+  function bodyweightLoad(opts) {
+    if (opts.bodyweightLb == null || !Number.isFinite(opts.bodyweightLb)) return null;
+    const factor = typeof opts.factor === "number" && opts.factor > 0 ? opts.factor : 1;
+    const base = opts.bodyweightLb * factor;
+    const load = base + (opts.added || 0) - (opts.assistance || 0);
+    return Math.max(0, Math.round(load * 10) / 10);
+  }
+
+  // lib/train/sets.ts
+  var DEFAULT_SET_KIND = "reps_weight";
+  function emptyVolume() {
+    return { load: 0, loadUnavailable: false, reps: 0, seconds: 0, metres: 0 };
+  }
+  function setKind(set) {
+    return set.kind || DEFAULT_SET_KIND;
+  }
+  function entryKind(entry) {
+    const first = workingSets(entry)[0];
+    return first ? setKind(first) : DEFAULT_SET_KIND;
+  }
+  function isPerSide(set, opts) {
+    return set.perSide !== void 0 ? set.perSide === true : opts.perSide === true;
+  }
+  function sidesOf(set) {
+    const sides = set && set.sides;
+    if (!sides || !sides.left || !sides.right) return null;
+    const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+    return {
+      left: { w: num2(sides.left.w), r: num2(sides.left.r) },
+      right: { w: num2(sides.right.w), r: num2(sides.right.r) }
+    };
+  }
+  function isWorkingSet(set) {
+    return !!set && set.fail !== true && set.warmup !== true;
+  }
+  function workingSets(entry) {
+    return (entry.sets || []).filter(isWorkingSet);
+  }
+  function isAmrapSet(set) {
+    return !!set && set.amrap === true && isWorkingSet(set);
+  }
+  function amrapOf(entry) {
+    const flagged = (entry.sets || []).filter(isAmrapSet);
+    return flagged.length ? flagged[flagged.length - 1] : null;
+  }
+  function rangeSets(entry) {
+    return workingSets(entry).filter((set) => !isAmrapSet(set));
+  }
+  function setWeight(entry, set) {
+    const limbs = sidesOf(set);
+    if (limbs) return Math.min(limbs.left.w, limbs.right.w);
+    return typeof set.w === "number" ? set.w : entry.kg || 0;
+  }
+  function workingVolume(entry, opts = {}) {
+    const totals = emptyVolume();
+    for (const set of workingSets(entry)) {
+      const limbs = sidesOf(set);
+      if (limbs) {
+        totals.load += limbs.left.w * limbs.left.r + limbs.right.w * limbs.right.r;
+        continue;
+      }
+      const sides = isPerSide(set, opts) ? 2 : 1;
+      const reps = (set.r || 0) * sides;
+      const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
+      const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
+      switch (setKind(set)) {
+        case "reps_weight":
+          if (set.assisted) {
+            const load = bodyweightLoad({ bodyweightLb: bw, factor, assistance: setWeight(entry, set) });
+            if (load == null) totals.loadUnavailable = true;
+            else totals.load += load * reps;
+            totals.reps += reps;
+          } else {
+            totals.load += setWeight(entry, set) * reps;
+          }
+          break;
+        case "bodyweight":
+        case "weighted_bodyweight": {
+          const added = setKind(set) === "weighted_bodyweight" ? setWeight(entry, set) : 0;
+          const help = set.assisted ? setWeight(entry, set) : 0;
+          const load = bodyweightLoad({ bodyweightLb: bw, factor, added, assistance: help });
+          if (load == null) totals.loadUnavailable = true;
+          else totals.load += load * reps;
+          totals.reps += reps;
+          break;
+        }
+        case "reps_only":
+          totals.reps += reps;
+          break;
+        case "time":
+          totals.seconds += (set.s || 0) * sides;
+          break;
+        case "distance":
+          totals.metres += (set.m || 0) * sides;
+          break;
+        case "time_distance":
+          totals.seconds += (set.s || 0) * sides;
+          totals.metres += (set.m || 0) * sides;
+          break;
+      }
+    }
+    return totals;
+  }
+  function topWorkingSeconds(entry) {
+    const values = workingSets(entry).filter((set) => setKind(set) === "time" || setKind(set) === "time_distance").map((set) => set.s || 0);
+    return values.length ? Math.max(...values) : 0;
+  }
+  function topWorkingMetres(entry) {
+    const values = workingSets(entry).filter((set) => setKind(set) === "distance" || setKind(set) === "time_distance").map((set) => set.m || 0);
+    return values.length ? Math.max(...values) : 0;
+  }
+  function entryScore(entry, opts = {}) {
+    const kind = entryKind(entry);
+    const sets = workingSets(entry);
+    const best = (pick) => sets.length ? Math.max(...sets.map(pick)) : 0;
+    switch (kind) {
+      case "reps_only":
+        return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
+      case "time":
+        return { kind, primary: best((s) => s.s || 0), secondary: 0 };
+      case "distance":
+        return { kind, primary: best((s) => s.m || 0), secondary: 0 };
+      case "time_distance": {
+        const metres = best((s) => s.m || 0);
+        const seconds = sets.length ? Math.min(...sets.map((s) => s.s || Infinity)) : 0;
+        return { kind, primary: metres, secondary: Number.isFinite(seconds) ? -seconds : 0 };
+      }
+      case "bodyweight":
+      case "weighted_bodyweight": {
+        const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
+        const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
+        if (bw == null) return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
+        const load = (s) => bodyweightLoad({
+          bodyweightLb: bw,
+          factor,
+          added: kind === "weighted_bodyweight" ? setWeight(entry, s) : 0,
+          assistance: s.assisted ? setWeight(entry, s) : 0
+        }) || 0;
+        return { kind, primary: best(load), secondary: best((s) => s.r || 0) };
+      }
+      default: {
+        const assisted = sets.some((s) => s.assisted);
+        if (assisted) {
+          const least = sets.length ? Math.min(...sets.map((s) => setWeight(entry, s))) : 0;
+          return { kind, primary: -least, secondary: best((s) => s.r || 0) };
+        }
+        const weight = sets.length ? best((s) => setWeight(entry, s)) : entry.kg || 0;
+        return { kind, primary: weight, secondary: best((s) => s.r || 0) };
+      }
+    }
+  }
+  function topWorkingWeight(entry) {
+    const weights = workingSets(entry).map((set) => setWeight(entry, set));
+    return weights.length ? Math.max(...weights) : 0;
+  }
+  function topWorkingReps(entry) {
+    const reps = workingSets(entry).map((set) => set.r || 0);
+    return reps.length ? Math.max(...reps) : 0;
+  }
+  function workingRpe(entry) {
+    const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
+    if (!values.length) return null;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  // lib/train/targets.ts
+  var PROFILES = {
+    beginner: {
+      ceiling: 14,
+      floor: 5,
+      deloadMeasured: 0.95,
+      deloadInferred: 0.97,
+      repRanges: [[5, 8], [8, 12], [12, 15]]
+    },
+    intermediate: {
+      ceiling: 20,
+      floor: 10,
+      deloadMeasured: 0.9,
+      deloadInferred: 0.95,
+      repRanges: [[4, 6], [6, 10], [10, 15]]
+    },
+    advanced: {
+      ceiling: 25,
+      floor: 12,
+      deloadMeasured: 0.85,
+      deloadInferred: 0.92,
+      repRanges: [[3, 5], [5, 8], [8, 12]]
+    }
+  };
+  var UNKNOWN = PROFILES.intermediate;
+  function profileFor(age) {
+    return age && PROFILES[age] ? PROFILES[age] : UNKNOWN;
+  }
+  var MIN_TRAILING = 4;
+  var DROP_FRACTION = 0.6;
+  function weeklySetBand(ctx = {}) {
+    const profile = profileFor(ctx.trainingAge);
+    const trailing = ctx.trailingSets;
+    if (typeof trailing === "number" && Number.isFinite(trailing) && trailing >= MIN_TRAILING) {
+      return {
+        floor: Math.round(trailing * DROP_FRACTION * 10) / 10,
+        ceiling: profile.ceiling,
+        floorSource: "trailing"
+      };
+    }
+    if (ctx.trainingAge) {
+      return { floor: profile.floor, ceiling: profile.ceiling, floorSource: "age" };
+    }
+    return { floor: null, ceiling: profile.ceiling, floorSource: "none" };
+  }
+  function deloadCut(age, confidence) {
+    const profile = profileFor(age);
+    return confidence === "measured" ? profile.deloadMeasured : profile.deloadInferred;
+  }
+  function repRangeFor(age, tier) {
+    const ranges = profileFor(age).repRanges;
+    if (tier <= 1) return ranges[0];
+    if (tier >= 3) return ranges[2];
+    return ranges[1];
+  }
+  function streakTarget(statedFrequency, fallback = 4) {
+    if (typeof statedFrequency !== "number" || !Number.isFinite(statedFrequency)) return fallback;
+    return Math.min(14, Math.max(1, Math.round(statedFrequency)));
+  }
+
+  // lib/train/analysis.ts
+  var GAP_DAYS = 14;
+  var WEEKLY_SET_BAND = [10, 20];
+  var RATIO_BAND = [0.6, 1.7];
+  var DAY_MS = 864e5;
+  function indexFrom(customLib) {
+    const out = {};
+    for (const id of Object.keys(customLib || {})) out[id] = muscleSplitFrom(customLib[id]);
+    return out;
+  }
+  function localMidnight(dateStr) {
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+  function startOfDay(ms) {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  }
+  function daysAgo(dateStr, now) {
+    return Math.round((startOfDay(now) - localMidnight(dateStr)) / DAY_MS);
+  }
+  function attribute(history, index) {
+    const rows = [];
+    for (const id of Object.keys(history || {})) {
+      const split = index[id];
+      if (!split || !split.primary.length && !split.secondary.length) continue;
+      for (const entry of history[id] || []) {
+        if (entry.off) continue;
+        const sets = workingSets(entry).length;
+        if (!sets) continue;
+        const spread = distribute(sets, split);
+        for (const muscle of Object.keys(spread)) {
+          rows.push({ muscle, sets: spread[muscle] || 0, date: entry.date, estimated: split.estimated });
+        }
+      }
+    }
+    return rows;
+  }
+  var round = (n) => Math.round(n * 10) / 10;
+  function frequencyGaps(history, index, now) {
+    const rows = attribute(history, index);
+    const byMuscle = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      const seen = byMuscle.get(row.muscle) || { dates: /* @__PURE__ */ new Set(), last: row.date, estimated: false };
+      seen.dates.add(row.date);
+      if (row.date > seen.last) seen.last = row.date;
+      seen.estimated = seen.estimated || row.estimated;
+      byMuscle.set(row.muscle, seen);
+    }
+    const findings = [];
+    for (const [muscle, seen] of byMuscle) {
+      if (seen.dates.size < 2) continue;
+      const gap = daysAgo(seen.last, now);
+      if (gap < GAP_DAYS) continue;
+      findings.push({
+        kind: "frequency_gap",
+        muscle,
+        text: `${label(muscle)} haven't been trained in ${gap} days.`,
+        estimated: seen.estimated
+      });
+    }
+    return findings.sort((a, b) => a.text.localeCompare(b.text));
+  }
+  function trailingAverage(rows, muscle, now) {
+    const mine = rows.filter((r) => r.muscle === muscle);
+    if (!mine.length) return null;
+    const oldest = mine.reduce((max, r) => Math.max(max, daysAgo(r.date, now)), 0);
+    let total = 0;
+    let covered = 0;
+    for (let week = 1; week <= 4; week++) {
+      const from = week * 7;
+      if (from > oldest) break;
+      covered++;
+      total += mine.filter((r) => {
+        const age = daysAgo(r.date, now);
+        return age >= from && age <= from + 6;
+      }).reduce((n, r) => n + r.sets, 0);
+    }
+    if (covered < 2) return null;
+    return total / covered;
+  }
+  function weeklySets(history, index, now, opts = {}) {
+    const all = attribute(history, index);
+    const rows = all.filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0);
+    if (!rows.length) return [];
+    const totals = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      const t = totals.get(row.muscle) || { sets: 0, estimated: false };
+      t.sets += row.sets;
+      t.estimated = t.estimated || row.estimated;
+      totals.set(row.muscle, t);
+    }
+    const findings = [];
+    for (const [muscle, t] of totals) {
+      const sets = round(t.sets);
+      const band = weeklySetBand({
+        trainingAge: opts.trainingAge,
+        trailingSets: trailingAverage(all, muscle, now)
+      });
+      if (sets > band.ceiling) {
+        findings.push({
+          kind: "weekly_sets",
+          muscle,
+          text: `${label(muscle)} took ${sets} hard sets this week, above the ${band.ceiling}-set band.`,
+          estimated: t.estimated
+        });
+        continue;
+      }
+      if (band.floor == null || sets <= 0 || sets >= band.floor) continue;
+      if (band.floorSource === "trailing") {
+        findings.push({
+          kind: "weekly_sets",
+          muscle,
+          text: `${label(muscle)} got ${sets} hard sets this week, well under your recent average of ${round(band.floor / 0.6)}.`,
+          estimated: t.estimated
+        });
+        continue;
+      }
+      if (totals.size >= 3) {
+        findings.push({
+          kind: "weekly_sets",
+          muscle,
+          text: `${label(muscle)} got ${sets} hard sets this week, under the ${band.floor}-set band.`,
+          estimated: t.estimated
+        });
+      }
+    }
+    return findings.sort((a, b) => a.text.localeCompare(b.text));
+  }
+  function sumOf(rows, muscles) {
+    return rows.filter((r) => muscles.includes(r.muscle)).reduce((n, r) => n + r.sets, 0);
+  }
+  function ratios(history, index, now, days = 28) {
+    const rows = attribute(history, index).filter((r) => {
+      const age = daysAgo(r.date, now);
+      return age >= 0 && age <= days;
+    });
+    if (!rows.length) return [];
+    const estimated = rows.some((r) => r.estimated);
+    const findings = [];
+    const MIN_TOTAL = 20;
+    const MIN_STRONG = 6;
+    const check = (aName, bName, a, b) => {
+      const left = sumOf(rows, a);
+      const right = sumOf(rows, b);
+      if (left + right < MIN_TOTAL) return;
+      if (Math.max(left, right) < MIN_STRONG) return;
+      if (right < 1 || left < 1) {
+        const [busy, idle, busyName, idleName] = left > right ? [left, right, aName, bName] : [right, left, bName, aName];
+        findings.push({
+          kind: "ratio",
+          text: `${round(busy)} sets of ${busyName.toLowerCase()} work in ${days} days and almost none of ${idleName.toLowerCase()}.`,
+          estimated
+        });
+        return;
+      }
+      const ratio = left / right;
+      if (ratio >= RATIO_BAND[0] && ratio <= RATIO_BAND[1]) return;
+      findings.push({
+        kind: "ratio",
+        text: `${aName} to ${bName} is running ${round(ratio)}:1 over the last ${days} days (${round(left)} vs ${round(right)} sets).`,
+        estimated
+      });
+    };
+    check("Push", "pull", PUSH_MUSCLES, PULL_MUSCLES);
+    check("Quads", "hamstrings", ["quads"], ["hamstrings"]);
+    return findings;
+  }
+  function volumeRamp(history, index, now, otherTraining = []) {
+    return loadFindings({ history, index, otherTraining, now }).map((found) => ({
+      kind: "volume_ramp",
+      muscle: found.muscle,
+      text: found.text,
+      estimated: found.estimated
+    }));
+  }
+  function analyse(history, index, now, opts = {}) {
+    return [
+      ...frequencyGaps(history, index, now),
+      ...weeklySets(history, index, now, opts),
+      ...volumeRamp(history, index, now, opts.otherTraining || []),
+      ...ratios(history, index, now)
+    ];
+  }
+  function label(muscle) {
+    return muscle.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  // lib/train/other.ts
+  var OTHER_ACTIVITIES = [
+    "conditioning",
+    "sport",
+    "endurance",
+    "martial_arts",
+    "mobility",
+    "labour",
+    "other"
+  ];
+  var SYSTEMIC_WINDOW_DAYS = 3;
+  var MODERATE_OTHER_LOAD = 300;
+  var HARD_OTHER_LOAD = 600;
+  var MAX_MINUTES = 600;
+  function asActivity(raw) {
+    const key = String(raw || "").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    return OTHER_ACTIVITIES.includes(key) ? key : "other";
+  }
+  function clamp(raw, fallback, min, max) {
+    const n = typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
+    return Math.min(max, Math.max(min, Math.round(n)));
+  }
+  function normalizeOtherEntry(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const info = raw;
+    const date = typeof info.date === "string" ? info.date.trim() : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    const entry = {
+      date,
+      activity: asActivity(info.activity),
+      minutes: clamp(info.minutes, 30, 1, MAX_MINUTES),
+      intensity: clamp(info.intensity, 5, 1, 10)
+    };
+    const note = typeof info.note === "string" ? info.note.trim() : "";
+    if (note) entry.note = note.slice(0, 200);
+    return entry;
+  }
+  function otherLoadOf(entry) {
+    return entry.minutes * entry.intensity;
+  }
+  function daysBetween(a, b) {
+    const parse = (s) => {
+      const [y, m2, d] = s.split("-").map(Number);
+      return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+    };
+    return Math.round((parse(b) - parse(a)) / 864e5);
+  }
+  function recentOtherLoad(entries, today, days = SYSTEMIC_WINDOW_DAYS) {
+    const inWindow2 = (entries || []).filter((e) => {
+      if (!e || typeof e.date !== "string") return false;
+      const age = daysBetween(e.date, today);
+      return age >= 0 && age < days;
+    });
+    let load = 0;
+    let hardest = null;
+    for (const e of inWindow2) {
+      const each = otherLoadOf(e);
+      load += each;
+      if (!hardest || each > otherLoadOf(hardest)) hardest = e;
+    }
+    return { load, sessions: inWindow2.length, days, estimated: true, hardest };
+  }
+  function describeOther(hardest) {
+    if (!hardest) return "other training";
+    const name = hardest.activity.replace(/_/g, " ");
+    return `${hardest.minutes} minutes of ${name} at ${hardest.intensity}/10`;
+  }
+  function otherTrainingLines(summary) {
+    if (!summary || !summary.sessions) return [];
+    const lines = [
+      `Other training in the last ${summary.days} days: ${summary.sessions} session(s), hardest was ${describeOther(summary.hardest)}.`,
+      "That load is SELF-REPORTED and estimated \u2014 duration times how hard they said it felt. It is a reason to ease a session, never a reason to change a specific lift."
+    ];
+    return lines;
+  }
+  function trainingDates(finishedDates, entries) {
+    const all = new Set(finishedDates || []);
+    for (const e of entries || []) if (e && typeof e.date === "string") all.add(e.date);
+    return [...all].sort();
+  }
+
+  // lib/train/windows.ts
+  var DAY_MS2 = 864e5;
+  function dateKey(ms) {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function localMidnight2(dateStr) {
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+  function daysBetween2(from, to) {
+    return Math.round((localMidnight2(to) - localMidnight2(from)) / DAY_MS2);
+  }
+  function shiftDays(ms, back) {
+    const d = new Date(ms);
+    d.setDate(d.getDate() - back);
+    return d;
+  }
+  function rollingWindow(now, endingDaysAgo = 0, days = 7) {
+    const end = shiftDays(now, endingDaysAgo);
+    const start = shiftDays(end.getTime(), days - 1);
+    return { from: dateKey(start.getTime()), to: dateKey(end.getTime()), days };
+  }
+  function baselineWindow(now, weeks = 4, skipDays = 7) {
+    return rollingWindow(now, skipDays, weeks * 7);
+  }
+  function inWindow(date, window) {
+    return !!date && date >= window.from && date <= window.to;
+  }
+  function deltaOf(current, baseline) {
+    if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline === 0) {
+      return { current, baseline, ratio: null, change: null };
+    }
+    const ratio = current / baseline;
+    return {
+      current,
+      baseline,
+      ratio: Math.round(ratio * 1e3) / 1e3,
+      change: Math.round((ratio - 1) * 1e3) / 1e3
+    };
+  }
+  function asPercent(change) {
+    if (change == null) return "";
+    const pct2 = Math.round(Math.abs(change) * 100);
+    return `${change >= 0 ? "up" : "down"} ${pct2}%`;
+  }
+
+  // lib/train/load.ts
+  var ACUTE_DAYS = 7;
+  var CHRONIC_DAYS = 28;
+  var MIN_CHRONIC_DAYS = 28;
+  var MIN_CHRONIC_LOAD = 4;
+  var SANE_BAND = [0.8, 1.5];
+  var OTHER_LOAD_PER_SET = 120;
+  function weeklyRate(daily) {
+    const out = new Array(daily.length).fill(0);
+    let running = 0;
+    for (let i = 0; i < daily.length; i++) {
+      running += daily[i];
+      if (i >= 7) running -= daily[i - 7];
+      out[i] = running;
+    }
+    return out;
+  }
+  function ewma(daily, days) {
+    if (!daily.length) return 0;
+    const alpha = 2 / (days + 1);
+    let value = daily[0];
+    for (let i = 1; i < daily.length; i++) value = daily[i] * alpha + value * (1 - alpha);
+    return value;
+  }
+  function dailySeries(rows, now, span) {
+    const today = dateKey(now);
+    const series = new Array(span).fill(0);
+    for (const row of rows) {
+      const age = daysBetween2(row.date, today);
+      if (age < 0 || age >= span) continue;
+      series[span - 1 - age] += row.amount;
+    }
+    return series;
+  }
+  var round2 = (n, p = 2) => Math.round(n * 10 ** p) / 10 ** p;
+  function readingFrom(daily, observedDays, estimated) {
+    const rate = weeklyRate(daily);
+    const acute = ewma(rate, ACUTE_DAYS);
+    const chronic = ewma(rate, CHRONIC_DAYS);
+    const usable = observedDays >= MIN_CHRONIC_DAYS && chronic >= MIN_CHRONIC_LOAD;
+    return {
+      acute: round2(acute),
+      chronic: round2(chronic),
+      /* Zero chronic would divide to Infinity. Reported as 0 and marked
+         unusable, which is the honest shape: there is no ratio here. */
+      ratio: chronic > 0 ? round2(acute / chronic) : 0,
+      usable,
+      estimated
+    };
+  }
+  function spanOfHistory(ctx) {
+    const today = dateKey(ctx.now);
+    let oldest = 0;
+    for (const id of Object.keys(ctx.history || {})) {
+      for (const entry of ctx.history[id] || []) {
+        if (!entry || entry.off || !entry.date) continue;
+        const age = daysBetween2(entry.date, today);
+        if (age > oldest) oldest = age;
+      }
+    }
+    for (const other of ctx.otherTraining || []) {
+      if (!other || !other.date) continue;
+      const age = daysBetween2(other.date, today);
+      if (age > oldest) oldest = age;
+    }
+    return oldest;
+  }
+  function acuteChronic(ctx) {
+    const span = CHRONIC_DAYS * 2;
+    const observedDays = spanOfHistory(ctx);
+    const attributed = attribute(ctx.history || {}, ctx.index || {});
+    const byMuscle = {};
+    const muscles = new Set(attributed.map((r) => r.muscle));
+    for (const muscle of muscles) {
+      const rows = attributed.filter((r) => r.muscle === muscle).map((r) => ({ date: r.date, amount: r.sets }));
+      byMuscle[muscle] = readingFrom(dailySeries(rows, ctx.now, span), observedDays, false);
+    }
+    const otherRows = (ctx.otherTraining || []).filter((e) => e && e.date).map((e) => ({ date: e.date, amount: otherLoadOf(e) / OTHER_LOAD_PER_SET }));
+    const systemicRows = [
+      ...attributed.map((r) => ({ date: r.date, amount: r.sets })),
+      ...otherRows
+    ];
+    const systemic = readingFrom(
+      dailySeries(systemicRows, ctx.now, span),
+      observedDays,
+      otherRows.length > 0
+    );
+    return { byMuscle, systemic };
+  }
+  function loadFindings(ctx) {
+    const snapshot = acuteChronic(ctx || {});
+    const out = [];
+    for (const muscle of Object.keys(snapshot.byMuscle)) {
+      const reading = snapshot.byMuscle[muscle];
+      if (!reading.usable) continue;
+      if (reading.ratio >= SANE_BAND[0] && reading.ratio <= SANE_BAND[1]) continue;
+      const label2 = muscle.replace(/_/g, " ");
+      const direction = reading.ratio > SANE_BAND[1] ? "above" : "below";
+      out.push({
+        muscle,
+        ratio: reading.ratio,
+        acute: reading.acute,
+        chronic: reading.chronic,
+        estimated: reading.estimated,
+        /* A load observation, in its own terms. No injury, no advice, no
+           verdict — what the ratio means for one body is not something this
+           engine can know, and the literature behind it is about monitored
+           squads rather than one person with a phone. */
+        text: `${label2}: about ${reading.acute} hard sets a week lately against a usual ${reading.chronic} \u2014 ${direction} your normal range.`
+      });
+    }
+    return out.sort((a, b) => b.ratio - a.ratio || a.muscle.localeCompare(b.muscle));
+  }
+  function systemicLoadNote(ctx) {
+    const { systemic } = acuteChronic(ctx || {});
+    if (!systemic.usable) return null;
+    if (systemic.ratio >= SANE_BAND[0] && systemic.ratio <= SANE_BAND[1]) return null;
+    const direction = systemic.ratio > SANE_BAND[1] ? "above" : "below";
+    const caveat = systemic.estimated ? " That includes other training you logged, which is self-reported." : "";
+    return `Total load: about ${systemic.acute} set-equivalents a week lately against a usual ${systemic.chronic} \u2014 ${direction} your normal range.${caveat}`;
+  }
 
   // lib/train/catalog.ts
   var m = (muscle, share) => ({ muscle, share });
@@ -1001,190 +1863,6 @@ var TrainEngine = (() => {
     return CATALOG_BY_ID[id] || null;
   }
 
-  // lib/train/bodyweight.ts
-  function bodyweightAt(history, date) {
-    let best = null;
-    for (const entry of history || []) {
-      if (!entry || typeof entry.lb !== "number" || !Number.isFinite(entry.lb) || entry.lb <= 0) continue;
-      if (entry.date > date) continue;
-      if (!best || entry.date > best.date) best = entry;
-    }
-    return best ? best.lb : null;
-  }
-  function currentBodyweight(history) {
-    const sorted = (history || []).filter((e) => e && e.lb > 0).sort((a, b) => a.date.localeCompare(b.date));
-    return sorted.length ? sorted[sorted.length - 1].lb : null;
-  }
-  function recordBodyweight(history, date, lb) {
-    if (!Number.isFinite(lb) || lb <= 0) return history || [];
-    const rest = (history || []).filter((e) => e && e.date !== date);
-    return [...rest, { date, lb: Math.round(lb * 10) / 10 }].sort((a, b) => a.date.localeCompare(b.date));
-  }
-  function bodyweightLoad(opts) {
-    if (opts.bodyweightLb == null || !Number.isFinite(opts.bodyweightLb)) return null;
-    const factor = typeof opts.factor === "number" && opts.factor > 0 ? opts.factor : 1;
-    const base = opts.bodyweightLb * factor;
-    const load = base + (opts.added || 0) - (opts.assistance || 0);
-    return Math.max(0, Math.round(load * 10) / 10);
-  }
-
-  // lib/train/sets.ts
-  var DEFAULT_SET_KIND = "reps_weight";
-  function emptyVolume() {
-    return { load: 0, loadUnavailable: false, reps: 0, seconds: 0, metres: 0 };
-  }
-  function setKind(set) {
-    return set.kind || DEFAULT_SET_KIND;
-  }
-  function entryKind(entry) {
-    const first = workingSets(entry)[0];
-    return first ? setKind(first) : DEFAULT_SET_KIND;
-  }
-  function isPerSide(set, opts) {
-    return set.perSide !== void 0 ? set.perSide === true : opts.perSide === true;
-  }
-  function sidesOf(set) {
-    const sides = set && set.sides;
-    if (!sides || !sides.left || !sides.right) return null;
-    const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-    return {
-      left: { w: num2(sides.left.w), r: num2(sides.left.r) },
-      right: { w: num2(sides.right.w), r: num2(sides.right.r) }
-    };
-  }
-  function isWorkingSet(set) {
-    return !!set && set.fail !== true && set.warmup !== true;
-  }
-  function workingSets(entry) {
-    return (entry.sets || []).filter(isWorkingSet);
-  }
-  function isAmrapSet(set) {
-    return !!set && set.amrap === true && isWorkingSet(set);
-  }
-  function amrapOf(entry) {
-    const flagged = (entry.sets || []).filter(isAmrapSet);
-    return flagged.length ? flagged[flagged.length - 1] : null;
-  }
-  function rangeSets(entry) {
-    return workingSets(entry).filter((set) => !isAmrapSet(set));
-  }
-  function setWeight(entry, set) {
-    const limbs = sidesOf(set);
-    if (limbs) return Math.min(limbs.left.w, limbs.right.w);
-    return typeof set.w === "number" ? set.w : entry.kg || 0;
-  }
-  function workingVolume(entry, opts = {}) {
-    const totals = emptyVolume();
-    for (const set of workingSets(entry)) {
-      const limbs = sidesOf(set);
-      if (limbs) {
-        totals.load += limbs.left.w * limbs.left.r + limbs.right.w * limbs.right.r;
-        continue;
-      }
-      const sides = isPerSide(set, opts) ? 2 : 1;
-      const reps = (set.r || 0) * sides;
-      const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
-      const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
-      switch (setKind(set)) {
-        case "reps_weight":
-          if (set.assisted) {
-            const load = bodyweightLoad({ bodyweightLb: bw, factor, assistance: setWeight(entry, set) });
-            if (load == null) totals.loadUnavailable = true;
-            else totals.load += load * reps;
-            totals.reps += reps;
-          } else {
-            totals.load += setWeight(entry, set) * reps;
-          }
-          break;
-        case "bodyweight":
-        case "weighted_bodyweight": {
-          const added = setKind(set) === "weighted_bodyweight" ? setWeight(entry, set) : 0;
-          const help = set.assisted ? setWeight(entry, set) : 0;
-          const load = bodyweightLoad({ bodyweightLb: bw, factor, added, assistance: help });
-          if (load == null) totals.loadUnavailable = true;
-          else totals.load += load * reps;
-          totals.reps += reps;
-          break;
-        }
-        case "reps_only":
-          totals.reps += reps;
-          break;
-        case "time":
-          totals.seconds += (set.s || 0) * sides;
-          break;
-        case "distance":
-          totals.metres += (set.m || 0) * sides;
-          break;
-        case "time_distance":
-          totals.seconds += (set.s || 0) * sides;
-          totals.metres += (set.m || 0) * sides;
-          break;
-      }
-    }
-    return totals;
-  }
-  function topWorkingSeconds(entry) {
-    const values = workingSets(entry).filter((set) => setKind(set) === "time" || setKind(set) === "time_distance").map((set) => set.s || 0);
-    return values.length ? Math.max(...values) : 0;
-  }
-  function topWorkingMetres(entry) {
-    const values = workingSets(entry).filter((set) => setKind(set) === "distance" || setKind(set) === "time_distance").map((set) => set.m || 0);
-    return values.length ? Math.max(...values) : 0;
-  }
-  function entryScore(entry, opts = {}) {
-    const kind = entryKind(entry);
-    const sets = workingSets(entry);
-    const best = (pick) => sets.length ? Math.max(...sets.map(pick)) : 0;
-    switch (kind) {
-      case "reps_only":
-        return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
-      case "time":
-        return { kind, primary: best((s) => s.s || 0), secondary: 0 };
-      case "distance":
-        return { kind, primary: best((s) => s.m || 0), secondary: 0 };
-      case "time_distance": {
-        const metres = best((s) => s.m || 0);
-        const seconds = sets.length ? Math.min(...sets.map((s) => s.s || Infinity)) : 0;
-        return { kind, primary: metres, secondary: Number.isFinite(seconds) ? -seconds : 0 };
-      }
-      case "bodyweight":
-      case "weighted_bodyweight": {
-        const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
-        const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
-        if (bw == null) return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
-        const load = (s) => bodyweightLoad({
-          bodyweightLb: bw,
-          factor,
-          added: kind === "weighted_bodyweight" ? setWeight(entry, s) : 0,
-          assistance: s.assisted ? setWeight(entry, s) : 0
-        }) || 0;
-        return { kind, primary: best(load), secondary: best((s) => s.r || 0) };
-      }
-      default: {
-        const assisted = sets.some((s) => s.assisted);
-        if (assisted) {
-          const least = sets.length ? Math.min(...sets.map((s) => setWeight(entry, s))) : 0;
-          return { kind, primary: -least, secondary: best((s) => s.r || 0) };
-        }
-        const weight = sets.length ? best((s) => setWeight(entry, s)) : entry.kg || 0;
-        return { kind, primary: weight, secondary: best((s) => s.r || 0) };
-      }
-    }
-  }
-  function topWorkingWeight(entry) {
-    const weights = workingSets(entry).map((set) => setWeight(entry, set));
-    return weights.length ? Math.max(...weights) : 0;
-  }
-  function topWorkingReps(entry) {
-    const reps = workingSets(entry).map((set) => set.r || 0);
-    return reps.length ? Math.max(...reps) : 0;
-  }
-  function workingRpe(entry) {
-    const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
-    if (!values.length) return null;
-    return values.reduce((a, b) => a + b, 0) / values.length;
-  }
-
   // lib/train/fitting.ts
   var PARAMETER_GATES = {
     increment: 8
@@ -1242,66 +1920,6 @@ var TrainEngine = (() => {
   function describeParameters(parameters) {
     if (!parameters || !parameters.fitted) return [];
     return Object.values(parameters.increments).filter((v) => !!v).map((v) => v.text).sort();
-  }
-
-  // lib/train/targets.ts
-  var PROFILES = {
-    beginner: {
-      ceiling: 14,
-      floor: 5,
-      deloadMeasured: 0.95,
-      deloadInferred: 0.97,
-      repRanges: [[5, 8], [8, 12], [12, 15]]
-    },
-    intermediate: {
-      ceiling: 20,
-      floor: 10,
-      deloadMeasured: 0.9,
-      deloadInferred: 0.95,
-      repRanges: [[4, 6], [6, 10], [10, 15]]
-    },
-    advanced: {
-      ceiling: 25,
-      floor: 12,
-      deloadMeasured: 0.85,
-      deloadInferred: 0.92,
-      repRanges: [[3, 5], [5, 8], [8, 12]]
-    }
-  };
-  var UNKNOWN = PROFILES.intermediate;
-  function profileFor(age) {
-    return age && PROFILES[age] ? PROFILES[age] : UNKNOWN;
-  }
-  var MIN_TRAILING = 4;
-  var DROP_FRACTION = 0.6;
-  function weeklySetBand(ctx = {}) {
-    const profile = profileFor(ctx.trainingAge);
-    const trailing = ctx.trailingSets;
-    if (typeof trailing === "number" && Number.isFinite(trailing) && trailing >= MIN_TRAILING) {
-      return {
-        floor: Math.round(trailing * DROP_FRACTION * 10) / 10,
-        ceiling: profile.ceiling,
-        floorSource: "trailing"
-      };
-    }
-    if (ctx.trainingAge) {
-      return { floor: profile.floor, ceiling: profile.ceiling, floorSource: "age" };
-    }
-    return { floor: null, ceiling: profile.ceiling, floorSource: "none" };
-  }
-  function deloadCut(age, confidence) {
-    const profile = profileFor(age);
-    return confidence === "measured" ? profile.deloadMeasured : profile.deloadInferred;
-  }
-  function repRangeFor(age, tier) {
-    const ranges = profileFor(age).repRanges;
-    if (tier <= 1) return ranges[0];
-    if (tier >= 3) return ranges[2];
-    return ranges[1];
-  }
-  function streakTarget(statedFrequency, fallback = 4) {
-    if (typeof statedFrequency !== "number" || !Number.isFinite(statedFrequency)) return fallback;
-    return Math.min(14, Math.max(1, Math.round(statedFrequency)));
   }
 
   // lib/train/amrap.ts
@@ -1554,16 +2172,16 @@ var TrainEngine = (() => {
   var REAPPROACH = 0.95;
   function deloadPlan(record, trainingAge) {
     if (!record) return { weight: null, setsFactor: 1 };
-    const round7 = (n) => Math.round(n * 100) / 100;
+    const round8 = (n) => Math.round(n * 100) / 100;
     if (record.state === "reapproach") {
-      return { weight: round7(record.priorWeight * REAPPROACH), setsFactor: 1 };
+      return { weight: round8(record.priorWeight * REAPPROACH), setsFactor: 1 };
     }
     if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
     if (record.kind === "volume") {
-      return { weight: round7(record.priorWeight), setsFactor: VOLUME_CUT };
+      return { weight: round8(record.priorWeight), setsFactor: VOLUME_CUT };
     }
     return {
-      weight: round7(record.priorWeight * deloadCut(trainingAge, record.confidence)),
+      weight: round8(record.priorWeight * deloadCut(trainingAge, record.confidence)),
       setsFactor: 1
     };
   }
@@ -1735,12 +2353,12 @@ var TrainEngine = (() => {
     const step = stepFor(reference, exercise);
     return tidy2(Math.round(weight / step) * step);
   }
-  function localMidnight(dateStr) {
+  function localMidnight3(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function daysSince(dateStr, now) {
-    const then = localMidnight(dateStr);
+    const then = localMidnight3(dateStr);
     const nowDate = new Date(now);
     const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
     return Math.round((today - then) / 864e5);
@@ -1770,7 +2388,7 @@ var TrainEngine = (() => {
       return { days: trailing, priorWeight: topWorkingWeight(last), sessionsSince: 0 };
     }
     for (let i = sessions.length - 1; i > 0; i--) {
-      const gap = daysSince(sessions[i - 1].date, localMidnight(sessions[i].date));
+      const gap = daysSince(sessions[i - 1].date, localMidnight3(sessions[i].date));
       if (gap >= LAYOFF_DAYS) {
         return { days: gap, priorWeight: topWorkingWeight(sessions[i - 1]), sessionsSince: sessions.length - i };
       }
@@ -2092,19 +2710,19 @@ var TrainEngine = (() => {
     }
     return best;
   }
-  function dateKey(ms) {
+  function dateKey2(ms) {
     const d = new Date(ms);
     const pad = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
-  function shiftDays(ms, delta) {
+  function shiftDays2(ms, delta) {
     const d = new Date(ms);
     d.setDate(d.getDate() + delta);
-    return dateKey(d.getTime());
+    return dateKey2(d.getTime());
   }
   function classifyPR(history, candidate, now) {
     if (!isWorkingSet(candidate)) return NO_PR;
-    const today = dateKey(now);
+    const today = dateKey2(now);
     const base = { excludeDate: today };
     const kind = candidate.kind || DEFAULT_SET_KIND;
     if (kind === "time") {
@@ -2135,7 +2753,7 @@ var TrainEngine = (() => {
     }
     const weight = candidate.weight || 0;
     const reps = candidate.reps || 0;
-    const rolling = { excludeDate: today, sinceDate: shiftDays(now, -ROLLING_PR_DAYS) };
+    const rolling = { excludeDate: today, sinceDate: shiftDays2(now, -ROLLING_PR_DAYS) };
     const value = epley1RM(weight, reps);
     const allTime = bestE1RM(history, base);
     if (value != null && allTime) {
@@ -2160,7 +2778,7 @@ var TrainEngine = (() => {
   function nearMissCue(history, prefill, incrementLb, now) {
     const value = epley1RM(prefill.weight, prefill.reps);
     if (value == null) return null;
-    const best = bestE1RM(history, { excludeDate: dateKey(now) });
+    const best = bestE1RM(history, { excludeDate: dateKey2(now) });
     if (!best) return null;
     const deficit = best.value - value;
     if (deficit <= 0) return null;
@@ -2169,56 +2787,8 @@ var TrainEngine = (() => {
     return `${Math.round(deficit * 10) / 10} lb under your best`;
   }
 
-  // lib/train/windows.ts
-  var DAY_MS = 864e5;
-  function dateKey2(ms) {
-    const d = new Date(ms);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  }
-  function localMidnight2(dateStr) {
-    const [y, m2, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-  }
-  function daysBetween(from, to) {
-    return Math.round((localMidnight2(to) - localMidnight2(from)) / DAY_MS);
-  }
-  function shiftDays2(ms, back) {
-    const d = new Date(ms);
-    d.setDate(d.getDate() - back);
-    return d;
-  }
-  function rollingWindow(now, endingDaysAgo = 0, days = 7) {
-    const end = shiftDays2(now, endingDaysAgo);
-    const start = shiftDays2(end.getTime(), days - 1);
-    return { from: dateKey2(start.getTime()), to: dateKey2(end.getTime()), days };
-  }
-  function baselineWindow(now, weeks = 4, skipDays = 7) {
-    return rollingWindow(now, skipDays, weeks * 7);
-  }
-  function inWindow(date, window) {
-    return !!date && date >= window.from && date <= window.to;
-  }
-  function deltaOf(current, baseline) {
-    if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline === 0) {
-      return { current, baseline, ratio: null, change: null };
-    }
-    const ratio = current / baseline;
-    return {
-      current,
-      baseline,
-      ratio: Math.round(ratio * 1e3) / 1e3,
-      change: Math.round((ratio - 1) * 1e3) / 1e3
-    };
-  }
-  function asPercent(change) {
-    if (change == null) return "";
-    const pct2 = Math.round(Math.abs(change) * 100);
-    return `${change >= 0 ? "up" : "down"} ${pct2}%`;
-  }
-
   // lib/train/simulate.ts
-  var DAY_MS2 = 864e5;
+  var DAY_MS3 = 864e5;
   var DELOAD_FACTOR = 0.9;
   function simulate(history, scenario, now) {
     const working = (history || []).map((e) => ({
@@ -2235,9 +2805,9 @@ var TrainEngine = (() => {
     for (let week = 0; week < weeks; week++) {
       const deloadWeek = !!scenario.deloadEvery && (week + 1) % scenario.deloadEvery === 0;
       for (let i = 0; i < perWeek2; i++) {
-        const date = dateKey2(now + dayOffset * DAY_MS2);
+        const date = dateKey(now + dayOffset * DAY_MS3);
         dayOffset += spacing;
-        const suggestion = suggestTarget(working, { ...scenario.exercise, sets: setCount }, now + dayOffset * DAY_MS2);
+        const suggestion = suggestTarget(working, { ...scenario.exercise, sets: setCount }, now + dayOffset * DAY_MS3);
         const weight = deloadWeek ? Math.round((suggestion.weight ?? scenario.exercise.kg ?? 0) * DELOAD_FACTOR) : suggestion.weight ?? scenario.exercise.kg ?? 0;
         const reps = suggestion.reps ?? scenario.exercise.reps;
         sessions.push({ date, weight, reps, sets: setCount, projected: true });
@@ -2482,7 +3052,7 @@ var TrainEngine = (() => {
   function weeksInRotation(entries, now) {
     const sessions = realSessions2(entries);
     if (!sessions.length) return 0;
-    return Math.floor(daysBetween(sessions[0].date, dateKey2(now)) / 7);
+    return Math.floor(daysBetween2(sessions[0].date, dateKey(now)) / 7);
   }
   function weeksSinceAnythingNew(history, now) {
     let newest = 0;
@@ -2592,7 +3162,7 @@ var TrainEngine = (() => {
     return { seconds: Math.max(10, Math.round(median3 - typicalRest)), basis: "observed" };
   }
   var minutesFor = (sets, rest, perSet) => sets * (perSet + (rest || 0)) / 60;
-  var round = (n) => Math.round(n * 10) / 10;
+  var round3 = (n) => Math.round(n * 10) / 10;
   var loggedSets = (e) => (e.log || []).filter(Boolean).length;
   function midDeload(ctx, id) {
     const record = (ctx.deloadStates || {})[id];
@@ -2628,7 +3198,7 @@ var TrainEngine = (() => {
     const exercises = (ctx.exercises || []).slice();
     const { seconds: perSet, basis } = perSetSeconds(ctx);
     const budget = typeof ctx.minutes === "number" && Number.isFinite(ctx.minutes) && ctx.minutes > 0 ? ctx.minutes : 0;
-    const before = round(
+    const before = round3(
       exercises.reduce((total2, e) => total2 + minutesFor(e.sets, e.rest, perSet), 0)
     );
     const base = {
@@ -2649,7 +3219,7 @@ var TrainEngine = (() => {
       for (const { e, why } of scored) {
         base.keep.push({ id: e.id, name: e.name, sets: e.sets, reason: why || "fits the time" });
       }
-      base.estimatedMinutes = round(total());
+      base.estimatedMinutes = round3(total());
       return base;
     }
     const dropped = /* @__PURE__ */ new Set();
@@ -2710,7 +3280,7 @@ var TrainEngine = (() => {
         base.keep.push({ id: e.id, name: e.name, sets, reason: why || "kept in full" });
       }
     }
-    base.estimatedMinutes = round(total());
+    base.estimatedMinutes = round3(total());
     base.warnings = warnings;
     return base;
   }
@@ -2719,471 +3289,6 @@ var TrainEngine = (() => {
     if (state) return `dropped for time, but it is mid-${state}`;
     if (why) return `dropped for time, despite being ${why}`;
     return (e.tier || 2) >= 3 ? "accessory, dropped for time" : "dropped for time";
-  }
-
-  // lib/train/muscles.ts
-  var MUSCLES = [
-    "chest",
-    "front_delts",
-    "side_delts",
-    "rear_delts",
-    "triceps",
-    "biceps",
-    "forearms",
-    "lats",
-    "traps",
-    "upper_back",
-    "lower_back",
-    "abs",
-    "obliques",
-    "glutes",
-    "quads",
-    "hamstrings",
-    "adductors",
-    "abductors",
-    "calves",
-    "neck",
-    "full_body",
-    "cardio"
-  ];
-  var SECONDARY_SHARE = 0.5;
-  var SYNONYMS = {
-    chest: "chest",
-    pecs: "chest",
-    pectorals: "chest",
-    pectoral: "chest",
-    front_delts: "front_delts",
-    front_delt: "front_delts",
-    anterior_deltoid: "front_delts",
-    side_delts: "side_delts",
-    lateral_deltoid: "side_delts",
-    medial_delts: "side_delts",
-    rear_delts: "rear_delts",
-    posterior_deltoid: "rear_delts",
-    rear_delt: "rear_delts",
-    triceps: "triceps",
-    tricep: "triceps",
-    tris: "triceps",
-    biceps: "biceps",
-    bicep: "biceps",
-    bis: "biceps",
-    forearms: "forearms",
-    forearm: "forearms",
-    grip: "forearms",
-    lats: "lats",
-    lat: "lats",
-    latissimus: "lats",
-    traps: "traps",
-    trapezius: "traps",
-    upper_back: "upper_back",
-    rhomboids: "upper_back",
-    mid_back: "upper_back",
-    lower_back: "lower_back",
-    erectors: "lower_back",
-    spinal_erectors: "lower_back",
-    abs: "abs",
-    core: "abs",
-    abdominals: "abs",
-    rectus_abdominis: "abs",
-    obliques: "obliques",
-    oblique: "obliques",
-    glutes: "glutes",
-    glute: "glutes",
-    butt: "glutes",
-    quads: "quads",
-    quadriceps: "quads",
-    quad: "quads",
-    hamstrings: "hamstrings",
-    hamstring: "hamstrings",
-    hams: "hamstrings",
-    adductors: "adductors",
-    inner_thigh: "adductors",
-    abductors: "abductors",
-    outer_thigh: "abductors",
-    calves: "calves",
-    calf: "calves",
-    soleus: "calves",
-    gastrocnemius: "calves",
-    neck: "neck",
-    full_body: "full_body",
-    total_body: "full_body",
-    cardio: "cardio",
-    conditioning: "cardio",
-    aerobic: "cardio"
-  };
-  var AMBIGUOUS = {
-    shoulders: "front_delts",
-    shoulder: "front_delts",
-    delts: "front_delts",
-    deltoids: "front_delts",
-    back: "upper_back",
-    upper_body: "full_body",
-    lower_body: "quads",
-    legs: "quads",
-    arms: "biceps",
-    hips: "glutes",
-    posterior_chain: "hamstrings"
-  };
-  function normalizeName(raw) {
-    return String(raw || "").toLowerCase().trim().replace(/[\s-]+/g, "_").replace(/[^a-z_]/g, "");
-  }
-  function mapMuscle(raw) {
-    const key = normalizeName(raw);
-    if (!key) return { muscle: null, exact: false };
-    if (SYNONYMS[key] && MUSCLES.includes(SYNONYMS[key])) return { muscle: SYNONYMS[key], exact: true };
-    if (AMBIGUOUS[key]) return { muscle: AMBIGUOUS[key], exact: false };
-    const singular = key.replace(/s$/, "");
-    if (SYNONYMS[singular] && MUSCLES.includes(SYNONYMS[singular])) {
-      return { muscle: SYNONYMS[singular], exact: true };
-    }
-    return { muscle: null, exact: false };
-  }
-  function normalizeShares(list) {
-    if (!list.length) return [];
-    const total = list.reduce((sum, c) => sum + (Number.isFinite(c.share) ? c.share : 0), 0);
-    if (total <= 0) {
-      const even = 1 / list.length;
-      return list.map((c) => ({ muscle: c.muscle, share: even }));
-    }
-    return list.map((c) => ({ muscle: c.muscle, share: c.share / total }));
-  }
-  function collect(raw) {
-    const entries = Array.isArray(raw) ? raw : [];
-    const seen = /* @__PURE__ */ new Map();
-    const unmapped = [];
-    let exact = true;
-    let authored = entries.length > 0;
-    for (const entry of entries) {
-      const isObject = !!entry && typeof entry === "object";
-      const name = isObject ? entry.muscle : entry;
-      const weight = isObject ? entry.share : void 0;
-      if (!isObject || typeof weight !== "number") authored = false;
-      const { muscle, exact: hit } = mapMuscle(name);
-      if (!muscle) {
-        const label2 = String(name || "").trim();
-        if (label2 && label2 !== "[object Object]") unmapped.push(label2);
-        else if (isObject) unmapped.push(JSON.stringify(entry));
-        continue;
-      }
-      if (!hit) exact = false;
-      seen.set(muscle, (seen.get(muscle) || 0) + (typeof weight === "number" ? weight : 1));
-    }
-    const list = [...seen.entries()].map(([muscle, share]) => ({ muscle, share }));
-    return { list: normalizeShares(list), unmapped, exact, authored };
-  }
-  function muscleSplitFrom(info) {
-    const def = info && typeof info === "object" ? info : {};
-    const primary = collect(def.primary);
-    const secondary = collect(def.secondary);
-    const authored = primary.authored && (!secondary.list.length || secondary.authored);
-    return {
-      primary: primary.list,
-      secondary: secondary.list,
-      estimated: !authored || !primary.exact || !secondary.exact,
-      unmapped: [...primary.unmapped, ...secondary.unmapped]
-    };
-  }
-  function distribute(sets, split) {
-    const out = {};
-    const add = (muscle, amount) => {
-      out[muscle] = (out[muscle] || 0) + amount;
-    };
-    split.primary.forEach((c) => add(c.muscle, sets * c.share));
-    split.secondary.forEach((c) => add(c.muscle, sets * c.share * SECONDARY_SHARE));
-    return out;
-  }
-  var PUSH_MUSCLES = ["chest", "front_delts", "side_delts", "triceps"];
-  var PULL_MUSCLES = ["lats", "upper_back", "rear_delts", "biceps", "traps"];
-
-  // lib/train/analysis.ts
-  var GAP_DAYS = 14;
-  var WEEKLY_SET_BAND = [10, 20];
-  var RATIO_BAND = [0.6, 1.7];
-  var RAMP_LIMIT = 1.5;
-  var DAY_MS3 = 864e5;
-  function indexFrom(customLib) {
-    const out = {};
-    for (const id of Object.keys(customLib || {})) out[id] = muscleSplitFrom(customLib[id]);
-    return out;
-  }
-  function localMidnight3(dateStr) {
-    const [y, m2, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-  }
-  function startOfDay(ms) {
-    const d = new Date(ms);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  }
-  function daysAgo(dateStr, now) {
-    return Math.round((startOfDay(now) - localMidnight3(dateStr)) / DAY_MS3);
-  }
-  function attribute(history, index) {
-    const rows = [];
-    for (const id of Object.keys(history || {})) {
-      const split = index[id];
-      if (!split || !split.primary.length && !split.secondary.length) continue;
-      for (const entry of history[id] || []) {
-        if (entry.off) continue;
-        const sets = workingSets(entry).length;
-        if (!sets) continue;
-        const spread = distribute(sets, split);
-        for (const muscle of Object.keys(spread)) {
-          rows.push({ muscle, sets: spread[muscle] || 0, date: entry.date, estimated: split.estimated });
-        }
-      }
-    }
-    return rows;
-  }
-  var round2 = (n) => Math.round(n * 10) / 10;
-  function frequencyGaps(history, index, now) {
-    const rows = attribute(history, index);
-    const byMuscle = /* @__PURE__ */ new Map();
-    for (const row of rows) {
-      const seen = byMuscle.get(row.muscle) || { dates: /* @__PURE__ */ new Set(), last: row.date, estimated: false };
-      seen.dates.add(row.date);
-      if (row.date > seen.last) seen.last = row.date;
-      seen.estimated = seen.estimated || row.estimated;
-      byMuscle.set(row.muscle, seen);
-    }
-    const findings = [];
-    for (const [muscle, seen] of byMuscle) {
-      if (seen.dates.size < 2) continue;
-      const gap = daysAgo(seen.last, now);
-      if (gap < GAP_DAYS) continue;
-      findings.push({
-        kind: "frequency_gap",
-        muscle,
-        text: `${label(muscle)} haven't been trained in ${gap} days.`,
-        estimated: seen.estimated
-      });
-    }
-    return findings.sort((a, b) => a.text.localeCompare(b.text));
-  }
-  function trailingAverage(rows, muscle, now) {
-    const mine = rows.filter((r) => r.muscle === muscle);
-    if (!mine.length) return null;
-    const oldest = mine.reduce((max, r) => Math.max(max, daysAgo(r.date, now)), 0);
-    let total = 0;
-    let covered = 0;
-    for (let week = 1; week <= 4; week++) {
-      const from = week * 7;
-      if (from > oldest) break;
-      covered++;
-      total += mine.filter((r) => {
-        const age = daysAgo(r.date, now);
-        return age >= from && age <= from + 6;
-      }).reduce((n, r) => n + r.sets, 0);
-    }
-    if (covered < 2) return null;
-    return total / covered;
-  }
-  function weeklySets(history, index, now, opts = {}) {
-    const all = attribute(history, index);
-    const rows = all.filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0);
-    if (!rows.length) return [];
-    const totals = /* @__PURE__ */ new Map();
-    for (const row of rows) {
-      const t = totals.get(row.muscle) || { sets: 0, estimated: false };
-      t.sets += row.sets;
-      t.estimated = t.estimated || row.estimated;
-      totals.set(row.muscle, t);
-    }
-    const findings = [];
-    for (const [muscle, t] of totals) {
-      const sets = round2(t.sets);
-      const band = weeklySetBand({
-        trainingAge: opts.trainingAge,
-        trailingSets: trailingAverage(all, muscle, now)
-      });
-      if (sets > band.ceiling) {
-        findings.push({
-          kind: "weekly_sets",
-          muscle,
-          text: `${label(muscle)} took ${sets} hard sets this week, above the ${band.ceiling}-set band.`,
-          estimated: t.estimated
-        });
-        continue;
-      }
-      if (band.floor == null || sets <= 0 || sets >= band.floor) continue;
-      if (band.floorSource === "trailing") {
-        findings.push({
-          kind: "weekly_sets",
-          muscle,
-          text: `${label(muscle)} got ${sets} hard sets this week, well under your recent average of ${round2(band.floor / 0.6)}.`,
-          estimated: t.estimated
-        });
-        continue;
-      }
-      if (totals.size >= 3) {
-        findings.push({
-          kind: "weekly_sets",
-          muscle,
-          text: `${label(muscle)} got ${sets} hard sets this week, under the ${band.floor}-set band.`,
-          estimated: t.estimated
-        });
-      }
-    }
-    return findings.sort((a, b) => a.text.localeCompare(b.text));
-  }
-  function sumOf(rows, muscles) {
-    return rows.filter((r) => muscles.includes(r.muscle)).reduce((n, r) => n + r.sets, 0);
-  }
-  function ratios(history, index, now, days = 28) {
-    const rows = attribute(history, index).filter((r) => {
-      const age = daysAgo(r.date, now);
-      return age >= 0 && age <= days;
-    });
-    if (!rows.length) return [];
-    const estimated = rows.some((r) => r.estimated);
-    const findings = [];
-    const MIN_TOTAL = 20;
-    const MIN_STRONG = 6;
-    const check = (aName, bName, a, b) => {
-      const left = sumOf(rows, a);
-      const right = sumOf(rows, b);
-      if (left + right < MIN_TOTAL) return;
-      if (Math.max(left, right) < MIN_STRONG) return;
-      if (right < 1 || left < 1) {
-        const [busy, idle, busyName, idleName] = left > right ? [left, right, aName, bName] : [right, left, bName, aName];
-        findings.push({
-          kind: "ratio",
-          text: `${round2(busy)} sets of ${busyName.toLowerCase()} work in ${days} days and almost none of ${idleName.toLowerCase()}.`,
-          estimated
-        });
-        return;
-      }
-      const ratio = left / right;
-      if (ratio >= RATIO_BAND[0] && ratio <= RATIO_BAND[1]) return;
-      findings.push({
-        kind: "ratio",
-        text: `${aName} to ${bName} is running ${round2(ratio)}:1 over the last ${days} days (${round2(left)} vs ${round2(right)} sets).`,
-        estimated
-      });
-    };
-    check("Push", "pull", PUSH_MUSCLES, PULL_MUSCLES);
-    check("Quads", "hamstrings", ["quads"], ["hamstrings"]);
-    return findings;
-  }
-  function volumeRamp(history, index, now) {
-    const rows = attribute(history, index);
-    const week = rollingWindow(now);
-    const before = rollingWindow(now, 7);
-    const thisWeek = /* @__PURE__ */ new Map();
-    const lastWeek = /* @__PURE__ */ new Map();
-    let estimated = false;
-    for (const row of rows) {
-      const bucket = inWindow(row.date, week) ? thisWeek : inWindow(row.date, before) ? lastWeek : null;
-      if (!bucket) continue;
-      bucket.set(row.muscle, (bucket.get(row.muscle) || 0) + row.sets);
-      estimated = estimated || row.estimated;
-    }
-    const MIN_BASE = 6;
-    const findings = [];
-    for (const [muscle, current] of thisWeek) {
-      const previous = lastWeek.get(muscle) || 0;
-      if (previous < MIN_BASE) continue;
-      const jump = deltaOf(current, previous).ratio;
-      if (jump == null || jump < RAMP_LIMIT) continue;
-      findings.push({
-        kind: "volume_ramp",
-        muscle,
-        text: `${label(muscle)} jumped from ${round2(previous)} to ${round2(current)} hard sets week over week.`,
-        estimated
-      });
-    }
-    return findings.sort((a, b) => a.text.localeCompare(b.text));
-  }
-  function analyse(history, index, now, opts = {}) {
-    return [
-      ...frequencyGaps(history, index, now),
-      ...weeklySets(history, index, now, opts),
-      ...ratios(history, index, now),
-      ...volumeRamp(history, index, now)
-    ];
-  }
-  function label(muscle) {
-    return muscle.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-
-  // lib/train/other.ts
-  var OTHER_ACTIVITIES = [
-    "conditioning",
-    "sport",
-    "endurance",
-    "martial_arts",
-    "mobility",
-    "labour",
-    "other"
-  ];
-  var SYSTEMIC_WINDOW_DAYS = 3;
-  var MODERATE_OTHER_LOAD = 300;
-  var HARD_OTHER_LOAD = 600;
-  var MAX_MINUTES = 600;
-  function asActivity(raw) {
-    const key = String(raw || "").toLowerCase().trim().replace(/[\s-]+/g, "_");
-    return OTHER_ACTIVITIES.includes(key) ? key : "other";
-  }
-  function clamp(raw, fallback, min, max) {
-    const n = typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
-    return Math.min(max, Math.max(min, Math.round(n)));
-  }
-  function normalizeOtherEntry(raw) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-    const info = raw;
-    const date = typeof info.date === "string" ? info.date.trim() : "";
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-    const entry = {
-      date,
-      activity: asActivity(info.activity),
-      minutes: clamp(info.minutes, 30, 1, MAX_MINUTES),
-      intensity: clamp(info.intensity, 5, 1, 10)
-    };
-    const note = typeof info.note === "string" ? info.note.trim() : "";
-    if (note) entry.note = note.slice(0, 200);
-    return entry;
-  }
-  function otherLoadOf(entry) {
-    return entry.minutes * entry.intensity;
-  }
-  function daysBetween2(a, b) {
-    const parse = (s) => {
-      const [y, m2, d] = s.split("-").map(Number);
-      return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-    };
-    return Math.round((parse(b) - parse(a)) / 864e5);
-  }
-  function recentOtherLoad(entries, today, days = SYSTEMIC_WINDOW_DAYS) {
-    const inWindow2 = (entries || []).filter((e) => {
-      if (!e || typeof e.date !== "string") return false;
-      const age = daysBetween2(e.date, today);
-      return age >= 0 && age < days;
-    });
-    let load = 0;
-    let hardest = null;
-    for (const e of inWindow2) {
-      const each = otherLoadOf(e);
-      load += each;
-      if (!hardest || each > otherLoadOf(hardest)) hardest = e;
-    }
-    return { load, sessions: inWindow2.length, days, estimated: true, hardest };
-  }
-  function describeOther(hardest) {
-    if (!hardest) return "other training";
-    const name = hardest.activity.replace(/_/g, " ");
-    return `${hardest.minutes} minutes of ${name} at ${hardest.intensity}/10`;
-  }
-  function otherTrainingLines(summary) {
-    if (!summary || !summary.sessions) return [];
-    const lines = [
-      `Other training in the last ${summary.days} days: ${summary.sessions} session(s), hardest was ${describeOther(summary.hardest)}.`,
-      "That load is SELF-REPORTED and estimated \u2014 duration times how hard they said it felt. It is a reason to ease a session, never a reason to change a specific lift."
-    ];
-    return lines;
-  }
-  function trainingDates(finishedDates, entries) {
-    const all = new Set(finishedDates || []);
-    for (const e of entries || []) if (e && typeof e.date === "string") all.add(e.date);
-    return [...all].sort();
   }
 
   // lib/train/weekly.ts
@@ -3195,7 +3300,7 @@ var TrainEngine = (() => {
     return weeks > 0 ? value / weeks : value;
   }
   var mean2 = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-  var round3 = (n, places = 1) => {
+  var round4 = (n, places = 1) => {
     const f = 10 ** places;
     return Math.round(n * f) / f;
   };
@@ -3211,7 +3316,7 @@ var TrainEngine = (() => {
   }
   function readMetric(metric, ctx, w) {
     const raw = readRaw(metric, ctx, w);
-    return { ...raw, value: round3(perWeek(metric, raw.value, w), 2) };
+    return { ...raw, value: round4(perWeek(metric, raw.value, w), 2) };
   }
   function readRaw(metric, ctx, w) {
     switch (metric) {
@@ -3220,7 +3325,7 @@ var TrainEngine = (() => {
         if (!rows.length) return NOTHING;
         const sessions = new Set(rows.map((r) => r.date)).size;
         return {
-          value: round3(rows.reduce((n, r) => n + r.sets, 0)),
+          value: round4(rows.reduce((n, r) => n + r.sets, 0)),
           samples: sessions,
           estimated: rows.some((r) => r.estimated)
         };
@@ -3250,17 +3355,17 @@ var TrainEngine = (() => {
           }
         }
         if (!best.size) return NOTHING;
-        return { value: round3(mean2([...best.values()])), samples: found.length, estimated: false };
+        return { value: round4(mean2([...best.values()])), samples: found.length, estimated: false };
       }
       case "median_rest": {
         const values = entriesIn(ctx, w).map(({ entry }) => medianRest(entry)).filter((v) => v != null);
         if (!values.length) return NOTHING;
-        return { value: round3(mean2(values)), samples: values.length, estimated: false };
+        return { value: round4(mean2(values)), samples: values.length, estimated: false };
       }
       case "rpe": {
         const values = entriesIn(ctx, w).map(({ entry }) => workingRpe(entry)).filter((v) => v != null);
         if (!values.length) return NOTHING;
-        return { value: round3(mean2(values)), samples: values.length, estimated: false };
+        return { value: round4(mean2(values)), samples: values.length, estimated: false };
       }
       case "amrap": {
         const values = [];
@@ -3269,12 +3374,12 @@ var TrainEngine = (() => {
           if (set && typeof set.r === "number") values.push(set.r);
         }
         if (!values.length) return NOTHING;
-        return { value: round3(mean2(values)), samples: values.length, estimated: false };
+        return { value: round4(mean2(values)), samples: values.length, estimated: false };
       }
       case "bodyweight": {
         const values = (ctx.bodyweight || []).filter((b) => b && inWindow(b.date, w) && typeof b.lb === "number").map((b) => b.lb);
         if (!values.length) return NOTHING;
-        return { value: round3(mean2(values)), samples: values.length, estimated: false };
+        return { value: round4(mean2(values)), samples: values.length, estimated: false };
       }
       case "other_load": {
         const rows = (ctx.otherTraining || []).filter((e) => e && inWindow(e.date, w));
@@ -3291,14 +3396,14 @@ var TrainEngine = (() => {
         const pick = (v) => metric === "recovery" ? v.recovery : v.sleepHours;
         const values = (ctx.vitals || []).filter((v) => v && inWindow(v.date, w)).map(pick).filter((n) => typeof n === "number" && Number.isFinite(n));
         if (!values.length) return NOTHING;
-        return { value: round3(mean2(values), 2), samples: values.length, estimated: false };
+        return { value: round4(mean2(values), 2), samples: values.length, estimated: false };
       }
       case "relative_strength": {
         const e1 = readMetric("e1rm", ctx, w);
         const bw = readMetric("bodyweight", ctx, w);
         if (!e1.samples || !bw.samples || bw.value <= 0) return NOTHING;
         return {
-          value: round3(e1.value / bw.value, 3),
+          value: round4(e1.value / bw.value, 3),
           samples: Math.min(e1.samples, bw.samples),
           estimated: false
         };
@@ -3307,7 +3412,7 @@ var TrainEngine = (() => {
         const e1 = readMetric("e1rm", ctx, w);
         const sessions = readMetric("sessions", ctx, w);
         if (!e1.samples || !sessions.value) return NOTHING;
-        return { value: round3(e1.value / sessions.value, 2), samples: e1.samples, estimated: false };
+        return { value: round4(e1.value / sessions.value, 2), samples: e1.samples, estimated: false };
       }
       default:
         return NOTHING;
@@ -4221,7 +4326,7 @@ var TrainEngine = (() => {
     "streak_milestone",
     "first_time"
   ];
-  var round4 = (n) => Math.round(n * 10) / 10;
+  var round5 = (n) => Math.round(n * 10) / 10;
   function fromFinding(finding) {
     const kind = finding.kind === "ratio" ? "ratio" : finding.kind === "volume_ramp" ? "volume_ramp" : finding.kind === "weekly_sets" ? "weekly_sets" : finding.kind === "frequency_gap" ? "frequency_gap" : null;
     if (!kind) return null;
@@ -4248,24 +4353,24 @@ var TrainEngine = (() => {
     for (const d of ctx.deloadsApplied || []) {
       signals.push({
         kind: "deload_applied",
-        text: `${d.name} moved from ${round4(d.from)} to ${round4(d.to)} lb \u2014 ${d.kind === "intensity" ? "an" : "a"} ${d.kind} deload, applied automatically.`,
-        value: round4(d.to),
+        text: `${d.name} moved from ${round5(d.from)} to ${round5(d.to)} lb \u2014 ${d.kind === "intensity" ? "an" : "a"} ${d.kind} deload, applied automatically.`,
+        value: round5(d.to),
         estimated: false
       });
     }
     for (const p of ctx.plateaus || []) {
       signals.push({
         kind: "plateau",
-        text: `${p.name} has been flat at ${round4(p.weight)} for ${p.sessions} sessions.`,
-        value: round4(p.weight),
+        text: `${p.name} has been flat at ${round5(p.weight)} for ${p.sessions} sessions.`,
+        value: round5(p.weight),
         estimated: false
       });
     }
     for (const r of ctx.records || []) {
       signals.push({
         kind: "personal_record",
-        text: `${r.name}: ${round4(r.value)}${r.unit} is ${/^[aeiou]/i.test(r.kind) ? "an" : "a"} ${r.kind} record.`,
-        value: round4(r.value),
+        text: `${r.name}: ${round5(r.value)}${r.unit} is ${/^[aeiou]/i.test(r.kind) ? "an" : "a"} ${r.kind} record.`,
+        value: round5(r.value),
         estimated: false
       });
     }
@@ -4320,7 +4425,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
     if (sets < WEEKLY_SET_BAND[0]) return "under";
     return "in";
   }
-  var round5 = (n) => Math.round(n * 10) / 10;
+  var round6 = (n) => Math.round(n * 10) / 10;
   function weeklyReview(ctx) {
     const to = dateKey4(ctx.now);
     const from = shift(ctx.now, -6);
@@ -4358,7 +4463,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
         }
       }
     }
-    const hardSetsByMuscle = [...perMuscle.entries()].map(([muscle, sets]) => ({ muscle, sets: round5(sets), band: bandOf(sets) })).sort((a, b) => b.sets - a.sets);
+    const hardSetsByMuscle = [...perMuscle.entries()].map(([muscle, sets]) => ({ muscle, sets: round6(sets), band: bandOf(sets) })).sort((a, b) => b.sets - a.sets);
     const quiet = [...trainedEver].filter((m2) => !trainedNow.has(m2)).sort();
     const findings = analyse(ctx.history, index, ctx.now, { trainingAge: ctx.trainingAge });
     const quiet_week = sessions === 0 && !findings.length && !moved2.length;
@@ -4477,7 +4582,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
     const n = typeof raw === "string" ? parseFloat(raw) : typeof raw === "number" ? raw : NaN;
     return Number.isFinite(n) ? n : void 0;
   }
-  var round6 = (n) => Math.round(n * 100) / 100;
+  var round7 = (n) => Math.round(n * 100) / 100;
   function readRows(rows, source, strongUnit) {
     const cols = headerIndex(rows[0] || []);
     const at = (row, key) => cols[key] === void 0 ? "" : row[cols[key]];
@@ -4491,10 +4596,10 @@ Say that back in one short sentence, in the second person, keeping the number ex
       let weightLb;
       if (source === "hevy") {
         const kg = num(at(row, "weight_kg"));
-        weightLb = kg === void 0 ? void 0 : round6(kg * LB_PER_KG);
+        weightLb = kg === void 0 ? void 0 : round7(kg * LB_PER_KG);
       } else {
         const w = num(at(row, "weight"));
-        weightLb = w === void 0 ? void 0 : strongUnit === "kg" ? round6(w * LB_PER_KG) : w;
+        weightLb = w === void 0 ? void 0 : strongUnit === "kg" ? round7(w * LB_PER_KG) : w;
       }
       const km = num(at(row, "distance_km"));
       const distance = num(at(row, "distance"));
@@ -4504,7 +4609,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
         weightLb,
         reps: num(at(row, "reps")),
         seconds: num(source === "hevy" ? at(row, "duration_seconds") : at(row, "seconds")),
-        metres: km !== void 0 ? round6(km * 1e3) : distance,
+        metres: km !== void 0 ? round7(km * 1e3) : distance,
         rpe: num(at(row, "rpe")),
         warmup
       });
@@ -5729,6 +5834,15 @@ async function buildInsightContext(session){
   if(damp) lines.push('SELF-CORRECTION: ' + damp.reason);
   TrainEngine.describeParameters(fittedParams()).forEach(l=>
     lines.push('FITTED TO YOU: ' + l));
+  /* The whole-body reading, which is where self-reported other training
+     is allowed to count. Per-muscle load stays lifting-only. */
+  const systemic = TrainEngine.systemicLoadNote({
+    history: STATE.history||{},
+    index: TrainEngine.indexFrom(STATE.customLib||{}),
+    otherTraining: otherEntries(),
+    now: Date.now(),
+  });
+  if(systemic) lines.push('LOAD: ' + systemic);
 
   const rec = noteRecovery(await readRecovery());
   /* Only a connected read with data feeds the deload diagnosis. The other
@@ -6179,7 +6293,14 @@ function trainingAge(){ return STATE.trainingAge || null; }
 function athleteContext(){
   return { weeklyTarget: weeklyTarget(), trainingAge: trainingAge() };
 }
-function analysisOptsFor(){ return { trainingAge: athleteContext().trainingAge }; }
+function analysisOptsFor(){
+  return {
+    trainingAge: athleteContext().trainingAge,
+    /* Folded into the systemic load index only. A muscle's hard sets
+       never include it — see other.ts. */
+    otherTraining: otherEntries(),
+  };
+}
 
 function progressionInputFor(e, rx){
   return {

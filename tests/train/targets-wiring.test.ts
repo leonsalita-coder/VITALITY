@@ -96,7 +96,7 @@ describe('the streak target is the one they chose', () => {
 describe('the training age reaches every threshold that scales', () => {
   it('carries into the analysis options', () => {
     expect(run("(function(){ STATE.trainingAge='advanced'; return analysisOptsFor(); })()"))
-      .toEqual({ trainingAge: 'advanced' })
+      .toMatchObject({ trainingAge: 'advanced' })
   })
 
   it('carries into the progression input, defined rather than undefined', () => {

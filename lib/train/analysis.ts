@@ -21,6 +21,8 @@ import { workingSets, type HistoryEntry } from './sets'
 import { weeklySetBand } from './targets'
 import type { TrainingAge } from './onboarding'
 import { deltaOf, inWindow, rollingWindow } from './windows'
+import { loadFindings } from './load'
+import type { OtherEntry } from './other'
 
 /** Days without training a muscle before that is worth mentioning. */
 export const GAP_DAYS = 14
@@ -37,13 +39,22 @@ export const WEEKLY_SET_BAND: [number, number] = [10, 20]
 /** What the analysis needs to know about the person it is analysing. */
 export interface AnalysisOptions {
   trainingAge?: TrainingAge | null
+  /**
+   * Self-reported training that isn't lifting.
+   *
+   * Reaches the systemic load index only — never a muscle's hard sets.
+   * See other.ts, which is emphatic about why.
+   */
+  otherTraining?: OtherEntry[]
 }
 
 /** A ratio outside this in either direction is worth flagging. */
 export const RATIO_BAND: [number, number] = [0.6, 1.7]
 
-/** Week-over-week increase that counts as a hard jump. */
-export const RAMP_LIMIT = 1.5
+/* RAMP_LIMIT lived here and is gone: the week-over-week threshold it
+   named was replaced by the acute-versus-chronic model in load.ts, and a
+   constant nothing reads is a claim about behaviour that no longer
+   happens. See volumeRamp below, which delegates. */
 
 const DAY_MS = 86_400_000
 
@@ -312,46 +323,32 @@ export function ratios(history: History, index: ExerciseIndex, now: number, days
 }
 
 /**
- * Week-over-week jumps in hard sets per muscle.
+ * Muscles whose recent load is well away from what they are used to.
  *
- * Gated on a real base: going from 2 sets to 4 doubles the load and means
- * nothing, so the previous week has to carry enough volume for a jump to
- * be a jump.
+ * This DELEGATES to the acute-versus-chronic model rather than keeping a
+ * week-over-week threshold of its own. The old version fired when this
+ * week was 1.5x last week, which says nothing about how used to the work
+ * the athlete is: doubling from two sets to four tripped it, and a lifter
+ * on twenty sets a week absorbing a jump to twenty-six did not. The
+ * replacement compares recent load against a month of it, and states both
+ * numbers.
+ *
+ * Kept as a name because `analyse` and the tile both call it, and because
+ * one authority for "is this muscle's volume unusual" is the whole point —
+ * a second implementation beside it is how two screens come to disagree.
  */
-export function volumeRamp(history: History, index: ExerciseIndex, now: number): Finding[] {
-  const rows = attribute(history, index)
-  /* The same rolling window every other week-over-week read uses. This
-     used to bucket by `daysAgo <= 6` and `<= 13` with its own arithmetic,
-     which is how two screens end up disagreeing about what week it is. */
-  const week = rollingWindow(now)
-  const before = rollingWindow(now, 7)
-  const thisWeek = new Map<Muscle, number>()
-  const lastWeek = new Map<Muscle, number>()
-  let estimated = false
-
-  for (const row of rows) {
-    const bucket = inWindow(row.date, week) ? thisWeek
-      : inWindow(row.date, before) ? lastWeek : null
-    if (!bucket) continue
-    bucket.set(row.muscle, (bucket.get(row.muscle) || 0) + row.sets)
-    estimated = estimated || row.estimated
-  }
-
-  const MIN_BASE = 6
-  const findings: Finding[] = []
-  for (const [muscle, current] of thisWeek) {
-    const previous = lastWeek.get(muscle) || 0
-    if (previous < MIN_BASE) continue
-    const jump = deltaOf(current, previous).ratio
-    if (jump == null || jump < RAMP_LIMIT) continue
-    findings.push({
-      kind: 'volume_ramp',
-      muscle,
-      text: `${label(muscle)} jumped from ${round(previous)} to ${round(current)} hard sets week over week.`,
-      estimated,
-    })
-  }
-  return findings.sort((a, b) => a.text.localeCompare(b.text))
+export function volumeRamp(
+  history: History,
+  index: ExerciseIndex,
+  now: number,
+  otherTraining: OtherEntry[] = [],
+): Finding[] {
+  return loadFindings({ history, index, otherTraining, now }).map((found) => ({
+    kind: 'volume_ramp' as const,
+    muscle: found.muscle,
+    text: found.text,
+    estimated: found.estimated,
+  }))
 }
 
 /** Every finding worth making, or an empty list when there is nothing to say. */
@@ -364,8 +361,8 @@ export function analyse(
   return [
     ...frequencyGaps(history, index, now),
     ...weeklySets(history, index, now, opts),
+    ...volumeRamp(history, index, now, opts.otherTraining || []),
     ...ratios(history, index, now),
-    ...volumeRamp(history, index, now),
   ]
 }
 
