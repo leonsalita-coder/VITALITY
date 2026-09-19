@@ -18,6 +18,14 @@ const entry = (day: number, w: number, reps: number, sets = 3) => ({
 const LIB = { bench: { primary: ['Chest'], secondary: ['Triceps'] }, squat: { primary: ['Quads'] } }
 const INDEX = indexFrom(LIB)
 
+/** A silent series and an unloaded fixture look identical; this separates them. */
+describe('the fixture itself', () => {
+  it('resolves its muscles', () => {
+    expect(Object.keys(INDEX)).toHaveLength(Object.keys(LIB).length)
+    for (const id of Object.keys(LIB)) expect(INDEX[id].primary.length, id).toBeGreaterThan(0)
+  })
+})
+
 describe('e1RM trend — the default view', () => {
   it('produces a point per session', () => {
     const s = e1rmSeries([entry(14, 185, 5), entry(7, 190, 5), entry(1, 190, 6)])

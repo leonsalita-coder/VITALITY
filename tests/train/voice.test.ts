@@ -21,6 +21,14 @@ const LIB = {
 }
 const INDEX = indexFrom(LIB)
 
+/** The gate tests assert silence; an empty index would fake every one. */
+describe('the fixture itself', () => {
+  it('resolves its muscles', () => {
+    expect(Object.keys(INDEX)).toHaveLength(Object.keys(LIB).length)
+    for (const id of Object.keys(LIB)) expect(INDEX[id].primary.length, id).toBeGreaterThan(0)
+  })
+})
+
 const ctx = (over: Partial<SignalContext> = {}): SignalContext => ({
   history: {}, index: INDEX, now: NOW, today: ago(0),
   records: [], deloadsApplied: [], plateaus: [],

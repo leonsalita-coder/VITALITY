@@ -51,6 +51,9 @@ beforeAll(async () => {
   errors = []
   saves = []
   const dom = new JSDOM(readFileSync('public/tiles/train.html', 'utf8'), {
+    // a real origin: about:blank is opaque, and storage the tile touches
+    // throws there — a setup that fails silently is a test proving nothing
+    url: 'https://train.test/',
     runScripts: 'dangerously',
     pretendToBeVisual: true,
     beforeParse(w: any) {

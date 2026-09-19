@@ -25,6 +25,9 @@ let run: (expr: string) => any
 
 beforeAll(async () => {
   const dom = new JSDOM(readFileSync('public/tiles/train.html', 'utf8'), {
+    // a real origin: about:blank is opaque, and storage the tile touches
+    // throws there — a setup that fails silently is a test proving nothing
+    url: 'https://train.test/',
     runScripts: 'dangerously',
     pretendToBeVisual: true,
     beforeParse(w: any) {
@@ -43,6 +46,14 @@ beforeAll(async () => {
   await new Promise((r) => setTimeout(r, 700))
   win = dom.window
   run = (expr: string) => win.eval(expr)
+})
+
+/** Every assertion below evaluates inside the tile; prove it is alive. */
+describe('the fixture itself', () => {
+  it('booted with a usable engine and state', () => {
+    expect(run('typeof TrainEngine')).toBe('object')
+    expect(run('!!STATE')).toBe(true)
+  })
 })
 
 /** Registers a lift of a given kind and returns a session-exercise for it. */

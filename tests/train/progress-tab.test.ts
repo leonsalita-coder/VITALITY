@@ -41,6 +41,9 @@ let run: (expr: string) => any
 
 beforeAll(async () => {
   const dom = new JSDOM(readFileSync('public/tiles/train.html', 'utf8'), {
+    // a real origin: about:blank is opaque, and storage the tile touches
+    // throws there — a setup that fails silently is a test proving nothing
+    url: 'https://train.test/',
     runScripts: 'dangerously', pretendToBeVisual: true,
     beforeParse(w: any) {
       w.Vitality = {
@@ -57,6 +60,15 @@ beforeAll(async () => {
   await new Promise((r) => setTimeout(r, 800))
   win = dom.window
   run = (expr: string) => win.eval(expr)
+})
+
+/** A tile that failed to boot renders nothing, and "nothing" passes a
+ *  surprising number of assertions. */
+describe('the fixture itself', () => {
+  it('booted with the seeded history', () => {
+    expect(run('Object.keys(STATE.history).length')).toBe(2)
+    expect(run('STATE.finishedDates.length')).toBe(6)
+  })
 })
 
 const draw = (id: string) =>

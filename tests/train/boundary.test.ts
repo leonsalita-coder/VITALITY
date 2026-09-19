@@ -107,7 +107,10 @@ describe('values the tile holds arrive at the engine', () => {
 
   beforeAll(async () => {
     const dom = new JSDOM(readFileSync(TILES[0], 'utf8'), {
-      runScripts: 'dangerously',
+      // a real origin: about:blank is opaque, and storage the tile touches
+    // throws there — a setup that fails silently is a test proving nothing
+    url: 'https://train.test/',
+    runScripts: 'dangerously',
       pretendToBeVisual: true,
       beforeParse(w: any) {
         w.Vitality = {

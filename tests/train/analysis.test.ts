@@ -29,6 +29,23 @@ const LIB = {
 }
 const INDEX = indexFrom(LIB)
 
+/**
+ * Fixture integrity.
+ *
+ * Almost every assertion below is "this stays silent", which would pass
+ * just as happily against an index that never loaded. One test proves the
+ * fixture is real so the silence means something.
+ */
+describe('the fixture itself', () => {
+  it('maps every lift onto real muscles', () => {
+    expect(Object.keys(INDEX)).toHaveLength(Object.keys(LIB).length)
+    for (const id of Object.keys(LIB)) {
+      expect(INDEX[id].primary.length, id).toBeGreaterThan(0)
+      expect(INDEX[id].unmapped, id).toEqual([])
+    }
+  })
+})
+
 describe('the constraint that was silently broken', () => {
   it('counts a muscle hit under two names as one muscle', () => {
     // 6 sets as "Chest" and 6 as "Pecs" — neither alone reaches the band
