@@ -56,11 +56,12 @@ async function boot() {
         generateWorkout: async () => { throw new Error('no_key') },
       }
       w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
-      /* The tile's background canvas is decoration. jsdom has no 2d
-         context, and an unhandled throw from it would kill the run before
-         a single tap was counted. */
-      w.HTMLCanvasElement.prototype.getContext = () => null
-      w.addEventListener('error', (ev) => ev.preventDefault())
+      /* The tile's background canvas is decoration, and jsdom has no 2d
+         context to give it. Returning null makes the tile throw before a
+         single tap is counted, so it gets a no-op context instead —
+         stubbing the dependency rather than swallowing the crash. */
+      const noop = new Proxy({}, { get: () => () => noop })
+      w.HTMLCanvasElement.prototype.getContext = () => noop
     },
   })
   await new Promise((r) => setTimeout(r, 700))
@@ -187,16 +188,31 @@ const scenarios = {
   },
 }
 
-/** How crowded one exercise is while you are training on it. */
+/**
+ * How crowded ONE exercise is while you are training on it.
+ *
+ * The card's class is `.ex`. An earlier version of this looked for
+ * `.exCard`, found nothing, silently fell back to document.body and
+ * reported the whole board as though it were one lift — a measurement
+ * that fails open is worse than no measurement, so this throws instead.
+ */
 function density(win) {
-  const card = win.document.querySelector('.exCard') || win.document.body
+  const card = win.document.querySelector('.ex')
+  if (!card) throw new Error('no .ex card rendered — nothing to measure')
   const all = [...card.querySelectorAll('button, input')]
-  const inPill = [...card.querySelectorAll('.pill button, .pill input')]
-  const pills = card.querySelectorAll('.pill').length
+  /* The set rows and the rest timer are both things training mode keeps,
+     so they are not clutter and are counted separately. The rest bar also
+     only exists once a set is logged, and a number that moved with test
+     order would not be a measurement. */
+  const kept = (el) => el.closest('.pill') || el.closest('.restSlot')
+  const extra = all.filter((el) => !kept(el))
   return {
     controls_per_exercise: all.length,
-    controls_outside_the_set_rows: all.length - inPill.length,
-    set_rows: pills,
+    controls_outside_the_set_rows: extra.length,
+    set_rows: card.querySelectorAll('.pill').length,
+    controls_outside_set_rows_listed: extra.map(
+      (el) => el.dataset.act || el.className.split(' ')[0] || el.tagName.toLowerCase(),
+    ),
   }
 }
 
@@ -218,10 +234,17 @@ function targets(html) {
   return out
 }
 
-/** Which inputmode each field asks the phone keyboard for. */
+/**
+ * Which inputmode each field asks the phone keyboard for.
+ *
+ * Scoped to one set row. Scanning the document picks up the plate-config
+ * and goal fields too, which are not what anyone taps mid-set.
+ */
 function keyboards(win) {
+  const row = win.document.querySelector('.pill')
+  if (!row) throw new Error('no .pill row rendered — nothing to measure')
   const out = {}
-  for (const input of win.document.querySelectorAll('.pillInput')) {
+  for (const input of row.querySelectorAll('.pillInput')) {
     out[input.getAttribute('aria-label')?.split(' —')[0] || '?'] = input.getAttribute('inputmode')
   }
   return out
@@ -244,9 +267,13 @@ async function main() {
 
   const dom = await boot()
   const shape = { ...density(dom.window), keyboards: keyboards(dom.window) }
+  /* The same card with everything on it, so the training-mode number has
+     something to be a reduction OF. */
+  dom.window.eval("curSession().mode='edit'; render();")
+  const editShape = density(dom.window)
   dom.window.close()
 
-  const report = { scenarios: results, shape, tap_targets_px: targets(html) }
+  const report = { scenarios: results, shape, edit_mode: editShape, tap_targets_px: targets(html) }
 
   if (asJson) {
     console.log(JSON.stringify(report, null, 2))
@@ -266,9 +293,10 @@ async function main() {
       `  ${name.padEnd(30)}  ${String(r.taps).padStart(4)}  ${String(r.keystrokes).padStart(4)}  ${String(r.logged).padStart(11)}${per}`,
     )
   }
-  console.log('\n  one exercise, while training:')
-  console.log(`    controls on the card ............ ${shape.controls_per_exercise}`)
-  console.log(`    of those, NOT on a set row ...... ${shape.controls_outside_the_set_rows}`)
+  console.log('\n  one exercise — controls beyond the set rows:')
+  console.log(`    training mode ................... ${shape.controls_outside_the_set_rows}  [${shape.controls_outside_set_rows_listed.join(', ')}]`)
+  console.log(`    edit mode ....................... ${editShape.controls_outside_the_set_rows}  [${editShape.controls_outside_set_rows_listed.join(', ')}]`)
+  console.log(`    controls on the card, training .. ${shape.controls_per_exercise}`)
   console.log(`    set rows ........................ ${shape.set_rows}`)
   console.log('\n  phone keyboard per field:')
   for (const [field, mode] of Object.entries(shape.keyboards)) {

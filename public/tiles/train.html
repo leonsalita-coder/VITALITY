@@ -229,6 +229,7 @@
     <div class="exwrap" id="exwrap"></div>
     <div class="wcSection" id="cooldownSlot"></div>
     <div class="finishRow"><button class="finishBtn" id="finishBtn">Finish session</button></div>
+    <button class="freshbtn" id="modeBtn">Edit session</button>
     <button class="freshbtn" id="freshbtn">Start fresh</button>
     <p class="store-note">Saved to your Vitality dashboard.</p>
   </div>
@@ -3861,6 +3862,34 @@ function currentSessionState(){
     today, finished: !!STATE.submitted,
   });
 }
+/**
+ * Training mode and edit mode.
+ *
+ * Mid-session a lift card carried eight controls beyond the set rows —
+ * swap, history, tune, pin, collapse, info, overflow and drag — for
+ * somebody sweaty, breathing hard, holding the phone one-handed, forty
+ * seconds into a rest timer. Seven of those are things you do while
+ * PLANNING a session, and one is a thing you do while DOING one.
+ *
+ * So the card renders for what you are actually doing. Training mode is
+ * the default and holds log, the rest timer and swap; edit mode holds
+ * everything, and reaching it is one deliberate tap.
+ *
+ * This is about which controls RENDER, not how they look — no styling is
+ * involved, and it stands however the stylesheet is resolved later.
+ *
+ * The mode lives on the SESSION, not on STATE. A new day builds a fresh
+ * session object below, so tomorrow opens in training mode without
+ * anything having to remember to reset it — the alternative, a global
+ * flag, would leave you editing a session you meant to train.
+ */
+function sessionMode(){ return curSession().mode === 'edit' ? 'edit' : 'training'; }
+function editing(){ return sessionMode() === 'edit'; }
+function setSessionMode(mode){
+  curSession().mode = mode === 'edit' ? 'edit' : 'training';
+  saveState(); render();
+}
+
 function curSession(){
   if(!STATE.session || STATE.session.date!==today){
     /* The day rolled over. If work was logged and finish was never pressed,
@@ -4126,6 +4155,7 @@ function renderBody(){
   wrap.appendChild(add);
   renderChecklist('#cooldownSlot', session.cooldown, 'cool', 'Cooldown');
   renderFinish(session);
+  renderMode();
 }
 /* ---- warm-up / cooldown checklists --------------------------------- */
 const openSections={};
@@ -4204,6 +4234,14 @@ function restPanelHTML(title, body, undo){
 }
 function wireRestPanel(){ const u=$('#undoOff'); if(u) u.onclick=()=>{ curSession().off=false; render(); }; }
 
+/* The one deliberate action into edit mode, and back out of it. */
+function renderMode(){
+  const btn=$('#modeBtn'); if(!btn) return;
+  const edit = editing();
+  btn.textContent = edit ? 'Done editing' : 'Edit session';
+  btn.setAttribute('aria-pressed', edit ? 'true' : 'false');
+  btn.onclick=()=> setSessionMode(edit ? 'training' : 'edit');
+}
 function renderFinish(session){
   const btn=$('#finishBtn'); const t=sessionTotals(session);
   if(STATE.submitted){ btn.textContent='Re-lock session'; btn.classList.add('locked'); btn.disabled=false; }
@@ -4541,24 +4579,34 @@ function renderCard(e, session){
     ? '<span class="deloadTag" title="'+escapeHtml(deloadExplain(dl))+'">'+dl.state+'</span>'
     : (e.deload?'<span class="deloadTag">deload</span>':'');
   const meta = metaBits.map(b=>'<span>'+b+'</span>').join('<span class="metaSep">·</span>') + dlTag + (e.group?'<span class="groupTag">superset '+e.group+'</span>':'');
+  /* Everything below is a render decision, never a data one: the same
+     exercise, the same log, fewer things competing for a thumb. */
+  const edit = editing();
   card.innerHTML =
     '<div class="exHead">'
-    + '<button class="grip" aria-label="Drag to reorder" title="Drag to reorder">'+gripIcon()+'</button>'
-    + '<button class="exEye" data-act="eye" aria-label="'+(e.collapsed?'Show':'Hide')+'">'+svg(e.collapsed?IC.eyeOff:IC.eyeOpen,' fill="none" stroke="currentColor"')+'</button>'
-    + '<button class="exName" data-act="form"><span class="nameTxt">'+e.name+'</span><span class="exInfo" data-act="form" aria-label="Form notes">i</span></button>'
-    + '<button class="pinBtn '+(e.pinned?'on':'')+'" data-act="pin" aria-label="Pin to top" title="Pin to top">'+(e.pinned?'★':'☆')+'</button>'
-    + '<button class="menuBtn" data-act="menu" aria-label="More">'+dotsIcon()+'</button>'
+    + (edit ? '<button class="grip" aria-label="Drag to reorder" title="Drag to reorder">'+gripIcon()+'</button>' : '')
+    + (edit ? '<button class="exEye" data-act="eye" aria-label="'+(e.collapsed?'Show':'Hide')+'">'+svg(e.collapsed?IC.eyeOff:IC.eyeOpen,' fill="none" stroke="currentColor"')+'</button>' : '')
+    /* The name still reads the same; in training mode it is simply not a
+       button, because opening form notes is not a thing you do between
+       sets. */
+    + (edit
+        ? '<button class="exName" data-act="form"><span class="nameTxt">'+e.name+'</span><span class="exInfo" data-act="form" aria-label="Form notes">i</span></button>'
+        : '<div class="exName"><span class="nameTxt">'+e.name+'</span></div>')
+    + (edit ? '<button class="pinBtn '+(e.pinned?'on':'')+'" data-act="pin" aria-label="Pin to top" title="Pin to top">'+(e.pinned?'★':'☆')+'</button>' : '')
+    + (edit ? '<button class="menuBtn" data-act="menu" aria-label="More">'+dotsIcon()+'</button>' : '')
     + '</div>'
     + '<div class="exMeta">'+meta+'</div>'
     + (e.note?'<div class="exNote"><span class="ndot">•</span><span>'+escapeHtml(e.note)+'</span></div>':'')
     + '<div class="collapsedNote">'+exDoneCount(e)+' of '+e.log.length+' sets logged · tap the eye to expand</div>'
     + '<div class="exActions">'
+    /* Swap survives training mode because the bench being taken is a
+       thing that happens while you are standing at the bench. */
     +   '<button class="actionPill" data-act="swap">'+svg(IC.swap,' fill="none" stroke="currentColor"')+'<span class="pl">Swap</span></button>'
-    +   '<button class="actionPill" data-act="history">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">History</span></button>'
-    +   (TrainEngine.sameAsLastTime(histFor(e).filter(x=>!x.off), { excludeDate: today })
+    +   (edit ? '<button class="actionPill" data-act="history">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">History</span></button>' : '')
+    +   (edit && TrainEngine.sameAsLastTime(histFor(e).filter(x=>!x.off), { excludeDate: today })
           ? '<button class="actionPill" data-act="repeat">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">Repeat</span></button>'
           : '')
-    +   '<button class="actionPill" data-act="tune">'+svg(IC.tune,' fill="none" stroke="currentColor"')+'<span class="pl">Tune</span></button>'
+    +   (edit ? '<button class="actionPill" data-act="tune">'+svg(IC.tune,' fill="none" stroke="currentColor"')+'<span class="pl">Tune</span></button>' : '')
     + '</div>'
     + '<div class="restSlot"></div>'
     + '<div class="pills"></div>';
@@ -4569,7 +4617,10 @@ function renderCard(e, session){
   for(let i=0;i<e.log.length;i++) pillWrap.appendChild(renderPillGroup(e, rx, i));
   // rest timer
   if(restTimers[e.id]) mountRestBar(card, e);
-  // drag
+  /* drag — wireDrag keys off the grip and returns early without one, so
+     training mode disarms it by not rendering the grip. An `if(edit)`
+     here would be a second guard saying the same thing, and a guard
+     nothing can falsify is decoration. */
   wireDrag(card, e, session);
   return card;
 }
