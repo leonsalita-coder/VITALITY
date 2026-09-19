@@ -22,7 +22,17 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return Response.json({ error: 'bad_request' })
   }
-  const b = body as { goal?: unknown; messages?: unknown }
+  const b = body as {
+    goal?: unknown
+    messages?: unknown
+    /* The exercises the athlete actually has on record. The model picks
+       from this list; the tile re-validates the answer against it either
+       way, so this is a steer rather than a guarantee. */
+    allowed?: unknown
+    equipment?: unknown
+    minutes?: unknown
+    avoid?: unknown
+  }
   const goal = String(b?.goal || 'general fitness').trim().slice(0, 200)
   const rawMessages = Array.isArray(b?.messages) ? b.messages : []
   const messages = rawMessages
@@ -34,6 +44,27 @@ export async function POST(req: Request): Promise<Response> {
   if (!messages.length) return Response.json({ error: 'no_messages' })
 
   const transcript = messages.map((m) => (m.role === 'user' ? 'Athlete: ' : 'Coach: ') + m.text).join('\n')
+
+  const allowed = Array.isArray(b?.allowed) ? b.allowed : []
+  const equipment = Array.isArray(b?.equipment) ? b.equipment : []
+  const avoid = Array.isArray(b?.avoid) ? b.avoid : []
+  const minutes = typeof b?.minutes === 'number' ? b.minutes : null
+  const constraintBlock = [
+    allowed.length
+      ? 'CHOOSE ONLY FROM THESE EXERCISES, by "id". Do not invent any:\n' +
+        allowed
+          .map((a: Record<string, unknown>) => `  ${a.id} — ${a.name} (${a.equipment || 'bodyweight'}, ${a.kind})`)
+          .join('\n')
+      : '',
+    equipment.length ? `Equipment available: ${equipment.join(', ')}. Use nothing else.` : '',
+    minutes ? `The athlete has ${minutes} minutes. The session must fit.` : '',
+    avoid.length ? `NEVER include these — they cause pain: ${avoid.join(', ')}.` : '',
+    allowed.length
+      ? 'Each exercise object must be {"id": "<one of the ids above>", "sets": n, "reps": n}. Prefer exercises with more history.'
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 
   const prompt = `You are an athletic coach in a running conversation with your athlete. Their overall goal: ${goal}.
 
@@ -49,7 +80,9 @@ Include 4 to 7 exercises, ordered with the most important first. "startingKg" is
 2. ONLY if the message is genuinely too vague to act on at all (no activity, sport, or goal signal whatsoever), ask ONE short clarifying question instead:
 {"kind":"question","text":"your one short question"}
 
-Bias strongly toward option 1 — almost every message has enough to work with. Never ask more than one question in a row. Return ONLY the JSON object.`
+Bias strongly toward option 1 — almost every message has enough to work with. Never ask more than one question in a row. Return ONLY the JSON object.
+
+${constraintBlock}`
 
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {

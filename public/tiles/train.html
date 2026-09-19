@@ -282,6 +282,9 @@ var TrainEngine = (() => {
     ENGINE_VERSION: () => ENGINE_VERSION,
     HIGH_RPE: () => HIGH_RPE,
     LAYOFF_DAYS: () => LAYOFF_DAYS,
+    MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
+    MAX_WORKING_SETS: () => MAX_WORKING_SETS,
+    RECENT_HEAVY_SETS: () => RECENT_HEAVY_SETS,
     RECOVERY_FLOOR: () => RECOVERY_FLOOR,
     ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
     SET_KINDS: () => SET_KINDS,
@@ -295,6 +298,7 @@ var TrainEngine = (() => {
     entryKind: () => entryKind,
     entryScore: () => entryScore,
     epley1RM: () => epley1RM,
+    estimateMinutes: () => estimateMinutes,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
     limitDeloads: () => limitDeloads,
@@ -302,11 +306,13 @@ var TrainEngine = (() => {
     nearMissCue: () => nearMissCue,
     nextDeloadState: () => nextDeloadState,
     normalizeClassification: () => normalizeClassification,
+    planSession: () => planSession,
     sessionsPerWeek: () => sessionsPerWeek,
     setKind: () => setKind,
     setWeight: () => setWeight,
     streakLabel: () => streakLabel,
     suggestTarget: () => suggestTarget,
+    templatePlan: () => templatePlan,
     topWorkingMetres: () => topWorkingMetres,
     topWorkingReps: () => topWorkingReps,
     topWorkingSeconds: () => topWorkingSeconds,
@@ -1110,6 +1116,149 @@ var TrainEngine = (() => {
     };
   }
 
+  // lib/train/plan.ts
+  var MAX_WORKING_SETS = 30;
+  var MAX_SETS_PER_MUSCLE = 12;
+  var RECENT_HEAVY_SETS = 8;
+  var SECONDS_PER_SET = 45;
+  var ALWAYS_AVAILABLE = ["bodyweight", "none", ""];
+  function estimateMinutes(exercises) {
+    const seconds = (exercises || []).reduce(
+      (total, e) => total + (e.sets || 0) * (SECONDS_PER_SET + (e.rest || 0)),
+      0
+    );
+    return Math.round(seconds / 60 * 10) / 10;
+  }
+  function equipmentAllowed(equipment, allowed) {
+    const want = String(equipment || "").toLowerCase();
+    if (ALWAYS_AVAILABLE.includes(want)) return true;
+    return (allowed || []).some((have) => String(have).toLowerCase() === want);
+  }
+  function planned(def, raw) {
+    const c = normalizeClassification({
+      tier: raw.tier,
+      startingSets: raw.sets ?? def.sets,
+      startingReps: raw.reps ?? def.reps,
+      startingKg: raw.weight ?? def.weight,
+      restSeconds: raw.rest ?? def.rest,
+      defaultSetKind: def.kind,
+      perSide: def.perSide === true,
+      assisted: def.assisted === true
+    });
+    return {
+      id: def.id,
+      name: def.name,
+      kind: def.kind || DEFAULT_SET_KIND,
+      sets: c.sets,
+      reps: c.reps,
+      weight: c.weight,
+      rest: c.rest,
+      perSide: c.perSide,
+      assisted: c.assisted,
+      repRange: def.repRange ?? c.repRange,
+      muscles: def.muscles || [],
+      equipment: def.equipment || "",
+      sessions: def.sessions || 0
+    };
+  }
+  function resolve(raw, known) {
+    if (!raw || typeof raw !== "object") return { def: null, label: String(raw) };
+    const entry = raw;
+    const id = typeof entry.id === "string" ? entry.id : "";
+    const name = typeof entry.name === "string" ? entry.name : "";
+    const byId = known.find((k) => k.id === id);
+    if (byId) return { def: byId, label: id };
+    const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const byName = name ? known.find((k) => norm(k.name) === norm(name)) : void 0;
+    return { def: byName || null, label: id || name || "unnamed" };
+  }
+  function applyCaps(exercises, constraints, violations) {
+    const ordered = exercises.map((e, i) => ({ e, i })).sort((a, b) => b.e.sessions - a.e.sessions || a.i - b.i).map((o) => o.e);
+    const kept = [];
+    const perMuscle = {};
+    let totalSets = 0;
+    for (const exercise of ordered) {
+      if (totalSets + exercise.sets > MAX_WORKING_SETS) {
+        violations.push(`${exercise.id}: dropped, session over ${MAX_WORKING_SETS} working sets`);
+        continue;
+      }
+      const overloaded = exercise.muscles.find(
+        (m) => (perMuscle[m] || 0) + exercise.sets > MAX_SETS_PER_MUSCLE
+      );
+      if (overloaded) {
+        violations.push(`${exercise.id}: dropped, ${overloaded} over ${MAX_SETS_PER_MUSCLE} sets`);
+        continue;
+      }
+      if (typeof constraints.minutes === "number" && constraints.minutes > 0) {
+        if (estimateMinutes([...kept, exercise]) > constraints.minutes) {
+          violations.push(`${exercise.id}: dropped, session over ${constraints.minutes} minutes`);
+          continue;
+        }
+      }
+      kept.push(exercise);
+      totalSets += exercise.sets;
+      exercise.muscles.forEach((m) => {
+        perMuscle[m] = (perMuscle[m] || 0) + exercise.sets;
+      });
+    }
+    return exercises.filter((e) => kept.includes(e));
+  }
+  function permitted(def, c, violations) {
+    if ((c.painFlagged || []).includes(def.id)) {
+      violations.push(`${def.id}: excluded, flagged as painful`);
+      return false;
+    }
+    if (!equipmentAllowed(def.equipment, c.equipment)) {
+      violations.push(`${def.id}: excluded, ${def.equipment} equipment not on record`);
+      return false;
+    }
+    const hammered = (def.muscles || []).find(
+      (m) => (c.recentMuscleVolume || {})[m] >= RECENT_HEAVY_SETS
+    );
+    if (hammered) {
+      violations.push(`${def.id}: excluded, ${hammered} worked hard recently`);
+      return false;
+    }
+    return true;
+  }
+  function templatePlan(constraints) {
+    const violations = [];
+    const usable = (constraints.known || []).filter((def) => permitted(def, constraints, violations)).sort((a, b) => b.sessions - a.sessions || a.id.localeCompare(b.id));
+    const exercises = applyCaps(
+      usable.slice(0, 6).map((def) => planned(def, {})),
+      constraints,
+      violations
+    );
+    return { ok: exercises.length > 0, exercises, violations, source: "template" };
+  }
+  function planSession(raw, constraints) {
+    const violations = [];
+    const list = Array.isArray(raw) ? raw : null;
+    if (!list || !list.length) {
+      const fallback = templatePlan(constraints);
+      return { ...fallback, violations: ["response was not a list of exercises", ...fallback.violations] };
+    }
+    const chosen = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const entry of list) {
+      const { def, label } = resolve(entry, constraints.known || []);
+      if (!def) {
+        violations.push(`${label}: not a known exercise`);
+        continue;
+      }
+      if (seen.has(def.id)) continue;
+      if (!permitted(def, constraints, violations)) continue;
+      seen.add(def.id);
+      chosen.push(planned(def, entry));
+    }
+    const exercises = applyCaps(chosen, constraints, violations);
+    if (!exercises.length) {
+      const fallback = templatePlan(constraints);
+      return { ...fallback, violations: [...violations, ...fallback.violations] };
+    }
+    return { ok: true, exercises, violations, source: "model" };
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -1179,7 +1328,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], weeklyTarget:4,
+    history:{}, customLib:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -1818,6 +1967,85 @@ function renderPillGroup(e, rx, idx){
  * perfectly well what it should be, and an inline object literal gives a
  * test nothing to hold on to.
  */
+/* ── what the coach is allowed to build from ─────────────────────────
+   Every one of these comes from the athlete's own record. The model is
+   handed the list and the limits; it does not get to widen either. */
+function knownExercises(){
+  const lib=STATE.customLib||{}, names=STATE.exerciseNames||{};
+  return Object.keys(names).map(id=>{
+    const info=lib[id]||{};
+    const hist=(STATE.history&&STATE.history[id])||[];
+    const last=hist.filter(x=>!x.off).slice(-1)[0];
+    return {
+      id, name:names[id]||id,
+      equipment:String(info.equipment||'').toLowerCase(),
+      muscles:(info.primary||[]).map(m=>String(m).toLowerCase()),
+      kind: TrainEngine.SET_KINDS.indexOf(info.kind)>=0 ? info.kind : 'reps_weight',
+      sessions: hist.filter(x=>!x.off).length,
+      sets: last ? (last.sets||[]).length || 3 : 3,
+      reps: 8,
+      weight: last ? (TrainEngine.topWorkingWeight(last)||0) : 0,
+      rest: 90,
+      perSide: info.perSide===true,
+      assisted: info.assisted===true,
+      repRange: info.repRange||null,
+    };
+  });
+}
+/* Equipment on record IS the equipment list — asking for a barbell session
+   in a hotel room is the common failure, and the honest signal for what is
+   in the room is what the athlete has actually been training with. */
+function equipmentOnRecord(){
+  const seen={};
+  Object.values(STATE.customLib||{}).forEach(info=>{
+    const eq=String((info&&info.equipment)||'').toLowerCase();
+    if(eq) seen[eq]=true;
+  });
+  return Object.keys(seen);
+}
+/* Hard sets per muscle over the last couple of days, so a muscle worked
+   yesterday is not programmed hard again today. */
+function recentMuscleSets(days){
+  const out={}, cutoff=new Date(); cutoff.setDate(cutoff.getDate()-(days||2));
+  const key=ymd(cutoff);
+  Object.keys(STATE.history||{}).forEach(id=>{
+    const info=(STATE.customLib||{})[id]||{};
+    const muscles=(info.primary||[]).map(m=>String(m).toLowerCase());
+    if(!muscles.length) return;
+    (STATE.history[id]||[]).forEach(entry=>{
+      if(entry.off || entry.date < key) return;
+      const sets=TrainEngine.workingSets(entry).length;
+      muscles.forEach(m=>{ out[m]=(out[m]||0)+sets; });
+    });
+  });
+  return out;
+}
+/* A movement that hurts stays out of every generated session until the
+   athlete clears it. The noticer remembering is the whole point — being
+   re-offered the lift that hurt you is how you stop trusting it. */
+function isPainFlagged(e){ return (STATE.painFlagged||[]).indexOf(e.id)>=0; }
+function togglePainFlag(e){
+  STATE.painFlagged = STATE.painFlagged || [];
+  const i = STATE.painFlagged.indexOf(e.id);
+  if(i>=0) STATE.painFlagged.splice(i,1); else STATE.painFlagged.push(e.id);
+  saveState(); render();
+}
+function planConstraints(minutes){
+  return {
+    equipment: equipmentOnRecord(),
+    minutes: typeof minutes==='number' && minutes>0 ? minutes : undefined,
+    painFlagged: STATE.painFlagged || [],
+    recentMuscleVolume: recentMuscleSets(2),
+    known: knownExercises(),
+  };
+}
+/* A time budget the athlete actually stated, e.g. "I've got 30 minutes". */
+function statedMinutes(text){
+  const m=String(text||'').match(/(\d{1,3})\s*(?:min|minute|minutes|m)\b/i);
+  if(!m) return undefined;
+  const n=parseInt(m[1],10);
+  return n>=5 && n<=240 ? n : undefined;
+}
 function progressionInputFor(e, rx){
   return {
     kg: rx.kg,
@@ -2539,16 +2767,17 @@ function openSwap(e){
              can never route a lift into the wrong strategy. */
           const c=TrainEngine.normalizeClassification(info);
           const id=slugify(nm);
-          STATE.customLib=STATE.customLib||{};
-          /* This IS the cache — a name is classified once and never again. */
-          STATE.customLib[id]={
-            equipment:info.equipment||'', primary:info.primary||[], secondary:info.secondary||[],
-            gist:info.gist||'', steps:info.steps||[], cues:info.cues||[],
-            kind:c.kind,
-            perSide:c.perSide||undefined,
-            assisted:c.assisted||undefined,
-            repRange:c.repRange||undefined,
-          };
+          /* Same installer the coach path uses — one writer, so a typed
+             lift and a generated one cannot end up shaped differently.
+             This is also the cache: a name is classified once, never again. */
+          installExerciseDef(id, nm, {
+            kind:c.kind, perSide:c.perSide, assisted:c.assisted, repRange:c.repRange,
+            equipment:info.equipment||'', primary:info.primary||[],
+          });
+          Object.assign(STATE.customLib[id], {
+            secondary:info.secondary||[], gist:info.gist||'',
+            steps:info.steps||[], cues:info.cues||[],
+          });
           const def={ id, name:nm, tier:c.tier, sets:c.sets, reps:c.reps, kg:c.weight, perHand:c.perSide, rest:c.rest, lastKg:lastKgFromHistory(id), pinned:false, collapsed:false, deload:false, note:'', log:Array(c.sets).fill(null) };
           commitExercise(def, e, session, adding);
         }catch(err){
@@ -2628,14 +2857,43 @@ function openCoach(){
     overlay.classList.add('thinking'); if(fabConstellation) fabConstellation.setMode('thinking'); if(headerConstellation) headerConstellation.setMode('thinking'); statusTxt.textContent='Thinking…';
     try{
       const history = messages.map(m=>({role:m.role==='user'?'user':'assistant', text:m.text}));
-      const res = await window.Vitality.generateWorkout({ goal:fullGoalContext(), messages:history });
+      const constraints = planConstraints(statedMinutes(text));
+      const ask = extra => window.Vitality.generateWorkout({
+        goal: fullGoalContext(),
+        messages: extra ? history.concat([{role:'user', text:extra}]) : history,
+        /* the model picks from this list; it does not get to invent one */
+        allowed: constraints.known.map(k=>({ id:k.id, name:k.name, equipment:k.equipment, kind:k.kind })),
+        equipment: constraints.equipment,
+        minutes: constraints.minutes,
+        avoid: constraints.painFlagged,
+      });
+
+      let res = await ask(null);
       if(res && res.kind==='question'){
         messages.push({role:'ai', text:res.text}); paint();
-      } else if(res && res.kind==='workout'){
-        messages.push({role:'ai', text:res.reply||'Here’s your session.'}); paint();
-        showApply(res, session, result);
       } else {
-        messages.push({role:'ai', text:"Couldn't build that — try again."}); paint();
+        let plan = TrainEngine.planSession(res && res.exercises, constraints);
+        /* One retry, telling it exactly what it got wrong. If the second
+           answer is no better we stop asking and build the session from
+           the athlete's own lifts — the app has to produce something
+           usable offline, rate-limited, or with no key at all. */
+        if(plan.source==='template' && plan.violations.length){
+          const retry = await ask('That did not fit. Fix these and answer again: '+plan.violations.slice(0,5).join('; '));
+          const second = TrainEngine.planSession(retry && retry.exercises, constraints);
+          if(second.source==='model') { plan = second; res = retry; }
+        }
+        if(plan.ok){
+          plan.warmup = (res && res.warmup) || [];
+          plan.cooldown = (res && res.cooldown) || [];
+          messages.push({role:'ai', text: plan.source==='model'
+            ? ((res && res.reply) || 'Here’s your session.')
+            : 'Built one from your own lifts.'});
+          paint();
+          showApply(plan, session, result);
+        } else {
+          messages.push({role:'ai', text:"Couldn't build that — log a few lifts first and I'll have something to work with."});
+          paint();
+        }
       }
     }catch(err){
       const reason=err&&err.message;
@@ -2668,31 +2926,54 @@ function closeCoach(){
   morph.style.opacity='.4';
   setTimeout(cleanup, 340);
 }
-function showApply(res, session, result){
+function showApply(plan, session, result){
+  /* `plan` has already been through TrainEngine.planSession — every
+     exercise is one the athlete has on record, within every cap, and
+     normalised by the same validator a typed lift goes through. Nothing
+     here reads the model's response directly. */
   const used=new Set(session.ex.map(x=>x.id));
-  const defs=(res.exercises||[]).map(info=>{
-    const id=slugifyAvoiding(info.name||'exercise', used); used.add(id);
-    /* The coach is the SECOND path that creates exercises, and it has to
-       validate exactly like the classifier does — otherwise every lift it
-       generates silently arrives as reps_weight with no rep range, and a
-       generated plank gets told to add five pounds. */
-    const c=TrainEngine.normalizeClassification(info);
-    STATE.customLib=STATE.customLib||{};
-    STATE.customLib[id]={
-      equipment:info.equipment||'', primary:info.primary||[], secondary:info.secondary||[],
-      gist:info.gist||'', steps:info.steps||[], cues:info.cues||[],
-      kind:c.kind,
-      perSide:c.perSide||undefined,
-      assisted:c.assisted||undefined,
-      repRange:c.repRange||undefined,
-    };
-    return { id, name:info.name||'Exercise', tier:c.tier, sets:c.sets, reps:c.reps, kg:c.weight, perHand:c.perSide, rest:c.rest, lastKg:lastKgFromHistory(id), pinned:false, collapsed:false, deload:false, note:'', log:Array(c.sets).fill(null) };
-  });
-  const warmup=(res.warmup||[]).map(t=>({text:t, done:false}));
-  const cooldown=(res.cooldown||[]).map(t=>({text:t, done:false}));
-  result.innerHTML = '<div class="popBtns" style="margin-top:14px"><button class="pbtn ghost" id="genAdd">Add alongside</button><button class="pbtn save" id="genReplace">Replace today</button></div>';
+  const defs=plan.exercises.map(p=>{
+    if(used.has(p.id)) return null;
+    used.add(p.id);
+    installExerciseDef(p.id, p.name, {
+      kind:p.kind, perSide:p.perSide, assisted:p.assisted, repRange:p.repRange,
+      equipment:p.equipment, primary:p.muscles,
+    });
+    return sessionExerciseFrom(p);
+  }).filter(Boolean);
+
+  const warmup=(plan.warmup||[]).map(t=>({text:t, done:false}));
+  const cooldown=(plan.cooldown||[]).map(t=>({text:t, done:false}));
+  const note = plan.source==='template'
+    ? '<p class="formGist">Built from your own lifts — the coach could not be reached, or what it suggested did not fit your equipment and time.</p>'
+    : (plan.violations && plan.violations.length
+        ? '<p class="formGist">Trimmed to fit: '+escapeHtml(plan.violations.slice(0,3).join('; '))+'</p>'
+        : '');
+  result.innerHTML = note + '<div class="popBtns" style="margin-top:14px"><button class="pbtn ghost" id="genAdd">Add alongside</button><button class="pbtn save" id="genReplace">Replace today</button></div>';
   result.querySelector('#genAdd').onclick=()=>{ session.ex.push(...defs); if(warmup.length) session.warmup=session.warmup.concat(warmup); if(cooldown.length) session.cooldown=session.cooldown.concat(cooldown); closeCoach(); render(); };
   result.querySelector('#genReplace').onclick=()=>{ session.ex.forEach(x=>stopRest(x.id)); session.ex=defs; session.warmup=warmup; session.cooldown=cooldown; closeCoach(); render(); };
+}
+/* The ONE place an exercise definition is written. Both creation paths go
+   through it, so a generated lift cannot be shaped differently from a
+   typed one. */
+function installExerciseDef(id, name, fields){
+  STATE.customLib=STATE.customLib||{};
+  const info=STATE.customLib[id]||(STATE.customLib[id]={});
+  info.equipment=fields.equipment||info.equipment||'';
+  info.primary=fields.primary||info.primary||[];
+  info.kind=fields.kind||'reps_weight';
+  if(fields.perSide) info.perSide=true; else delete info.perSide;
+  if(fields.assisted) info.assisted=true; else delete info.assisted;
+  if(fields.repRange) info.repRange=fields.repRange; else delete info.repRange;
+  STATE.exerciseNames=STATE.exerciseNames||{};
+  STATE.exerciseNames[id]=name;
+}
+/* The ONE place a session exercise is built from a definition. */
+function sessionExerciseFrom(p){
+  return { id:p.id, name:p.name, tier:2, sets:p.sets, reps:p.reps, kg:p.weight,
+           perHand:p.perSide, rest:p.rest, lastKg:lastKgFromHistory(p.id),
+           pinned:false, collapsed:false, deload:false, note:'',
+           log:Array(p.sets).fill(null) };
 }
 
 /* ---- tune popup --------------------------------------------------- */
@@ -2805,6 +3086,7 @@ function openMenu(e, session, btn){
       +'<span class="menuRowLabel">'+(e.deload?'Deload active':'Deload this lift')+'</span>'
       +'<span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">⬇️</span></span></span>'
     +'</button>'
+    + '<button data-m="pain"'+(isPainFlagged(e)?' class="on"':'')+'>'+svg('<path d="M12 3l9 16H3zM12 9v5M12 17h.01"/>',' fill="none" stroke="currentColor"')+(isPainFlagged(e)?'This is cleared — unflag':'This hurts — stop suggesting it')+'</button>'
     + '<button data-m="note">'+svg('<path d="M4 5h16M4 12h16M4 19h10"/>',' fill="none" stroke="currentColor"')+(e.note?'Edit note':'Add a note')+'</button>'
     + (e.group ? '<button data-m="ungroup">'+svg('<path d="M4 7h13M14 4l3 3-3 3M20 17H7M10 14l-3 3 3 3"/>',' fill="none" stroke="currentColor"')+'Remove from superset</button>'
                : (hasNext ? '<button data-m="link">'+svg('<path d="M4 7h13M14 4l3 3-3 3M20 17H7M10 14l-3 3 3 3"/>',' fill="none" stroke="currentColor"')+'Link with next (superset)</button>' : ''))
@@ -2819,6 +3101,7 @@ function openMenu(e, session, btn){
   menu.querySelectorAll('button').forEach(b=> b.onclick=()=>{
     const m=b.dataset.m; closePop();
     if(m==='deload'){ e.deload=!e.deload; render(); }
+    else if(m==='pain'){ togglePainFlag(e); }
     else if(m==='note'){ openNote(e); }
     else if(m==='link'){ linkWithNext(e, session); }
     else if(m==='ungroup'){ ungroup(e); }
@@ -3755,6 +4038,7 @@ function spawnParticles(root){
   STATE.history = STATE.history || {};
   STATE.deloadStates = STATE.deloadStates || {};
   STATE.deloadExclusions = STATE.deloadExclusions || [];
+  STATE.painFlagged = STATE.painFlagged || [];
   STATE.weeklyTarget = STATE.weeklyTarget || TrainEngine.DEFAULT_WEEKLY_TARGET;
   migrateDeloadOverrides();
   STATE.exerciseNames = STATE.exerciseNames || {};

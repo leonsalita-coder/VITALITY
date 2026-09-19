@@ -230,9 +230,41 @@ describe('every path that creates an exercise validates it', () => {
     expect(logger.slice(start, start + 900)).toContain('normalizeClassification')
   })
 
-  it('validates in the coach path', () => {
+  it('validates in the coach path, through the constrained planner', () => {
+    // the coach path validates via planSession, which runs the same
+    // normalizeClassification internally and enforces the session caps on
+    // top of it — a superset of what the classifier path does
+    expect(logger).toContain('TrainEngine.planSession(')
     const start = logger.indexOf('function showApply')
-    expect(logger.slice(start, start + 900)).toContain('normalizeClassification')
+    const body = logger.slice(start, start + 1200)
+    expect(body).toContain('plan.exercises')
+  })
+
+  it('never lets the coach path touch the raw model response', () => {
+    const start = logger.indexOf('function showApply')
+    const body = logger.slice(start, start + 1200)
+    // the old bug: reading res.exercises[].name/sets straight into a lift
+    expect(body).not.toMatch(/res\.exercises/)
+    expect(body).not.toMatch(/info\.(name|tier|equipment)/)
+  })
+
+  it('builds every exercise definition through one installer', () => {
+    expect(logger).toContain('function installExerciseDef')
+    // CALLS, not the declaration — counting the definition is how this
+    // assertion would pass while only one path actually used it
+    const calls = (logger.match(/installExerciseDef\(/g) || []).length
+      - (logger.match(/function installExerciseDef\(/g) || []).length
+    expect(calls).toBeGreaterThanOrEqual(2)
+  })
+
+  it('has no path that writes a definition around the installer', () => {
+    /* A direct customLib assignment is a second writer by another name.
+       The installer's own lazy-init line is the one legitimate case, so
+       its body is cut out before looking. */
+    const start = logger.indexOf('function installExerciseDef')
+    const outside = logger.slice(0, start) + logger.slice(logger.indexOf('function sessionExerciseFrom'))
+    const direct = outside.match(/STATE\.customLib\[\w+\]\s*=\s*\{/g) || []
+    expect(direct).toEqual([])
   })
 
   it('never builds an exercise straight off a raw model field', () => {
