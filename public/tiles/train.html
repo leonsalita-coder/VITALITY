@@ -315,6 +315,7 @@ var TrainEngine = (() => {
     LOAD_SPIKE: () => LOAD_SPIKE,
     LOW_RECOVERY: () => LOW_RECOVERY,
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
+    MAX_SNAPSHOTS: () => MAX_SNAPSHOTS,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
     MODERATE_RECOVERY: () => MODERATE_RECOVERY,
     MUSCLES: () => MUSCLES,
@@ -330,12 +331,14 @@ var TrainEngine = (() => {
     ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
     SECONDARY_SHARE: () => SECONDARY_SHARE,
     SET_KINDS: () => SET_KINDS,
+    SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
     analyse: () => analyse,
     assessReadiness: () => assessReadiness,
     bestE1RM: () => bestE1RM,
     briefFor: () => briefFor,
     catalogExercise: () => catalogExercise,
+    chooseRestore: () => chooseRestore,
     chooseSignal: () => chooseSignal,
     classifyPR: () => classifyPR,
     collectSignals: () => collectSignals,
@@ -354,9 +357,11 @@ var TrainEngine = (() => {
     entryScore: () => entryScore,
     epley1RM: () => epley1RM,
     estimateMinutes: () => estimateMinutes,
+    exportJson: () => exportJson,
     frequencyGaps: () => frequencyGaps,
     hasLoggedWork: () => hasLoggedWork,
     importCsv: () => importCsv,
+    importJson: () => importJson,
     indexFrom: () => indexFrom,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
@@ -364,6 +369,7 @@ var TrainEngine = (() => {
     loadableWeights: () => loadableWeights,
     loggedSetCount: () => loggedSetCount,
     longestWeekStreak: () => longestWeekStreak,
+    makeSnapshot: () => makeSnapshot,
     mapMuscle: () => mapMuscle,
     mergeExercises: () => mergeExercises,
     muscleSplitFrom: () => muscleSplitFrom,
@@ -378,6 +384,7 @@ var TrainEngine = (() => {
     planSession: () => planSession,
     plateBreakdown: () => plateBreakdown,
     prefillPlan: () => prefillPlan,
+    pushSnapshot: () => pushSnapshot,
     ratios: () => ratios,
     remapRoutines: () => remapRoutines,
     resolveExercise: () => resolveExercise,
@@ -392,6 +399,8 @@ var TrainEngine = (() => {
     similarity: () => similarity,
     slugFromName: () => slugFromName,
     snapToLoadable: () => snapToLoadable,
+    stateLooksEmpty: () => stateLooksEmpty,
+    storageReport: () => storageReport,
     streakLabel: () => streakLabel,
     suggestTarget: () => suggestTarget,
     templatePlan: () => templatePlan,
@@ -400,6 +409,7 @@ var TrainEngine = (() => {
     topWorkingReps: () => topWorkingReps,
     topWorkingSeconds: () => topWorkingSeconds,
     topWorkingWeight: () => topWorkingWeight,
+    validateSnapshot: () => validateSnapshot,
     volumeRamp: () => volumeRamp,
     weeklyReview: () => weeklyReview,
     weeklySets: () => weeklySets,
@@ -3087,6 +3097,91 @@ Say that back in one short sentence, in the second person, keeping the number ex
     };
   }
 
+  // lib/train/backup.ts
+  var SNAPSHOT_VERSION = 1;
+  var MAX_SNAPSHOTS = 5;
+  function countSets(state) {
+    const s = state;
+    if (!s || typeof s !== "object" || !s.history) return 0;
+    let n = 0;
+    for (const rows of Object.values(s.history)) {
+      for (const entry of rows || []) n += (entry.sets || []).length;
+    }
+    return n;
+  }
+  function dateKey4(ms) {
+    const d = new Date(ms);
+    const p = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function makeSnapshot(state, now) {
+    return { v: SNAPSHOT_VERSION, at: now, date: dateKey4(now), sets: countSets(state), state };
+  }
+  function validateSnapshot(raw) {
+    if (!raw || typeof raw !== "object") return false;
+    const s = raw;
+    if (s.v !== SNAPSHOT_VERSION) return false;
+    if (typeof s.at !== "number" || !Number.isFinite(s.at)) return false;
+    if (!s.state || typeof s.state !== "object") return false;
+    const state = s.state;
+    return !state.history || typeof state.history === "object";
+  }
+  function pushSnapshot(existing, snapshot, max = MAX_SNAPSHOTS) {
+    const list = (existing || []).filter(validateSnapshot);
+    const newest = list[0];
+    const rest = newest && newest.date === snapshot.date ? list.slice(1) : list;
+    return [snapshot, ...rest].slice(0, max);
+  }
+  function chooseRestore(candidates) {
+    const usable = (candidates || []).filter(validateSnapshot);
+    const withWork = usable.filter((s) => s.sets > 0);
+    const pool = withWork.length ? withWork : usable;
+    if (!pool.length) return null;
+    return pool.reduce((best, s) => s.at > best.at ? s : best);
+  }
+  function stateLooksEmpty(state) {
+    if (!state || typeof state !== "object") return true;
+    const s = state;
+    const lifts = s.history ? Object.keys(s.history).length : 0;
+    const days = Array.isArray(s.finishedDates) ? s.finishedDates.length : 0;
+    return lifts === 0 && days === 0;
+  }
+  function exportJson(state, now) {
+    const file = {
+      app: "vitality-train",
+      v: SNAPSHOT_VERSION,
+      exportedAt: new Date(now).toISOString(),
+      state
+    };
+    return JSON.stringify(file, null, 2);
+  }
+  function importJson(text) {
+    let parsed;
+    try {
+      parsed = JSON.parse(String(text || ""));
+    } catch {
+      return { ok: false, state: null, reason: "not valid JSON" };
+    }
+    if (!parsed || typeof parsed !== "object") {
+      return { ok: false, state: null, reason: "not an export file" };
+    }
+    const file = parsed;
+    if (file.app !== "vitality-train") {
+      return { ok: false, state: null, reason: "not a Train export" };
+    }
+    if (!file.state || typeof file.state !== "object") {
+      return { ok: false, state: null, reason: "the file carries no state" };
+    }
+    return { ok: true, state: file.state, reason: `${countSets(file.state)} sets` };
+  }
+  function storageReport(host, local, snapshots) {
+    const parts = [];
+    parts.push(host === "ok" ? "host store working" : `host store ${host}`);
+    parts.push(local === "ok" ? "in-frame copy working" : `in-frame copy ${local}`);
+    parts.push(`${snapshots} snapshot${snapshots === 1 ? "" : "s"}`);
+    return { host, local, snapshots, detail: parts.join(", ") };
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -3206,6 +3301,7 @@ function saveState(){ if(window.Vitality && typeof window.Vitality.save==='funct
  * look like guesswork.
  */
 let READINESS = null;
+let RESTORED_FROM = null;
 function weeklyHardSets(offsetWeeks){
   const start=new Date(); start.setDate(start.getDate()-(7*(offsetWeeks+1)-1));
   const end=new Date(); end.setDate(end.getDate()-7*offsetWeeks);
@@ -3241,8 +3337,6 @@ async function computeReadiness(){
   });
   if(READINESS.verdict==='rest_advised'){
     STATE.restAdvisedDates = STATE.restAdvisedDates || [];
-  STATE.routines = STATE.routines || [];
-  STATE.routineDays = STATE.routineDays || {};
     if(STATE.restAdvisedDates.indexOf(today)<0){ STATE.restAdvisedDates.push(today); saveState(); }
   }
   return READINESS;
@@ -3280,6 +3374,77 @@ function applyRoutine(session){
     }));
   });
   saveState();
+}
+/* ── durability ──────────────────────────────────────────────────────
+   Tile data already leaves the iframe: window.Vitality.save posts to the
+   host, which writes to the host app's storage and mirrors to Supabase
+   when sync is on. The exposure is that WITHOUT SYNC THERE IS ONE COPY, on
+   an origin Safari still evicts after about a week away.
+
+   So: rolling snapshots inside the saved payload, an independent in-frame
+   copy where the sandbox allows one, and a restore that never silently
+   starts fresh on top of someone with history. */
+let STORAGE = { host:'unavailable', local:'unavailable', snapshots:0, detail:'not probed' };
+const LOCAL_KEY = 'vitality.train.snapshots';
+
+/* An opaque-origin sandbox may deny localStorage outright. Probed, never
+   assumed — a layer believed to be working and silently absent is worse
+   than one known to be missing. */
+function localLayer(){
+  try{
+    if(!window.localStorage) return null;
+    window.localStorage.setItem(LOCAL_KEY+'.probe','1');
+    window.localStorage.removeItem(LOCAL_KEY+'.probe');
+    return window.localStorage;
+  }catch(err){ return null; }
+}
+function readLocalSnapshots(){
+  const store=localLayer(); if(!store) return [];
+  try{ const raw=store.getItem(LOCAL_KEY); return raw? JSON.parse(raw) : []; }
+  catch(err){ return []; }
+}
+function writeLocalSnapshots(list){
+  const store=localLayer(); if(!store) return 'unavailable';
+  try{ store.setItem(LOCAL_KEY, JSON.stringify(list)); return 'ok'; }
+  catch(err){ return 'failed'; }   // quota, most likely
+}
+/**
+ * Takes a snapshot and writes it to every layer that will accept one.
+ *
+ * Called on session finish and before anything destructive — a merge, an
+ * import, a kind change. Those are the moments a bad outcome is
+ * unrecoverable rather than merely annoying.
+ */
+function snapshotNow(reason){
+  try{
+    const snap=TrainEngine.makeSnapshot(stateForBackup(), Date.now());
+    STATE.snapshots=TrainEngine.pushSnapshot(STATE.snapshots||[], snap);
+    const localStatus=writeLocalSnapshots(STATE.snapshots);
+    saveState();
+    STORAGE=TrainEngine.storageReport(STORAGE.host, localStatus, (STATE.snapshots||[]).length);
+    console.info('[train] snapshot ('+reason+') — '+STORAGE.detail);
+  }catch(err){ console.warn('[train] snapshot failed: '+(err&&err.message)); }
+}
+/* The state minus its own snapshots, so copies never nest. */
+function stateForBackup(){
+  const copy=Object.assign({}, STATE);
+  delete copy.snapshots;
+  return copy;
+}
+/**
+ * Restores after an eviction.
+ *
+ * Only when live state looks LOST rather than never created, and only from
+ * a snapshot carrying actual work. Starting fresh on top of someone with
+ * history is the failure this whole file exists to prevent.
+ */
+function restoreIfEmpty(loaded){
+  const candidates=[...(loaded && loaded.snapshots ? loaded.snapshots : []), ...readLocalSnapshots()];
+  if(!TrainEngine.stateLooksEmpty(loaded)) return { state:loaded, restored:null };
+  const best=TrainEngine.chooseRestore(candidates);
+  if(!best) return { state:loaded, restored:null };
+  const merged=Object.assign({}, best.state, { snapshots:candidates.slice(0,5) });
+  return { state:merged, restored:best };
 }
 function plateConfig(){
   return STATE.plateConfig || TrainEngine.defaultPlateConfig();
@@ -3432,7 +3597,18 @@ function renderNoteBar(){
    headline, and the 3-up mini stat strip — all real arithmetic over data
    already collected (same rule as the Overview cards), nothing invented. */
 /* Reports; never asks. Same posture as the deload note. */
+/* A restore is never silent. Someone who lost data and got it back is owed
+   the sentence, and someone who did not is owed the absence of it. */
+function renderRestoreNotice(){
+  const el=$('#readinessNote'); if(!el || !RESTORED_FROM) return false;
+  el.style.display='';
+  el.className='readinessNote verdict-rest_advised';
+  el.textContent='Your data was missing on this device. Restored '+RESTORED_FROM.sets
+    +' sets from the backup taken '+fmtDate(RESTORED_FROM.date)+'.';
+  return true;
+}
 function renderReadiness(){
+  if(renderRestoreNotice()) return;
   const el=$('#readinessNote'); if(!el) return;
   const r=readiness();
   if(!r.reason){ el.textContent=''; el.style.display='none'; return; }
@@ -3637,6 +3813,7 @@ function renderFinish(session){
         if(existing) existing.minutes=mins; else STATE.sessionDurations.push({date:today, minutes:mins});
       }
       if(!session.insight) fetchInsight(session);
+      snapshotNow('session finished');
     }
     const wasSubmitted=STATE.submitted;
     renderFinish(session); renderStreak(); renderOverviewCards(); saveState();
@@ -4771,6 +4948,7 @@ function openImport(){
     });
 }
 function runImport(text, unit, status){
+  snapshotNow('before import');
   const existing={};
   Object.keys(STATE.history||{}).forEach(id=>{ existing[id]=(STATE.history[id]||[]).map(e=>({date:e.date})); });
   const out=TrainEngine.importCsv(text, {
@@ -4924,6 +5102,7 @@ function confirmMerge(fromId, intoId){
     scrim=>{
       scrim.querySelector('#mgCancel').onclick=closePop;
       scrim.querySelector('#mgGo').onclick=()=>{
+        snapshotNow('before merge');
         const out=TrainEngine.mergeExercises(STATE, fromId, intoId);
         Object.assign(STATE, out.state);
         /* A routine still pointing at the folded-away id would silently
@@ -4943,6 +5122,11 @@ function openSettings(){
     + '<div class="secLbl">Sessions per week</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal" id="wkTarget">'+weeklyTarget()+'</span><button class="step" data-t="1">+</button></div></div>'
     + '<p class="settingsNote">Your streak counts weeks that hit this. Rest days never break it.</p>'
+    + '<div class="secLbl">Backup</div>'
+    + '<p class="settingsNote" id="storageNote"></p>'
+    + '<button class="pbtn ghost" id="exportJson" style="width:100%">Download a full backup (JSON)</button>'
+    + '<div class="searchRow" style="margin-top:8px"><input id="restoreFile" type="file" accept=".json,application/json" aria-label="Restore from backup" /></div>'
+    + '<div id="restoreStatus" style="font-size:13px;min-height:16px;margin-top:6px"></div>'
     + '<div class="secLbl">Bring your history</div>'
     + '<p class="settingsNote">Import a Hevy or Strong export. Everything intelligent here needs history, and a fresh install has none.</p>'
     + '<button class="pbtn ghost" id="openImport" style="width:100%">Import CSV</button>'
@@ -4975,6 +5159,33 @@ function openSettings(){
         scrim.querySelectorAll('.swapItem[data-rm]').forEach(b=> b.onclick=()=>{
           STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
         });
+      };
+      const note=scrim.querySelector('#storageNote');
+      if(note) note.textContent='CSV is for reading; JSON round-trips everything. '+STORAGE.detail+'.';
+      const expBtn=scrim.querySelector('#exportJson');
+      if(expBtn) expBtn.onclick=()=>{
+        const blob=new Blob([TrainEngine.exportJson(stateForBackup(), Date.now())],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a'); a.href=url; a.download='train-backup-'+today+'.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),4000);
+      };
+      const restoreInput=scrim.querySelector('#restoreFile');
+      const restoreStatus=scrim.querySelector('#restoreStatus');
+      if(restoreInput) restoreInput.onchange=ev=>{
+        const file=ev.target.files && ev.target.files[0]; if(!file) return;
+        const reader=new FileReader();
+        reader.onload=()=>{
+          const out=TrainEngine.importJson(String(reader.result||''));
+          if(!out.ok){ restoreStatus.style.color='var(--fail)'; restoreStatus.textContent='Could not restore: '+out.reason+'.'; return; }
+          snapshotNow('before restore');
+          Object.assign(STATE, out.state);
+          rederiveFromHistory(); saveState();
+          restoreStatus.style.color='var(--signal)';
+          restoreStatus.textContent='Restored '+out.reason+'.';
+          render();
+        };
+        reader.readAsText(file);
       };
       const impBtn=scrim.querySelector('#openImport');
       if(impBtn) impBtn.onclick=()=>{ closePop(); openImport(); };
@@ -5492,6 +5703,7 @@ function openTune(e){
       flagBtn('#tas','#asLbl','assisted');
       scrim.querySelector('#tcancel').onclick=closePop;
       const commitTune=()=>{
+        if(draft.kind!==startingKind) snapshotNow('before kind change');
         setExerciseField(e,'kind', draft.kind==='reps_weight'?undefined:draft.kind);
         setExerciseField(e,'perSide', draft.perSide);
         setExerciseField(e,'assisted', draft.assisted);
@@ -6602,8 +6814,14 @@ function spawnParticles(root){
    structurally incompatible with the single-session model, so they start
    fresh rather than risk a broken migration. */
 (async()=>{
-  let d=null;
-  try{ d = await window.Vitality.load(); }catch(e){ d=null; }
+  let d=null, hostStatus='ok';
+  try{ d = await window.Vitality.load(); }catch(e){ d=null; hostStatus='failed'; }
+  const recovery=restoreIfEmpty(d && typeof d==='object' && !Array.isArray(d) ? d : null);
+  if(recovery.restored){
+    d=recovery.state;
+    RESTORED_FROM=recovery.restored;
+    console.warn('[train] local state was empty — restored '+recovery.restored.sets+' sets from '+recovery.restored.date);
+  }
   const usable = d && typeof d==='object' && !Array.isArray(d) && d.session && !d.days;
   STATE = usable ? d : buildState();
   STATE.customLib = STATE.customLib || {};
@@ -6621,7 +6839,18 @@ function spawnParticles(root){
   STATE.photos = STATE.photos || [];
   STATE.sessionDurations = STATE.sessionDurations || [];
   STATE.liftGoals = STATE.liftGoals || [];
-  try{ await computeReadiness(); }catch(err){ READINESS=null; }
+  STATE.restAdvisedDates = STATE.restAdvisedDates || [];
+  STATE.routines = STATE.routines || [];
+  STATE.routineDays = STATE.routineDays || {};
+  STATE.snapshots = STATE.snapshots || [];
+  STORAGE = TrainEngine.storageReport(hostStatus, localLayer()?'ok':'unavailable', STATE.snapshots.length);
+  console.info('[train] storage — '+STORAGE.detail);
+  if(!STATE.snapshots.length) snapshotNow('first boot');
+  /* Readiness is allowed to fail; nothing above it is. Reporting the
+     failure rather than swallowing it is the whole point of the recovery
+     work, and a bare catch here hid a ReferenceError for two commits. */
+  try{ await computeReadiness(); }
+  catch(err){ READINESS=null; console.warn('[train] readiness unavailable: '+(err&&err.message)); }
   applyRoutine(curSession());
   render(); wireFresh();
   renderGoalBubble(); renderPhotos(); wirePhotoUpload(); renderOverviewCards(); renderStatsPicker(); drawStatsSection();
