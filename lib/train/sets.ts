@@ -57,6 +57,21 @@ export interface HistorySet {
    * rangeSets() below.
    */
   amrap?: boolean
+  /**
+   * When this set was logged, epoch milliseconds.
+   *
+   * Absent means UNKNOWN, never zero — every row written before this
+   * existed has none, and nothing rewrites them. Capture is cheap and
+   * gets more expensive every session logged without it; a year of
+   * history with no timestamps cannot be recovered.
+   */
+  at?: number
+  /**
+   * The timestamp was inferred rather than observed — an import placing
+   * sets at plausible times, or a migration. Every timing read refuses
+   * these, so a median rest is never part measurement and part fiction.
+   */
+  atEstimated?: boolean
   /** Absent means reps_weight. */
   kind?: SetKind
   /**

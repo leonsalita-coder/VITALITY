@@ -23,6 +23,7 @@ import { entryScore, workingRpe, type HistoryEntry, type SetKind } from './sets'
 import { deloadCut } from './targets'
 import type { TrainingAge } from './onboarding'
 import { amrapTrend } from './amrap'
+import { restTrend } from './timing'
 
 /** Sessions to sit at the reduced load before climbing back. */
 export const DELOAD_HOLD_SESSIONS = 2
@@ -95,7 +96,7 @@ export function isExcluded(date: string, windows: ExclusionWindow[] = []): boole
  * RPE 10 are the same chart and opposite problems: one lifter is not being
  * pushed, the other cannot absorb what they are already doing.
  */
-export type PlateauCause = 'fatigue' | 'programming' | 'unknown'
+export type PlateauCause = 'fatigue' | 'programming' | 'unknown' | 'rest_compression'
 
 export interface Plateau {
   sessions: number
@@ -116,6 +117,14 @@ export interface Plateau {
    * reads exactly as before.
    */
   amrapFalling: boolean
+  /**
+   * Rest between working sets has been falling across the stall.
+   *
+   * False when nothing was timed, which is not the same as false when
+   * rest was steady — see cause, which only says 'rest_compression' on
+   * observed timing.
+   */
+  restCompressing: boolean
 }
 
 /** A rise of this much across the window reads as accumulating fatigue. */
@@ -123,7 +132,7 @@ const RPE_RISE = 1
 
 function readCause(
   window: HistoryEntry[],
-): { cause: PlateauCause; rpe: number | null; amrapFalling: boolean } {
+): { cause: PlateauCause; rpe: number | null; amrapFalling: boolean; restCompressing: boolean } {
   const values = window.map(workingRpe).filter((v): v is number => v != null)
   const mean = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
 
@@ -132,17 +141,32 @@ function readCause(
      and it is measured rather than self-reported — so it outranks the RPE
      read below rather than being averaged with it. */
   const trend = amrapTrend(window)
-  if (trend && trend.falling) return { cause: 'fatigue', rpe: mean, amrapFalling: true }
+  if (trend && trend.falling) {
+    return { cause: 'fatigue', rpe: mean, amrapFalling: true, restCompressing: false }
+  }
+
+  /* Rushing the rest, which is measured too and which nothing else here
+     could see. It is checked before the RPE read because the answer is
+     different in kind: the lift is not too heavy, the lifter is not
+     recovering between sets, and cutting the weight would treat a
+     stopwatch problem as a strength problem. */
+  const rest = restTrend(window)
+  if (rest && rest.compressing) {
+    return { cause: 'rest_compression', rpe: mean, amrapFalling: false, restCompressing: true }
+  }
 
   // a trend needs at least two points; one lonely RPE proves nothing
   if (values.length < 2) {
-    return { cause: 'unknown', rpe: values.length ? values[0] : null, amrapFalling: false }
+    return {
+      cause: 'unknown', rpe: values.length ? values[0] : null,
+      amrapFalling: false, restCompressing: false,
+    }
   }
   const rising = values[values.length - 1] - values[0] >= RPE_RISE
   if (rising || (mean as number) >= HIGH_RPE) {
-    return { cause: 'fatigue', rpe: mean, amrapFalling: false }
+    return { cause: 'fatigue', rpe: mean, amrapFalling: false, restCompressing: false }
   }
-  return { cause: 'programming', rpe: mean, amrapFalling: false }
+  return { cause: 'programming', rpe: mean, amrapFalling: false, restCompressing: false }
 }
 
 /**
@@ -180,7 +204,7 @@ export function detectPlateau(
   const primary = scores.map((s) => s.primary)
   const secondary = scores.map((s) => s.secondary)
   if (flat(primary) && flat(secondary)) {
-    const { cause, rpe, amrapFalling } = readCause(recent)
+    const { cause, rpe, amrapFalling, restCompressing } = readCause(recent)
     const last = scores[scores.length - 1]
     return {
       sessions: PLATEAU_WINDOW,
@@ -190,6 +214,7 @@ export function detectPlateau(
       cause,
       rpe,
       amrapFalling,
+      restCompressing,
     }
   }
   return null
@@ -255,6 +280,12 @@ export function nextDeloadState(
        * Only act when there is real evidence; 'unknown' still flags.
        */
       if (plateau.cause === 'programming') return record
+      /* Rushing rest is a stopwatch problem, not a strength problem. The
+         lift is not too heavy; the lifter is not recovering between sets.
+         Cutting the weight would "fix" it by removing the stimulus, the
+         rest would stay rushed, and the next stall would arrive lighter.
+         So this never reaches the state machine at all. */
+      if (plateau.cause === 'rest_compression') return record
       /* Diagnose on the way in as well as on the way out, so a flagged
          record already says what it thinks is wrong. It is re-diagnosed at
          the moment of acting, which is where the freshest data lives. */
@@ -341,6 +372,30 @@ export function deloadPlan(
     weight: round(record.priorWeight * deloadCut(trainingAge, record.confidence)),
     setsFactor: 1,
   }
+}
+
+/**
+ * What this stall calls for, in one sentence.
+ *
+ * The rest-compression case is the reason this exists: every other cause
+ * ends in some version of "do less", and this one ends in "wait longer" —
+ * saying the wrong one would send a lifter to cut a weight they can
+ * actually lift.
+ */
+export function plateauAdvice(plateau: Plateau | null): string {
+  if (!plateau) return ''
+  if (plateau.cause === 'rest_compression') {
+    return 'Rest between sets has been getting shorter. Rest longer before the next set — the weight is not the problem.'
+  }
+  if (plateau.cause === 'fatigue') {
+    return plateau.amrapFalling
+      ? 'Your all-out set has been falling at the same weight. That is fatigue, not programming.'
+      : 'Effort has been climbing at the same weight. That is fatigue.'
+  }
+  if (plateau.cause === 'programming') {
+    return 'Steady effort at a flat weight — there is capacity here that is not being asked for.'
+  }
+  return 'Flat for a while, with nothing logged that says why.'
 }
 
 export interface DeloadCandidate {
