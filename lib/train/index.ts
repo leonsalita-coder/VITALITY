@@ -1,3 +1,4 @@
+export * from './staleness'
 export * from './asymmetry'
 export * from './trim'
 export * from './weekly'

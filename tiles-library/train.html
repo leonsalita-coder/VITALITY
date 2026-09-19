@@ -349,6 +349,7 @@ var TrainEngine = (() => {
     SECONDARY_SHARE: () => SECONDARY_SHARE,
     SET_KINDS: () => SET_KINDS,
     SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
+    STALE_WEEKS: () => STALE_WEEKS,
     STATIC_WEEKS: () => STATIC_WEEKS,
     SWAP_WEIGHTS: () => SWAP_WEIGHTS,
     SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
@@ -460,6 +461,7 @@ var TrainEngine = (() => {
     similarity: () => similarity,
     slugFromName: () => slugFromName,
     snapToLoadable: () => snapToLoadable,
+    stalenessFor: () => stalenessFor,
     startingWeightFor: () => startingWeightFor,
     stateLooksEmpty: () => stateLooksEmpty,
     storageReport: () => storageReport,
@@ -486,6 +488,505 @@ var TrainEngine = (() => {
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
+
+  // lib/train/catalog.ts
+  var m = (muscle, share) => ({ muscle, share });
+  var bar = (o) => ({
+    id: "",
+    name: "",
+    aliases: [],
+    pattern: "squat",
+    equipment: "barbell",
+    unilateral: false,
+    defaultSetKind: "reps_weight",
+    e1rmValid: true,
+    loading: "barbell",
+    incrementLb: 5,
+    primary: [],
+    secondary: [],
+    ...o
+  });
+  var CATALOG = [
+    // ── squat ─────────────────────────────────────────────────────────
+    bar({
+      id: "back_squat",
+      name: "Back Squat",
+      aliases: ["squat", "bb squat", "barbell squat", "high bar squat"],
+      pattern: "squat",
+      primary: [m("quads", 0.55), m("glutes", 0.3), m("lower_back", 0.1), m("hamstrings", 0.05)]
+    }),
+    bar({
+      id: "front_squat",
+      name: "Front Squat",
+      aliases: ["fs", "bb front squat"],
+      pattern: "squat",
+      primary: [m("quads", 0.65), m("glutes", 0.2), m("abs", 0.1), m("upper_back", 0.05)]
+    }),
+    bar({
+      id: "goblet_squat",
+      name: "Goblet Squat",
+      aliases: ["db goblet squat"],
+      pattern: "squat",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("quads", 0.6), m("glutes", 0.3), m("abs", 0.1)]
+    }),
+    bar({
+      id: "leg_press",
+      name: "Leg Press",
+      aliases: ["machine leg press"],
+      pattern: "squat",
+      equipment: "machine",
+      loading: "stack",
+      incrementLb: 10,
+      primary: [m("quads", 0.65), m("glutes", 0.3), m("hamstrings", 0.05)]
+    }),
+    // ── hinge ─────────────────────────────────────────────────────────
+    bar({
+      id: "deadlift",
+      name: "Deadlift",
+      aliases: ["dl", "conventional deadlift", "bb deadlift"],
+      pattern: "hinge",
+      primary: [m("glutes", 0.3), m("hamstrings", 0.25), m("lower_back", 0.2), m("traps", 0.15), m("forearms", 0.1)]
+    }),
+    bar({
+      id: "romanian_deadlift",
+      name: "Romanian Deadlift",
+      aliases: ["rdl", "romanian dl", "stiff leg deadlift", "sldl"],
+      pattern: "hinge",
+      primary: [m("hamstrings", 0.55), m("glutes", 0.3), m("lower_back", 0.15)]
+    }),
+    bar({
+      id: "hip_thrust",
+      name: "Hip Thrust",
+      aliases: ["barbell hip thrust", "glute bridge"],
+      pattern: "hinge",
+      incrementLb: 10,
+      primary: [m("glutes", 0.75), m("hamstrings", 0.25)]
+    }),
+    bar({
+      id: "back_extension",
+      name: "Back Extension",
+      aliases: ["hyperextension", "45 degree back extension"],
+      pattern: "hinge",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "bodyweight",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("lower_back", 0.5), m("glutes", 0.3), m("hamstrings", 0.2)],
+      bodyweightFactor: 0.45
+    }),
+    bar({
+      id: "kettlebell_swing",
+      name: "Kettlebell Swing",
+      aliases: ["kb swing", "swing"],
+      pattern: "hinge",
+      equipment: "kettlebell",
+      loading: "free",
+      e1rmValid: false,
+      incrementLb: 8,
+      primary: [m("glutes", 0.5), m("hamstrings", 0.3), m("lower_back", 0.2)]
+    }),
+    // ── lunge / unilateral ────────────────────────────────────────────
+    bar({
+      id: "walking_lunge",
+      name: "Walking Lunge",
+      aliases: ["lunge", "lunges", "db lunge"],
+      pattern: "lunge",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      e1rmValid: false,
+      primary: [m("quads", 0.45), m("glutes", 0.4), m("hamstrings", 0.15)]
+    }),
+    bar({
+      id: "bulgarian_split_squat",
+      name: "Bulgarian Split Squat",
+      aliases: ["bss", "rear foot elevated split squat", "rfess", "split squat"],
+      pattern: "lunge",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      e1rmValid: false,
+      primary: [m("quads", 0.45), m("glutes", 0.4), m("hamstrings", 0.15)]
+    }),
+    bar({
+      id: "step_up",
+      name: "Step-Up",
+      aliases: ["box step up", "db step up"],
+      pattern: "lunge",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      e1rmValid: false,
+      primary: [m("quads", 0.45), m("glutes", 0.45), m("calves", 0.1)]
+    }),
+    // ── horizontal push ───────────────────────────────────────────────
+    bar({
+      id: "bench_press",
+      name: "Bench Press",
+      aliases: ["bench", "bb bench", "barbell bench", "flat bench", "bb bench press", "bp"],
+      pattern: "horizontal_push",
+      primary: [m("chest", 0.7), m("triceps", 0.15), m("front_delts", 0.15)]
+    }),
+    bar({
+      id: "incline_bench_press",
+      name: "Incline Bench Press",
+      aliases: ["incline bench", "incline barbell bench", "incline press"],
+      pattern: "horizontal_push",
+      primary: [m("chest", 0.55), m("front_delts", 0.3), m("triceps", 0.15)]
+    }),
+    bar({
+      id: "dumbbell_bench_press",
+      name: "Dumbbell Bench Press",
+      aliases: ["db bench", "db bench press", "dumbbell press", "db press"],
+      pattern: "horizontal_push",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      primary: [m("chest", 0.68), m("triceps", 0.16), m("front_delts", 0.16)]
+    }),
+    bar({
+      id: "push_up",
+      name: "Push-Up",
+      aliases: ["pushup", "push ups", "pressup"],
+      pattern: "horizontal_push",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "bodyweight",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("chest", 0.65), m("triceps", 0.2), m("front_delts", 0.15)],
+      bodyweightFactor: 0.65
+    }),
+    bar({
+      id: "chest_fly",
+      name: "Chest Fly",
+      aliases: ["fly", "flye", "pec deck", "cable fly", "db fly"],
+      pattern: "isolation",
+      equipment: "cable",
+      loading: "stack",
+      e1rmValid: false,
+      primary: [m("chest", 0.85), m("front_delts", 0.15)]
+    }),
+    // ── vertical push ─────────────────────────────────────────────────
+    bar({
+      id: "overhead_press",
+      name: "Overhead Press",
+      aliases: ["ohp", "military press", "standing press", "shoulder press", "strict press"],
+      pattern: "vertical_push",
+      primary: [m("front_delts", 0.55), m("side_delts", 0.2), m("triceps", 0.2), m("abs", 0.05)]
+    }),
+    bar({
+      id: "dumbbell_shoulder_press",
+      name: "Dumbbell Shoulder Press",
+      aliases: ["db shoulder press", "db ohp", "seated db press"],
+      pattern: "vertical_push",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      primary: [m("front_delts", 0.55), m("side_delts", 0.2), m("triceps", 0.25)]
+    }),
+    bar({
+      id: "lateral_raise",
+      name: "Lateral Raise",
+      aliases: ["side raise", "db lateral raise", "lat raise", "side lateral raise"],
+      pattern: "isolation",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("side_delts", 0.85), m("traps", 0.15)]
+    }),
+    bar({
+      id: "dip",
+      name: "Dip",
+      aliases: ["dips", "parallel bar dip", "chest dip", "tricep dip"],
+      pattern: "vertical_push",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "bodyweight",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("chest", 0.45), m("triceps", 0.4), m("front_delts", 0.15)],
+      bodyweightFactor: 1
+    }),
+    // ── vertical pull ─────────────────────────────────────────────────
+    bar({
+      id: "pull_up",
+      name: "Pull-Up",
+      aliases: ["pullup", "pull ups", "pullups"],
+      pattern: "vertical_pull",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "bodyweight",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)],
+      bodyweightFactor: 1
+    }),
+    bar({
+      id: "chin_up",
+      name: "Chin-Up",
+      aliases: ["chinup", "chin ups", "chinups"],
+      pattern: "vertical_pull",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "bodyweight",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("lats", 0.5), m("biceps", 0.35), m("upper_back", 0.15)],
+      bodyweightFactor: 1
+    }),
+    bar({
+      id: "lat_pulldown",
+      name: "Lat Pulldown",
+      aliases: ["pulldown", "lat pull down", "cable pulldown"],
+      pattern: "vertical_pull",
+      equipment: "machine",
+      loading: "stack",
+      incrementLb: 10,
+      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)]
+    }),
+    // ── horizontal pull ───────────────────────────────────────────────
+    bar({
+      id: "barbell_row",
+      name: "Barbell Row",
+      aliases: ["bb row", "bent over row", "pendlay row", "row"],
+      pattern: "horizontal_pull",
+      primary: [m("upper_back", 0.35), m("lats", 0.35), m("rear_delts", 0.15), m("biceps", 0.15)]
+    }),
+    bar({
+      id: "dumbbell_row",
+      name: "Dumbbell Row",
+      aliases: ["db row", "one arm row", "single arm row"],
+      pattern: "horizontal_pull",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      primary: [m("lats", 0.45), m("upper_back", 0.3), m("biceps", 0.25)]
+    }),
+    bar({
+      id: "seated_cable_row",
+      name: "Seated Cable Row",
+      aliases: ["cable row", "seated row"],
+      pattern: "horizontal_pull",
+      equipment: "cable",
+      loading: "stack",
+      incrementLb: 10,
+      primary: [m("upper_back", 0.45), m("lats", 0.3), m("biceps", 0.25)]
+    }),
+    bar({
+      id: "face_pull",
+      name: "Face Pull",
+      aliases: ["cable face pull", "facepull"],
+      pattern: "horizontal_pull",
+      equipment: "cable",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 5,
+      primary: [m("rear_delts", 0.5), m("upper_back", 0.3), m("traps", 0.2)]
+    }),
+    // ── arms ──────────────────────────────────────────────────────────
+    bar({
+      id: "barbell_curl",
+      name: "Barbell Curl",
+      aliases: ["bb curl", "bicep curl", "ez bar curl", "curl"],
+      pattern: "isolation",
+      e1rmValid: false,
+      primary: [m("biceps", 0.85), m("forearms", 0.15)]
+    }),
+    bar({
+      id: "dumbbell_curl",
+      name: "Dumbbell Curl",
+      aliases: ["db curl", "dumbbell bicep curl"],
+      pattern: "isolation",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("biceps", 0.85), m("forearms", 0.15)]
+    }),
+    bar({
+      id: "hammer_curl",
+      name: "Hammer Curl",
+      aliases: ["db hammer curl", "neutral curl"],
+      pattern: "isolation",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("biceps", 0.6), m("forearms", 0.4)]
+    }),
+    bar({
+      id: "tricep_pushdown",
+      name: "Tricep Pushdown",
+      aliases: ["pushdown", "cable pushdown", "rope pushdown", "tricep extension"],
+      pattern: "isolation",
+      equipment: "cable",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 5,
+      primary: [m("triceps", 1)]
+    }),
+    bar({
+      id: "skullcrusher",
+      name: "Skullcrusher",
+      aliases: ["lying tricep extension", "skull crusher"],
+      pattern: "isolation",
+      e1rmValid: false,
+      primary: [m("triceps", 1)]
+    }),
+    // ── legs, isolation ───────────────────────────────────────────────
+    bar({
+      id: "leg_curl",
+      name: "Leg Curl",
+      aliases: ["hamstring curl", "lying leg curl", "seated leg curl"],
+      pattern: "isolation",
+      equipment: "machine",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("hamstrings", 0.9), m("calves", 0.1)]
+    }),
+    bar({
+      id: "leg_extension",
+      name: "Leg Extension",
+      aliases: ["quad extension", "knee extension"],
+      pattern: "isolation",
+      equipment: "machine",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("quads", 1)]
+    }),
+    bar({
+      id: "calf_raise",
+      name: "Calf Raise",
+      aliases: ["standing calf raise", "seated calf raise", "calf raises"],
+      pattern: "isolation",
+      equipment: "machine",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("calves", 1)]
+    }),
+    // ── core ──────────────────────────────────────────────────────────
+    bar({
+      id: "plank",
+      name: "Plank",
+      aliases: ["front plank", "planks"],
+      pattern: "core",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "time",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("abs", 0.7), m("obliques", 0.3)]
+    }),
+    bar({
+      id: "side_plank",
+      name: "Side Plank",
+      aliases: ["side planks"],
+      pattern: "core",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "time",
+      unilateral: true,
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("obliques", 0.75), m("abs", 0.25)]
+    }),
+    bar({
+      id: "hanging_leg_raise",
+      name: "Hanging Leg Raise",
+      aliases: ["leg raise", "hanging knee raise", "leg raises"],
+      pattern: "core",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "bodyweight",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("abs", 0.7), m("obliques", 0.15), m("forearms", 0.15)],
+      bodyweightFactor: 0.4
+    }),
+    bar({
+      id: "cable_woodchop",
+      name: "Cable Woodchop",
+      aliases: ["woodchop", "wood chop", "cable chop"],
+      pattern: "rotation",
+      equipment: "cable",
+      loading: "stack",
+      unilateral: true,
+      e1rmValid: false,
+      incrementLb: 5,
+      primary: [m("obliques", 0.7), m("abs", 0.3)]
+    }),
+    // ── explosiveness: what taekwondo and soccer actually need ────────
+    bar({
+      id: "box_jump",
+      name: "Box Jump",
+      aliases: ["box jumps", "jump box"],
+      pattern: "jump",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "bodyweight",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("quads", 0.45), m("glutes", 0.4), m("calves", 0.15)],
+      bodyweightFactor: 1
+    }),
+    bar({
+      id: "broad_jump",
+      name: "Broad Jump",
+      aliases: ["standing broad jump", "long jump"],
+      pattern: "jump",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "distance",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("glutes", 0.4), m("quads", 0.35), m("hamstrings", 0.25)]
+    }),
+    bar({
+      id: "sprint",
+      name: "Sprint",
+      aliases: ["sprints", "shuttle run", "shuttles", "run"],
+      pattern: "sprint",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "time_distance",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("hamstrings", 0.3), m("quads", 0.25), m("glutes", 0.25), m("calves", 0.2)]
+    }),
+    bar({
+      id: "sled_push",
+      name: "Sled Push",
+      aliases: ["prowler push", "sled"],
+      pattern: "sprint",
+      equipment: "sled",
+      loading: "free",
+      defaultSetKind: "distance",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("quads", 0.4), m("glutes", 0.3), m("calves", 0.2), m("abs", 0.1)]
+    }),
+    bar({
+      id: "farmer_carry",
+      name: "Farmer's Carry",
+      aliases: ["farmers walk", "farmer walk", "loaded carry", "farmers carry"],
+      pattern: "carry",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      defaultSetKind: "distance",
+      e1rmValid: false,
+      primary: [m("forearms", 0.35), m("traps", 0.3), m("abs", 0.2), m("obliques", 0.15)]
+    })
+  ];
+  var CATALOG_BY_ID = Object.fromEntries(
+    CATALOG.map((e) => [e.id, e])
+  );
+  function catalogExercise(id) {
+    return CATALOG_BY_ID[id] || null;
+  }
 
   // lib/train/bodyweight.ts
   function bodyweightAt(history, date) {
@@ -671,51 +1172,96 @@ var TrainEngine = (() => {
     return values.reduce((a, b) => a + b, 0) / values.length;
   }
 
-  // lib/train/asymmetry.ts
-  var MIN_LOAD_GAP = 0.12;
-  var MIN_ASYMMETRY_SESSIONS = 4;
-  var PERSISTENCE = 0.7;
-  var mean = (v) => v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
-  function sideGapOf(entry) {
-    if (!entry || entry.off) return null;
-    const pairs = (entry.sets || []).filter(isWorkingSet).map(sidesOf).filter((s) => s != null);
-    if (!pairs.length) return null;
-    const left = mean(pairs.map((p) => p.left.w));
-    const right = mean(pairs.map((p) => p.right.w));
-    const leftReps = mean(pairs.map((p) => p.left.r));
-    const rightReps = mean(pairs.map((p) => p.right.r));
-    const weaker = Math.min(left, right);
-    const loadGap = weaker > 0 ? Math.abs(left - right) / weaker : 0;
-    return {
-      left: Math.round(left * 10) / 10,
-      right: Math.round(right * 10) / 10,
-      stronger: left === right ? "even" : left > right ? "left" : "right",
-      loadGap: Math.round(loadGap * 1e3) / 1e3,
-      repGap: Math.round(Math.abs(leftReps - rightReps) * 10) / 10
-    };
+  // lib/train/targets.ts
+  var PROFILES = {
+    beginner: {
+      ceiling: 14,
+      floor: 5,
+      deloadMeasured: 0.95,
+      deloadInferred: 0.97,
+      repRanges: [[5, 8], [8, 12], [12, 15]]
+    },
+    intermediate: {
+      ceiling: 20,
+      floor: 10,
+      deloadMeasured: 0.9,
+      deloadInferred: 0.95,
+      repRanges: [[4, 6], [6, 10], [10, 15]]
+    },
+    advanced: {
+      ceiling: 25,
+      floor: 12,
+      deloadMeasured: 0.85,
+      deloadInferred: 0.92,
+      repRanges: [[3, 5], [5, 8], [8, 12]]
+    }
+  };
+  var UNKNOWN = PROFILES.intermediate;
+  function profileFor(age) {
+    return age && PROFILES[age] ? PROFILES[age] : UNKNOWN;
   }
-  function asymmetryFor(history) {
-    const gaps = (history || []).map(sideGapOf).filter((g) => g != null);
-    if (gaps.length < MIN_ASYMMETRY_SESSIONS) return null;
-    const sides = ["left", "right"];
-    for (const side of sides) {
-      const showing = gaps.filter((g) => g.stronger === side && g.loadGap >= MIN_LOAD_GAP);
-      if (showing.length < Math.ceil(gaps.length * PERSISTENCE)) continue;
-      const left = Math.round(mean(gaps.map((g) => g.left)) * 10) / 10;
-      const right = Math.round(mean(gaps.map((g) => g.right)) * 10) / 10;
-      const loadGap = Math.round(mean(showing.map((g) => g.loadGap)) * 1e3) / 1e3;
+  var MIN_TRAILING = 4;
+  var DROP_FRACTION = 0.6;
+  function weeklySetBand(ctx = {}) {
+    const profile = profileFor(ctx.trainingAge);
+    const trailing = ctx.trailingSets;
+    if (typeof trailing === "number" && Number.isFinite(trailing) && trailing >= MIN_TRAILING) {
       return {
-        stronger: side,
-        left,
-        right,
-        loadGap,
-        sessions: gaps.length,
-        /* Both numbers, the word "difference", and no verdict. It is not
-           this file's business whether that difference matters. */
-        text: `Across ${gaps.length} sessions logged per side, your left has averaged ${left} and your right ${right} \u2014 a difference of ${Math.round(loadGap * 100)}%.`
+        floor: Math.round(trailing * DROP_FRACTION * 10) / 10,
+        ceiling: profile.ceiling,
+        floorSource: "trailing"
       };
     }
-    return null;
+    if (ctx.trainingAge) {
+      return { floor: profile.floor, ceiling: profile.ceiling, floorSource: "age" };
+    }
+    return { floor: null, ceiling: profile.ceiling, floorSource: "none" };
+  }
+  function deloadCut(age, confidence) {
+    const profile = profileFor(age);
+    return confidence === "measured" ? profile.deloadMeasured : profile.deloadInferred;
+  }
+  function repRangeFor(age, tier) {
+    const ranges = profileFor(age).repRanges;
+    if (tier <= 1) return ranges[0];
+    if (tier >= 3) return ranges[2];
+    return ranges[1];
+  }
+  function streakTarget(statedFrequency, fallback = 4) {
+    if (typeof statedFrequency !== "number" || !Number.isFinite(statedFrequency)) return fallback;
+    return Math.min(14, Math.max(1, Math.round(statedFrequency)));
+  }
+
+  // lib/train/amrap.ts
+  var AMRAP_OVER = 3;
+  var AMRAP_MAX_MULTIPLIER = 4;
+  function amrapSignal(entry, target) {
+    if (!entry) return null;
+    const set = amrapOf(entry);
+    if (!set || typeof set.r !== "number" || !Number.isFinite(set.r)) return null;
+    if (!Number.isFinite(target) || target <= 0) return null;
+    const reps = set.r;
+    const surplus = reps - target;
+    if (surplus < 0) {
+      return { reps, target, surplus, verdict: "struggling", multiplier: 1 };
+    }
+    if (surplus < AMRAP_OVER) {
+      return { reps, target, surplus, verdict: "on_target", multiplier: 1 };
+    }
+    const multiplier = Math.min(AMRAP_MAX_MULTIPLIER, 1 + Math.floor(surplus / AMRAP_OVER));
+    return { reps, target, surplus, verdict: "under_loaded", multiplier };
+  }
+  function amrapTrend(history) {
+    const reps = [];
+    for (const entry of history || []) {
+      if (!entry || entry.off) continue;
+      const set = amrapOf(entry);
+      if (set && typeof set.r === "number" && Number.isFinite(set.r)) reps.push(set.r);
+    }
+    if (reps.length < 2) return null;
+    const from = reps[0];
+    const to = reps[reps.length - 1];
+    return { from, to, sessions: reps.length, falling: to < from };
   }
 
   // lib/train/timing.ts
@@ -775,6 +1321,415 @@ var TrainEngine = (() => {
       sessions: medians.length,
       compressing: from > 0 && to / from <= REST_COMPRESSION
     };
+  }
+
+  // lib/train/deload.ts
+  var DELOAD_HOLD_SESSIONS = 2;
+  var RECOVERY_FLOOR = 55;
+  var HIGH_RPE = 9;
+  var PLATEAU_WINDOW = 3;
+  var COOLDOWN_DAYS = 14;
+  function isExcluded(date, windows = []) {
+    return (windows || []).some((w) => date >= w.from && date <= w.to);
+  }
+  var RPE_RISE = 1;
+  function readCause(window) {
+    const values = window.map(workingRpe).filter((v) => v != null);
+    const mean3 = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+    const trend = amrapTrend(window);
+    if (trend && trend.falling) {
+      return { cause: "fatigue", rpe: mean3, amrapFalling: true, restCompressing: false };
+    }
+    const rest = restTrend(window);
+    if (rest && rest.compressing) {
+      return { cause: "rest_compression", rpe: mean3, amrapFalling: false, restCompressing: true };
+    }
+    if (values.length < 2) {
+      return {
+        cause: "unknown",
+        rpe: values.length ? values[0] : null,
+        amrapFalling: false,
+        restCompressing: false
+      };
+    }
+    const rising = values[values.length - 1] - values[0] >= RPE_RISE;
+    if (rising || mean3 >= HIGH_RPE) {
+      return { cause: "fatigue", rpe: mean3, amrapFalling: false, restCompressing: false };
+    }
+    return { cause: "programming", rpe: mean3, amrapFalling: false, restCompressing: false };
+  }
+  function detectPlateau(history, opts = {}) {
+    const usable = (history || []).filter(
+      (entry) => entry && !entry.off && !isExcluded(entry.date, opts.excluded)
+    );
+    if (usable.length < PLATEAU_WINDOW + 1) return null;
+    const recent = usable.slice(-PLATEAU_WINDOW);
+    const scores = recent.map((entry) => entryScore(entry, {
+      bodyweightLb: opts.bodyweightLb,
+      bodyweightFactor: opts.bodyweightFactor
+    }));
+    const flat = (arr) => arr.every((v, i) => i === 0 || v <= arr[i - 1]);
+    const primary = scores.map((s) => s.primary);
+    const secondary = scores.map((s) => s.secondary);
+    if (flat(primary) && flat(secondary)) {
+      const { cause, rpe, amrapFalling, restCompressing } = readCause(recent);
+      const last = scores[scores.length - 1];
+      return {
+        sessions: PLATEAU_WINDOW,
+        // reported in the kind's own unit; assisted scores are negated
+        weight: Math.abs(last.primary),
+        kind: last.kind,
+        cause,
+        rpe,
+        amrapFalling,
+        restCompressing
+      };
+    }
+    return null;
+  }
+  function addDays(date, days) {
+    const [y, m2, d] = date.split("-").map(Number);
+    const dt = new Date(y, (m2 || 1) - 1, d || 1);
+    dt.setDate(dt.getDate() + days);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  }
+  function diagnose(ctx, plateau) {
+    if (typeof ctx.recovery === "number" && ctx.recovery < RECOVERY_FLOOR) {
+      return { kind: "volume", confidence: "measured" };
+    }
+    if (typeof ctx.rpe === "number" && ctx.rpe >= HIGH_RPE) {
+      return { kind: "intensity", confidence: "measured" };
+    }
+    if (plateau && plateau.cause === "fatigue") {
+      return { kind: "intensity", confidence: "measured" };
+    }
+    return { kind: "intensity", confidence: "inferred" };
+  }
+  var NORMAL = (weight, today) => ({
+    state: "normal",
+    kind: null,
+    priorWeight: weight,
+    since: today,
+    sessions: 0,
+    confidence: "measured"
+  });
+  function nextDeloadState(current, ctx) {
+    const plateau = detectPlateau(ctx.history, { excluded: ctx.excluded });
+    const record = current || NORMAL(plateau ? plateau.weight : 0, ctx.today);
+    switch (record.state) {
+      case "normal": {
+        if (!plateau) return record;
+        if (record.cooldownUntil && ctx.today < record.cooldownUntil) return record;
+        if (plateau.cause === "programming") return record;
+        if (plateau.cause === "rest_compression") return record;
+        const flagDx = diagnose(ctx, plateau);
+        return {
+          ...record,
+          state: "flagged",
+          kind: flagDx.kind,
+          confidence: flagDx.confidence,
+          priorWeight: plateau.weight,
+          since: ctx.today,
+          sessions: 0
+        };
+      }
+      case "flagged": {
+        if (!plateau) return { ...record, state: "normal", kind: null, since: ctx.today, sessions: 0 };
+        const { kind, confidence } = diagnose(ctx, plateau);
+        return {
+          ...record,
+          state: "deloading",
+          kind,
+          confidence,
+          priorWeight: plateau.weight,
+          since: ctx.today,
+          sessions: 0
+        };
+      }
+      case "deloading": {
+        if (!ctx.sessionLogged) return record;
+        const sessions = record.sessions + 1;
+        if (sessions < DELOAD_HOLD_SESSIONS) return { ...record, sessions };
+        return { ...record, state: "reapproach", since: ctx.today, sessions: 0 };
+      }
+      case "reapproach": {
+        if (!ctx.sessionLogged) return record;
+        return {
+          ...record,
+          state: "normal",
+          kind: null,
+          since: ctx.today,
+          sessions: 0,
+          // a lift that just finished a deload must not immediately re-flag,
+          // or the machine oscillates instead of resolving
+          cooldownUntil: addDays(ctx.today, COOLDOWN_DAYS)
+        };
+      }
+    }
+    return record;
+  }
+  var VOLUME_CUT = 2 / 3;
+  var REAPPROACH = 0.95;
+  function deloadPlan(record, trainingAge) {
+    if (!record) return { weight: null, setsFactor: 1 };
+    const round7 = (n) => Math.round(n * 100) / 100;
+    if (record.state === "reapproach") {
+      return { weight: round7(record.priorWeight * REAPPROACH), setsFactor: 1 };
+    }
+    if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
+    if (record.kind === "volume") {
+      return { weight: round7(record.priorWeight), setsFactor: VOLUME_CUT };
+    }
+    return {
+      weight: round7(record.priorWeight * deloadCut(trainingAge, record.confidence)),
+      setsFactor: 1
+    };
+  }
+  function plateauAdvice(plateau) {
+    if (!plateau) return "";
+    if (plateau.cause === "rest_compression") {
+      return "Rest between sets has been getting shorter. Rest longer before the next set \u2014 the weight is not the problem.";
+    }
+    if (plateau.cause === "fatigue") {
+      return plateau.amrapFalling ? "Your all-out set has been falling at the same weight. That is fatigue, not programming." : "Effort has been climbing at the same weight. That is fatigue.";
+    }
+    if (plateau.cause === "programming") {
+      return "Steady effort at a flat weight \u2014 there is capacity here that is not being asked for.";
+    }
+    return "Flat for a while, with nothing logged that says why.";
+  }
+  function limitDeloads(candidates, max = 2) {
+    return (candidates || []).slice().sort((a, b) => b.plateauLength - a.plateauLength || b.weight - a.weight).slice(0, max).map((c) => c.id);
+  }
+
+  // lib/train/swap.ts
+  var SWAP_WEIGHTS = {
+    pattern: 1,
+    muscles: 0.6,
+    history: 0.25,
+    equipment: 0.4
+  };
+  var HISTORY_SATURATION = 10;
+  var ALWAYS_AVAILABLE = ["bodyweight", "none", ""];
+  function muscleOverlap(a, b) {
+    const share = (list, secondary) => {
+      const out = /* @__PURE__ */ new Map();
+      for (const c of list || []) out.set(c.muscle, (out.get(c.muscle) || 0) + c.share);
+      for (const c of secondary || []) out.set(c.muscle, (out.get(c.muscle) || 0) + c.share * 0.5);
+      return out;
+    };
+    const left = share(a.primary, a.secondary);
+    const right = share(b.primary, b.secondary);
+    let total = 0;
+    for (const [muscle, value] of left) {
+      const other = right.get(muscle);
+      if (other != null) total += Math.min(value, other);
+    }
+    return Math.min(1, total);
+  }
+  function equipmentAvailable(equipment, available) {
+    const want = String(equipment || "").toLowerCase();
+    if (ALWAYS_AVAILABLE.includes(want)) return true;
+    return (available || []).some((have) => String(have).toLowerCase() === want);
+  }
+  function headline(exercise) {
+    return [...exercise.primary || []].sort((a, b) => b.share - a.share).slice(0, 2).map((c) => c.muscle.replace(/_/g, " "));
+  }
+  function rankSwaps(replacing, context) {
+    if (!replacing || !replacing.id) return [];
+    const catalog = context.known && context.known.length ? context.known : CATALOG;
+    const available = context.equipment || [];
+    const knowsEquipment = available.length > 0;
+    const sessionsOf = context.sessions || {};
+    const candidates = [];
+    for (const exercise of catalog) {
+      if (!exercise || exercise.id === replacing.id) continue;
+      if (knowsEquipment && !equipmentAvailable(exercise.equipment, available)) continue;
+      const samePattern = exercise.pattern === replacing.pattern;
+      const overlap = muscleOverlap(replacing, exercise);
+      const sessions = Math.max(0, sessionsOf[exercise.id] || 0);
+      const familiarity = Math.min(1, sessions / HISTORY_SATURATION);
+      if (!samePattern && overlap < 0.2) continue;
+      const reasons = [];
+      let score = 0;
+      if (samePattern) {
+        score += SWAP_WEIGHTS.pattern;
+        reasons.push(`same movement \u2014 ${replacing.pattern.replace(/_/g, " ")}`);
+      }
+      if (overlap > 0) {
+        score += SWAP_WEIGHTS.muscles * overlap;
+        const muscles = headline(exercise);
+        if (muscles.length) reasons.push(`works ${muscles.join(" and ")}`);
+      }
+      if (sessions > 0) {
+        score += SWAP_WEIGHTS.history * familiarity;
+        reasons.push(`${sessions} sessions on record \u2014 keeps your progression`);
+      }
+      if (knowsEquipment && equipmentAvailable(exercise.equipment, available)) {
+        score += SWAP_WEIGHTS.equipment;
+        if (!ALWAYS_AVAILABLE.includes(exercise.equipment)) {
+          reasons.push(`${exercise.equipment} \u2014 equipment you have`);
+        }
+      }
+      if (!reasons.length) continue;
+      candidates.push({
+        id: exercise.id,
+        name: exercise.name,
+        equipment: exercise.equipment,
+        pattern: exercise.pattern,
+        sessions,
+        score: Math.round(score * 1e3) / 1e3,
+        reasons
+      });
+    }
+    return candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  }
+
+  // lib/train/windows.ts
+  var DAY_MS = 864e5;
+  function dateKey(ms) {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function localMidnight(dateStr) {
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+  function daysBetween(from, to) {
+    return Math.round((localMidnight(to) - localMidnight(from)) / DAY_MS);
+  }
+  function shiftDays(ms, back) {
+    const d = new Date(ms);
+    d.setDate(d.getDate() - back);
+    return d;
+  }
+  function rollingWindow(now, endingDaysAgo = 0, days = 7) {
+    const end = shiftDays(now, endingDaysAgo);
+    const start = shiftDays(end.getTime(), days - 1);
+    return { from: dateKey(start.getTime()), to: dateKey(end.getTime()), days };
+  }
+  function baselineWindow(now, weeks = 4, skipDays = 7) {
+    return rollingWindow(now, skipDays, weeks * 7);
+  }
+  function inWindow(date, window) {
+    return !!date && date >= window.from && date <= window.to;
+  }
+  function deltaOf(current, baseline) {
+    if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline === 0) {
+      return { current, baseline, ratio: null, change: null };
+    }
+    const ratio = current / baseline;
+    return {
+      current,
+      baseline,
+      ratio: Math.round(ratio * 1e3) / 1e3,
+      change: Math.round((ratio - 1) * 1e3) / 1e3
+    };
+  }
+  function asPercent(change) {
+    if (change == null) return "";
+    const pct2 = Math.round(Math.abs(change) * 100);
+    return `${change >= 0 ? "up" : "down"} ${pct2}%`;
+  }
+
+  // lib/train/staleness.ts
+  var STALE_WEEKS = 12;
+  var MAX_CANDIDATES = 3;
+  var realSessions = (entries) => (entries || []).filter((e) => e && !e.off && e.date).sort((a, b) => a.date.localeCompare(b.date));
+  function weeksInRotation(entries, now) {
+    const sessions = realSessions(entries);
+    if (!sessions.length) return 0;
+    return Math.floor(daysBetween(sessions[0].date, dateKey(now)) / 7);
+  }
+  function weeksSinceAnythingNew(history, now) {
+    let newest = 0;
+    for (const id of Object.keys(history || {})) {
+      const sessions = realSessions(history[id]);
+      if (!sessions.length) continue;
+      const weeks = weeksInRotation(history[id], now);
+      if (newest === 0 || weeks < newest) newest = weeks;
+    }
+    return newest;
+  }
+  function stalenessFor(ctx) {
+    const history = ctx.history || {};
+    const ids = Object.keys(history);
+    if (!ids.length) return null;
+    if (weeksSinceAnythingNew(history, ctx.now) < STALE_WEEKS) return null;
+    const found = [];
+    for (const id of ids) {
+      const weeks = weeksInRotation(history[id], ctx.now);
+      if (weeks < STALE_WEEKS) continue;
+      const plateau = detectPlateau(history[id], {});
+      if (!plateau) continue;
+      const sessions = {};
+      for (const other of ids) sessions[other] = realSessions(history[other]).length;
+      const def = catalogExercise(id);
+      const candidates = def ? rankSwaps(def, { equipment: ctx.equipment || [], sessions }).slice(0, MAX_CANDIDATES) : [];
+      if (!candidates.length) continue;
+      const names = candidates.map((c) => c.name);
+      found.push({
+        exerciseId: id,
+        weeks,
+        candidates,
+        /* States the fact and hands over the options. It does not say the
+           routine is wrong — it says it has been the same for a long time
+           and the lift has stopped moving, which are both true. */
+        text: `${def.name} has been in rotation ${weeks} weeks and has stopped moving. Same pattern, different stimulus: ${names.join(", ")}.`
+      });
+    }
+    if (!found.length) return null;
+    found.sort((a, b) => b.weeks - a.weeks || a.exerciseId.localeCompare(b.exerciseId));
+    return found[0];
+  }
+
+  // lib/train/asymmetry.ts
+  var MIN_LOAD_GAP = 0.12;
+  var MIN_ASYMMETRY_SESSIONS = 4;
+  var PERSISTENCE = 0.7;
+  var mean = (v) => v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+  function sideGapOf(entry) {
+    if (!entry || entry.off) return null;
+    const pairs = (entry.sets || []).filter(isWorkingSet).map(sidesOf).filter((s) => s != null);
+    if (!pairs.length) return null;
+    const left = mean(pairs.map((p) => p.left.w));
+    const right = mean(pairs.map((p) => p.right.w));
+    const leftReps = mean(pairs.map((p) => p.left.r));
+    const rightReps = mean(pairs.map((p) => p.right.r));
+    const weaker = Math.min(left, right);
+    const loadGap = weaker > 0 ? Math.abs(left - right) / weaker : 0;
+    return {
+      left: Math.round(left * 10) / 10,
+      right: Math.round(right * 10) / 10,
+      stronger: left === right ? "even" : left > right ? "left" : "right",
+      loadGap: Math.round(loadGap * 1e3) / 1e3,
+      repGap: Math.round(Math.abs(leftReps - rightReps) * 10) / 10
+    };
+  }
+  function asymmetryFor(history) {
+    const gaps = (history || []).map(sideGapOf).filter((g) => g != null);
+    if (gaps.length < MIN_ASYMMETRY_SESSIONS) return null;
+    const sides = ["left", "right"];
+    for (const side of sides) {
+      const showing = gaps.filter((g) => g.stronger === side && g.loadGap >= MIN_LOAD_GAP);
+      if (showing.length < Math.ceil(gaps.length * PERSISTENCE)) continue;
+      const left = Math.round(mean(gaps.map((g) => g.left)) * 10) / 10;
+      const right = Math.round(mean(gaps.map((g) => g.right)) * 10) / 10;
+      const loadGap = Math.round(mean(showing.map((g) => g.loadGap)) * 1e3) / 1e3;
+      return {
+        stronger: side,
+        left,
+        right,
+        loadGap,
+        sessions: gaps.length,
+        /* Both numbers, the word "difference", and no verdict. It is not
+           this file's business whether that difference matters. */
+        text: `Across ${gaps.length} sessions logged per side, your left has averaged ${left} and your right ${right} \u2014 a difference of ${Math.round(loadGap * 100)}%.`
+      };
+    }
+    return null;
   }
 
   // lib/train/trim.ts
@@ -1098,114 +2053,6 @@ var TrainEngine = (() => {
   }
   var PUSH_MUSCLES = ["chest", "front_delts", "side_delts", "triceps"];
   var PULL_MUSCLES = ["lats", "upper_back", "rear_delts", "biceps", "traps"];
-
-  // lib/train/targets.ts
-  var PROFILES = {
-    beginner: {
-      ceiling: 14,
-      floor: 5,
-      deloadMeasured: 0.95,
-      deloadInferred: 0.97,
-      repRanges: [[5, 8], [8, 12], [12, 15]]
-    },
-    intermediate: {
-      ceiling: 20,
-      floor: 10,
-      deloadMeasured: 0.9,
-      deloadInferred: 0.95,
-      repRanges: [[4, 6], [6, 10], [10, 15]]
-    },
-    advanced: {
-      ceiling: 25,
-      floor: 12,
-      deloadMeasured: 0.85,
-      deloadInferred: 0.92,
-      repRanges: [[3, 5], [5, 8], [8, 12]]
-    }
-  };
-  var UNKNOWN = PROFILES.intermediate;
-  function profileFor(age) {
-    return age && PROFILES[age] ? PROFILES[age] : UNKNOWN;
-  }
-  var MIN_TRAILING = 4;
-  var DROP_FRACTION = 0.6;
-  function weeklySetBand(ctx = {}) {
-    const profile = profileFor(ctx.trainingAge);
-    const trailing = ctx.trailingSets;
-    if (typeof trailing === "number" && Number.isFinite(trailing) && trailing >= MIN_TRAILING) {
-      return {
-        floor: Math.round(trailing * DROP_FRACTION * 10) / 10,
-        ceiling: profile.ceiling,
-        floorSource: "trailing"
-      };
-    }
-    if (ctx.trainingAge) {
-      return { floor: profile.floor, ceiling: profile.ceiling, floorSource: "age" };
-    }
-    return { floor: null, ceiling: profile.ceiling, floorSource: "none" };
-  }
-  function deloadCut(age, confidence) {
-    const profile = profileFor(age);
-    return confidence === "measured" ? profile.deloadMeasured : profile.deloadInferred;
-  }
-  function repRangeFor(age, tier) {
-    const ranges = profileFor(age).repRanges;
-    if (tier <= 1) return ranges[0];
-    if (tier >= 3) return ranges[2];
-    return ranges[1];
-  }
-  function streakTarget(statedFrequency, fallback = 4) {
-    if (typeof statedFrequency !== "number" || !Number.isFinite(statedFrequency)) return fallback;
-    return Math.min(14, Math.max(1, Math.round(statedFrequency)));
-  }
-
-  // lib/train/windows.ts
-  var DAY_MS = 864e5;
-  function dateKey(ms) {
-    const d = new Date(ms);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  }
-  function localMidnight(dateStr) {
-    const [y, m2, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-  }
-  function daysBetween(from, to) {
-    return Math.round((localMidnight(to) - localMidnight(from)) / DAY_MS);
-  }
-  function shiftDays(ms, back) {
-    const d = new Date(ms);
-    d.setDate(d.getDate() - back);
-    return d;
-  }
-  function rollingWindow(now, endingDaysAgo = 0, days = 7) {
-    const end = shiftDays(now, endingDaysAgo);
-    const start = shiftDays(end.getTime(), days - 1);
-    return { from: dateKey(start.getTime()), to: dateKey(end.getTime()), days };
-  }
-  function baselineWindow(now, weeks = 4, skipDays = 7) {
-    return rollingWindow(now, skipDays, weeks * 7);
-  }
-  function inWindow(date, window) {
-    return !!date && date >= window.from && date <= window.to;
-  }
-  function deltaOf(current, baseline) {
-    if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline === 0) {
-      return { current, baseline, ratio: null, change: null };
-    }
-    const ratio = current / baseline;
-    return {
-      current,
-      baseline,
-      ratio: Math.round(ratio * 1e3) / 1e3,
-      change: Math.round((ratio - 1) * 1e3) / 1e3
-    };
-  }
-  function asPercent(change) {
-    if (change == null) return "";
-    const pct2 = Math.round(Math.abs(change) * 100);
-    return `${change >= 0 ? "up" : "down"} ${pct2}%`;
-  }
 
   // lib/train/analysis.ts
   var GAP_DAYS = 14;
@@ -1928,588 +2775,6 @@ var TrainEngine = (() => {
     };
   }
 
-  // lib/train/catalog.ts
-  var m = (muscle, share) => ({ muscle, share });
-  var bar = (o) => ({
-    id: "",
-    name: "",
-    aliases: [],
-    pattern: "squat",
-    equipment: "barbell",
-    unilateral: false,
-    defaultSetKind: "reps_weight",
-    e1rmValid: true,
-    loading: "barbell",
-    incrementLb: 5,
-    primary: [],
-    secondary: [],
-    ...o
-  });
-  var CATALOG = [
-    // ── squat ─────────────────────────────────────────────────────────
-    bar({
-      id: "back_squat",
-      name: "Back Squat",
-      aliases: ["squat", "bb squat", "barbell squat", "high bar squat"],
-      pattern: "squat",
-      primary: [m("quads", 0.55), m("glutes", 0.3), m("lower_back", 0.1), m("hamstrings", 0.05)]
-    }),
-    bar({
-      id: "front_squat",
-      name: "Front Squat",
-      aliases: ["fs", "bb front squat"],
-      pattern: "squat",
-      primary: [m("quads", 0.65), m("glutes", 0.2), m("abs", 0.1), m("upper_back", 0.05)]
-    }),
-    bar({
-      id: "goblet_squat",
-      name: "Goblet Squat",
-      aliases: ["db goblet squat"],
-      pattern: "squat",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      e1rmValid: false,
-      primary: [m("quads", 0.6), m("glutes", 0.3), m("abs", 0.1)]
-    }),
-    bar({
-      id: "leg_press",
-      name: "Leg Press",
-      aliases: ["machine leg press"],
-      pattern: "squat",
-      equipment: "machine",
-      loading: "stack",
-      incrementLb: 10,
-      primary: [m("quads", 0.65), m("glutes", 0.3), m("hamstrings", 0.05)]
-    }),
-    // ── hinge ─────────────────────────────────────────────────────────
-    bar({
-      id: "deadlift",
-      name: "Deadlift",
-      aliases: ["dl", "conventional deadlift", "bb deadlift"],
-      pattern: "hinge",
-      primary: [m("glutes", 0.3), m("hamstrings", 0.25), m("lower_back", 0.2), m("traps", 0.15), m("forearms", 0.1)]
-    }),
-    bar({
-      id: "romanian_deadlift",
-      name: "Romanian Deadlift",
-      aliases: ["rdl", "romanian dl", "stiff leg deadlift", "sldl"],
-      pattern: "hinge",
-      primary: [m("hamstrings", 0.55), m("glutes", 0.3), m("lower_back", 0.15)]
-    }),
-    bar({
-      id: "hip_thrust",
-      name: "Hip Thrust",
-      aliases: ["barbell hip thrust", "glute bridge"],
-      pattern: "hinge",
-      incrementLb: 10,
-      primary: [m("glutes", 0.75), m("hamstrings", 0.25)]
-    }),
-    bar({
-      id: "back_extension",
-      name: "Back Extension",
-      aliases: ["hyperextension", "45 degree back extension"],
-      pattern: "hinge",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "bodyweight",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("lower_back", 0.5), m("glutes", 0.3), m("hamstrings", 0.2)],
-      bodyweightFactor: 0.45
-    }),
-    bar({
-      id: "kettlebell_swing",
-      name: "Kettlebell Swing",
-      aliases: ["kb swing", "swing"],
-      pattern: "hinge",
-      equipment: "kettlebell",
-      loading: "free",
-      e1rmValid: false,
-      incrementLb: 8,
-      primary: [m("glutes", 0.5), m("hamstrings", 0.3), m("lower_back", 0.2)]
-    }),
-    // ── lunge / unilateral ────────────────────────────────────────────
-    bar({
-      id: "walking_lunge",
-      name: "Walking Lunge",
-      aliases: ["lunge", "lunges", "db lunge"],
-      pattern: "lunge",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      unilateral: true,
-      e1rmValid: false,
-      primary: [m("quads", 0.45), m("glutes", 0.4), m("hamstrings", 0.15)]
-    }),
-    bar({
-      id: "bulgarian_split_squat",
-      name: "Bulgarian Split Squat",
-      aliases: ["bss", "rear foot elevated split squat", "rfess", "split squat"],
-      pattern: "lunge",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      unilateral: true,
-      e1rmValid: false,
-      primary: [m("quads", 0.45), m("glutes", 0.4), m("hamstrings", 0.15)]
-    }),
-    bar({
-      id: "step_up",
-      name: "Step-Up",
-      aliases: ["box step up", "db step up"],
-      pattern: "lunge",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      unilateral: true,
-      e1rmValid: false,
-      primary: [m("quads", 0.45), m("glutes", 0.45), m("calves", 0.1)]
-    }),
-    // ── horizontal push ───────────────────────────────────────────────
-    bar({
-      id: "bench_press",
-      name: "Bench Press",
-      aliases: ["bench", "bb bench", "barbell bench", "flat bench", "bb bench press", "bp"],
-      pattern: "horizontal_push",
-      primary: [m("chest", 0.7), m("triceps", 0.15), m("front_delts", 0.15)]
-    }),
-    bar({
-      id: "incline_bench_press",
-      name: "Incline Bench Press",
-      aliases: ["incline bench", "incline barbell bench", "incline press"],
-      pattern: "horizontal_push",
-      primary: [m("chest", 0.55), m("front_delts", 0.3), m("triceps", 0.15)]
-    }),
-    bar({
-      id: "dumbbell_bench_press",
-      name: "Dumbbell Bench Press",
-      aliases: ["db bench", "db bench press", "dumbbell press", "db press"],
-      pattern: "horizontal_push",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      primary: [m("chest", 0.68), m("triceps", 0.16), m("front_delts", 0.16)]
-    }),
-    bar({
-      id: "push_up",
-      name: "Push-Up",
-      aliases: ["pushup", "push ups", "pressup"],
-      pattern: "horizontal_push",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "bodyweight",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("chest", 0.65), m("triceps", 0.2), m("front_delts", 0.15)],
-      bodyweightFactor: 0.65
-    }),
-    bar({
-      id: "chest_fly",
-      name: "Chest Fly",
-      aliases: ["fly", "flye", "pec deck", "cable fly", "db fly"],
-      pattern: "isolation",
-      equipment: "cable",
-      loading: "stack",
-      e1rmValid: false,
-      primary: [m("chest", 0.85), m("front_delts", 0.15)]
-    }),
-    // ── vertical push ─────────────────────────────────────────────────
-    bar({
-      id: "overhead_press",
-      name: "Overhead Press",
-      aliases: ["ohp", "military press", "standing press", "shoulder press", "strict press"],
-      pattern: "vertical_push",
-      primary: [m("front_delts", 0.55), m("side_delts", 0.2), m("triceps", 0.2), m("abs", 0.05)]
-    }),
-    bar({
-      id: "dumbbell_shoulder_press",
-      name: "Dumbbell Shoulder Press",
-      aliases: ["db shoulder press", "db ohp", "seated db press"],
-      pattern: "vertical_push",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      primary: [m("front_delts", 0.55), m("side_delts", 0.2), m("triceps", 0.25)]
-    }),
-    bar({
-      id: "lateral_raise",
-      name: "Lateral Raise",
-      aliases: ["side raise", "db lateral raise", "lat raise", "side lateral raise"],
-      pattern: "isolation",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      e1rmValid: false,
-      primary: [m("side_delts", 0.85), m("traps", 0.15)]
-    }),
-    bar({
-      id: "dip",
-      name: "Dip",
-      aliases: ["dips", "parallel bar dip", "chest dip", "tricep dip"],
-      pattern: "vertical_push",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "bodyweight",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("chest", 0.45), m("triceps", 0.4), m("front_delts", 0.15)],
-      bodyweightFactor: 1
-    }),
-    // ── vertical pull ─────────────────────────────────────────────────
-    bar({
-      id: "pull_up",
-      name: "Pull-Up",
-      aliases: ["pullup", "pull ups", "pullups"],
-      pattern: "vertical_pull",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "bodyweight",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)],
-      bodyweightFactor: 1
-    }),
-    bar({
-      id: "chin_up",
-      name: "Chin-Up",
-      aliases: ["chinup", "chin ups", "chinups"],
-      pattern: "vertical_pull",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "bodyweight",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("lats", 0.5), m("biceps", 0.35), m("upper_back", 0.15)],
-      bodyweightFactor: 1
-    }),
-    bar({
-      id: "lat_pulldown",
-      name: "Lat Pulldown",
-      aliases: ["pulldown", "lat pull down", "cable pulldown"],
-      pattern: "vertical_pull",
-      equipment: "machine",
-      loading: "stack",
-      incrementLb: 10,
-      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)]
-    }),
-    // ── horizontal pull ───────────────────────────────────────────────
-    bar({
-      id: "barbell_row",
-      name: "Barbell Row",
-      aliases: ["bb row", "bent over row", "pendlay row", "row"],
-      pattern: "horizontal_pull",
-      primary: [m("upper_back", 0.35), m("lats", 0.35), m("rear_delts", 0.15), m("biceps", 0.15)]
-    }),
-    bar({
-      id: "dumbbell_row",
-      name: "Dumbbell Row",
-      aliases: ["db row", "one arm row", "single arm row"],
-      pattern: "horizontal_pull",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      unilateral: true,
-      primary: [m("lats", 0.45), m("upper_back", 0.3), m("biceps", 0.25)]
-    }),
-    bar({
-      id: "seated_cable_row",
-      name: "Seated Cable Row",
-      aliases: ["cable row", "seated row"],
-      pattern: "horizontal_pull",
-      equipment: "cable",
-      loading: "stack",
-      incrementLb: 10,
-      primary: [m("upper_back", 0.45), m("lats", 0.3), m("biceps", 0.25)]
-    }),
-    bar({
-      id: "face_pull",
-      name: "Face Pull",
-      aliases: ["cable face pull", "facepull"],
-      pattern: "horizontal_pull",
-      equipment: "cable",
-      loading: "stack",
-      e1rmValid: false,
-      incrementLb: 5,
-      primary: [m("rear_delts", 0.5), m("upper_back", 0.3), m("traps", 0.2)]
-    }),
-    // ── arms ──────────────────────────────────────────────────────────
-    bar({
-      id: "barbell_curl",
-      name: "Barbell Curl",
-      aliases: ["bb curl", "bicep curl", "ez bar curl", "curl"],
-      pattern: "isolation",
-      e1rmValid: false,
-      primary: [m("biceps", 0.85), m("forearms", 0.15)]
-    }),
-    bar({
-      id: "dumbbell_curl",
-      name: "Dumbbell Curl",
-      aliases: ["db curl", "dumbbell bicep curl"],
-      pattern: "isolation",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      e1rmValid: false,
-      primary: [m("biceps", 0.85), m("forearms", 0.15)]
-    }),
-    bar({
-      id: "hammer_curl",
-      name: "Hammer Curl",
-      aliases: ["db hammer curl", "neutral curl"],
-      pattern: "isolation",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      e1rmValid: false,
-      primary: [m("biceps", 0.6), m("forearms", 0.4)]
-    }),
-    bar({
-      id: "tricep_pushdown",
-      name: "Tricep Pushdown",
-      aliases: ["pushdown", "cable pushdown", "rope pushdown", "tricep extension"],
-      pattern: "isolation",
-      equipment: "cable",
-      loading: "stack",
-      e1rmValid: false,
-      incrementLb: 5,
-      primary: [m("triceps", 1)]
-    }),
-    bar({
-      id: "skullcrusher",
-      name: "Skullcrusher",
-      aliases: ["lying tricep extension", "skull crusher"],
-      pattern: "isolation",
-      e1rmValid: false,
-      primary: [m("triceps", 1)]
-    }),
-    // ── legs, isolation ───────────────────────────────────────────────
-    bar({
-      id: "leg_curl",
-      name: "Leg Curl",
-      aliases: ["hamstring curl", "lying leg curl", "seated leg curl"],
-      pattern: "isolation",
-      equipment: "machine",
-      loading: "stack",
-      e1rmValid: false,
-      incrementLb: 10,
-      primary: [m("hamstrings", 0.9), m("calves", 0.1)]
-    }),
-    bar({
-      id: "leg_extension",
-      name: "Leg Extension",
-      aliases: ["quad extension", "knee extension"],
-      pattern: "isolation",
-      equipment: "machine",
-      loading: "stack",
-      e1rmValid: false,
-      incrementLb: 10,
-      primary: [m("quads", 1)]
-    }),
-    bar({
-      id: "calf_raise",
-      name: "Calf Raise",
-      aliases: ["standing calf raise", "seated calf raise", "calf raises"],
-      pattern: "isolation",
-      equipment: "machine",
-      loading: "stack",
-      e1rmValid: false,
-      incrementLb: 10,
-      primary: [m("calves", 1)]
-    }),
-    // ── core ──────────────────────────────────────────────────────────
-    bar({
-      id: "plank",
-      name: "Plank",
-      aliases: ["front plank", "planks"],
-      pattern: "core",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "time",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("abs", 0.7), m("obliques", 0.3)]
-    }),
-    bar({
-      id: "side_plank",
-      name: "Side Plank",
-      aliases: ["side planks"],
-      pattern: "core",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "time",
-      unilateral: true,
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("obliques", 0.75), m("abs", 0.25)]
-    }),
-    bar({
-      id: "hanging_leg_raise",
-      name: "Hanging Leg Raise",
-      aliases: ["leg raise", "hanging knee raise", "leg raises"],
-      pattern: "core",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "bodyweight",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("abs", 0.7), m("obliques", 0.15), m("forearms", 0.15)],
-      bodyweightFactor: 0.4
-    }),
-    bar({
-      id: "cable_woodchop",
-      name: "Cable Woodchop",
-      aliases: ["woodchop", "wood chop", "cable chop"],
-      pattern: "rotation",
-      equipment: "cable",
-      loading: "stack",
-      unilateral: true,
-      e1rmValid: false,
-      incrementLb: 5,
-      primary: [m("obliques", 0.7), m("abs", 0.3)]
-    }),
-    // ── explosiveness: what taekwondo and soccer actually need ────────
-    bar({
-      id: "box_jump",
-      name: "Box Jump",
-      aliases: ["box jumps", "jump box"],
-      pattern: "jump",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "bodyweight",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("quads", 0.45), m("glutes", 0.4), m("calves", 0.15)],
-      bodyweightFactor: 1
-    }),
-    bar({
-      id: "broad_jump",
-      name: "Broad Jump",
-      aliases: ["standing broad jump", "long jump"],
-      pattern: "jump",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "distance",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("glutes", 0.4), m("quads", 0.35), m("hamstrings", 0.25)]
-    }),
-    bar({
-      id: "sprint",
-      name: "Sprint",
-      aliases: ["sprints", "shuttle run", "shuttles", "run"],
-      pattern: "sprint",
-      equipment: "bodyweight",
-      loading: "free",
-      defaultSetKind: "time_distance",
-      e1rmValid: false,
-      incrementLb: 2.5,
-      primary: [m("hamstrings", 0.3), m("quads", 0.25), m("glutes", 0.25), m("calves", 0.2)]
-    }),
-    bar({
-      id: "sled_push",
-      name: "Sled Push",
-      aliases: ["prowler push", "sled"],
-      pattern: "sprint",
-      equipment: "sled",
-      loading: "free",
-      defaultSetKind: "distance",
-      e1rmValid: false,
-      incrementLb: 10,
-      primary: [m("quads", 0.4), m("glutes", 0.3), m("calves", 0.2), m("abs", 0.1)]
-    }),
-    bar({
-      id: "farmer_carry",
-      name: "Farmer's Carry",
-      aliases: ["farmers walk", "farmer walk", "loaded carry", "farmers carry"],
-      pattern: "carry",
-      equipment: "dumbbell",
-      loading: "dumbbell",
-      defaultSetKind: "distance",
-      e1rmValid: false,
-      primary: [m("forearms", 0.35), m("traps", 0.3), m("abs", 0.2), m("obliques", 0.15)]
-    })
-  ];
-  var CATALOG_BY_ID = Object.fromEntries(
-    CATALOG.map((e) => [e.id, e])
-  );
-  function catalogExercise(id) {
-    return CATALOG_BY_ID[id] || null;
-  }
-
-  // lib/train/swap.ts
-  var SWAP_WEIGHTS = {
-    pattern: 1,
-    muscles: 0.6,
-    history: 0.25,
-    equipment: 0.4
-  };
-  var HISTORY_SATURATION = 10;
-  var ALWAYS_AVAILABLE = ["bodyweight", "none", ""];
-  function muscleOverlap(a, b) {
-    const share = (list, secondary) => {
-      const out = /* @__PURE__ */ new Map();
-      for (const c of list || []) out.set(c.muscle, (out.get(c.muscle) || 0) + c.share);
-      for (const c of secondary || []) out.set(c.muscle, (out.get(c.muscle) || 0) + c.share * 0.5);
-      return out;
-    };
-    const left = share(a.primary, a.secondary);
-    const right = share(b.primary, b.secondary);
-    let total = 0;
-    for (const [muscle, value] of left) {
-      const other = right.get(muscle);
-      if (other != null) total += Math.min(value, other);
-    }
-    return Math.min(1, total);
-  }
-  function equipmentAvailable(equipment, available) {
-    const want = String(equipment || "").toLowerCase();
-    if (ALWAYS_AVAILABLE.includes(want)) return true;
-    return (available || []).some((have) => String(have).toLowerCase() === want);
-  }
-  function headline(exercise) {
-    return [...exercise.primary || []].sort((a, b) => b.share - a.share).slice(0, 2).map((c) => c.muscle.replace(/_/g, " "));
-  }
-  function rankSwaps(replacing, context) {
-    if (!replacing || !replacing.id) return [];
-    const catalog = context.known && context.known.length ? context.known : CATALOG;
-    const available = context.equipment || [];
-    const knowsEquipment = available.length > 0;
-    const sessionsOf = context.sessions || {};
-    const candidates = [];
-    for (const exercise of catalog) {
-      if (!exercise || exercise.id === replacing.id) continue;
-      if (knowsEquipment && !equipmentAvailable(exercise.equipment, available)) continue;
-      const samePattern = exercise.pattern === replacing.pattern;
-      const overlap = muscleOverlap(replacing, exercise);
-      const sessions = Math.max(0, sessionsOf[exercise.id] || 0);
-      const familiarity = Math.min(1, sessions / HISTORY_SATURATION);
-      if (!samePattern && overlap < 0.2) continue;
-      const reasons = [];
-      let score = 0;
-      if (samePattern) {
-        score += SWAP_WEIGHTS.pattern;
-        reasons.push(`same movement \u2014 ${replacing.pattern.replace(/_/g, " ")}`);
-      }
-      if (overlap > 0) {
-        score += SWAP_WEIGHTS.muscles * overlap;
-        const muscles = headline(exercise);
-        if (muscles.length) reasons.push(`works ${muscles.join(" and ")}`);
-      }
-      if (sessions > 0) {
-        score += SWAP_WEIGHTS.history * familiarity;
-        reasons.push(`${sessions} sessions on record \u2014 keeps your progression`);
-      }
-      if (knowsEquipment && equipmentAvailable(exercise.equipment, available)) {
-        score += SWAP_WEIGHTS.equipment;
-        if (!ALWAYS_AVAILABLE.includes(exercise.equipment)) {
-          reasons.push(`${exercise.equipment} \u2014 equipment you have`);
-        }
-      }
-      if (!reasons.length) continue;
-      candidates.push({
-        id: exercise.id,
-        name: exercise.name,
-        equipment: exercise.equipment,
-        pattern: exercise.pattern,
-        sessions,
-        score: Math.round(score * 1e3) / 1e3,
-        reasons
-      });
-    }
-    return candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-  }
-
   // lib/train/plates.ts
   var DEFAULT_BAR_LB = 45;
   var DEFAULT_PLATES_LB = [45, 35, 25, 10, 5, 2.5];
@@ -2614,218 +2879,6 @@ var TrainEngine = (() => {
       push(working * rung.fraction, rung.reps);
     }
     return out.sort((a, b) => a.kg - b.kg);
-  }
-
-  // lib/train/amrap.ts
-  var AMRAP_OVER = 3;
-  var AMRAP_MAX_MULTIPLIER = 4;
-  function amrapSignal(entry, target) {
-    if (!entry) return null;
-    const set = amrapOf(entry);
-    if (!set || typeof set.r !== "number" || !Number.isFinite(set.r)) return null;
-    if (!Number.isFinite(target) || target <= 0) return null;
-    const reps = set.r;
-    const surplus = reps - target;
-    if (surplus < 0) {
-      return { reps, target, surplus, verdict: "struggling", multiplier: 1 };
-    }
-    if (surplus < AMRAP_OVER) {
-      return { reps, target, surplus, verdict: "on_target", multiplier: 1 };
-    }
-    const multiplier = Math.min(AMRAP_MAX_MULTIPLIER, 1 + Math.floor(surplus / AMRAP_OVER));
-    return { reps, target, surplus, verdict: "under_loaded", multiplier };
-  }
-  function amrapTrend(history) {
-    const reps = [];
-    for (const entry of history || []) {
-      if (!entry || entry.off) continue;
-      const set = amrapOf(entry);
-      if (set && typeof set.r === "number" && Number.isFinite(set.r)) reps.push(set.r);
-    }
-    if (reps.length < 2) return null;
-    const from = reps[0];
-    const to = reps[reps.length - 1];
-    return { from, to, sessions: reps.length, falling: to < from };
-  }
-
-  // lib/train/deload.ts
-  var DELOAD_HOLD_SESSIONS = 2;
-  var RECOVERY_FLOOR = 55;
-  var HIGH_RPE = 9;
-  var PLATEAU_WINDOW = 3;
-  var COOLDOWN_DAYS = 14;
-  function isExcluded(date, windows = []) {
-    return (windows || []).some((w) => date >= w.from && date <= w.to);
-  }
-  var RPE_RISE = 1;
-  function readCause(window) {
-    const values = window.map(workingRpe).filter((v) => v != null);
-    const mean3 = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
-    const trend = amrapTrend(window);
-    if (trend && trend.falling) {
-      return { cause: "fatigue", rpe: mean3, amrapFalling: true, restCompressing: false };
-    }
-    const rest = restTrend(window);
-    if (rest && rest.compressing) {
-      return { cause: "rest_compression", rpe: mean3, amrapFalling: false, restCompressing: true };
-    }
-    if (values.length < 2) {
-      return {
-        cause: "unknown",
-        rpe: values.length ? values[0] : null,
-        amrapFalling: false,
-        restCompressing: false
-      };
-    }
-    const rising = values[values.length - 1] - values[0] >= RPE_RISE;
-    if (rising || mean3 >= HIGH_RPE) {
-      return { cause: "fatigue", rpe: mean3, amrapFalling: false, restCompressing: false };
-    }
-    return { cause: "programming", rpe: mean3, amrapFalling: false, restCompressing: false };
-  }
-  function detectPlateau(history, opts = {}) {
-    const usable = (history || []).filter(
-      (entry) => entry && !entry.off && !isExcluded(entry.date, opts.excluded)
-    );
-    if (usable.length < PLATEAU_WINDOW + 1) return null;
-    const recent = usable.slice(-PLATEAU_WINDOW);
-    const scores = recent.map((entry) => entryScore(entry, {
-      bodyweightLb: opts.bodyweightLb,
-      bodyweightFactor: opts.bodyweightFactor
-    }));
-    const flat = (arr) => arr.every((v, i) => i === 0 || v <= arr[i - 1]);
-    const primary = scores.map((s) => s.primary);
-    const secondary = scores.map((s) => s.secondary);
-    if (flat(primary) && flat(secondary)) {
-      const { cause, rpe, amrapFalling, restCompressing } = readCause(recent);
-      const last = scores[scores.length - 1];
-      return {
-        sessions: PLATEAU_WINDOW,
-        // reported in the kind's own unit; assisted scores are negated
-        weight: Math.abs(last.primary),
-        kind: last.kind,
-        cause,
-        rpe,
-        amrapFalling,
-        restCompressing
-      };
-    }
-    return null;
-  }
-  function addDays(date, days) {
-    const [y, m2, d] = date.split("-").map(Number);
-    const dt = new Date(y, (m2 || 1) - 1, d || 1);
-    dt.setDate(dt.getDate() + days);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-  }
-  function diagnose(ctx, plateau) {
-    if (typeof ctx.recovery === "number" && ctx.recovery < RECOVERY_FLOOR) {
-      return { kind: "volume", confidence: "measured" };
-    }
-    if (typeof ctx.rpe === "number" && ctx.rpe >= HIGH_RPE) {
-      return { kind: "intensity", confidence: "measured" };
-    }
-    if (plateau && plateau.cause === "fatigue") {
-      return { kind: "intensity", confidence: "measured" };
-    }
-    return { kind: "intensity", confidence: "inferred" };
-  }
-  var NORMAL = (weight, today) => ({
-    state: "normal",
-    kind: null,
-    priorWeight: weight,
-    since: today,
-    sessions: 0,
-    confidence: "measured"
-  });
-  function nextDeloadState(current, ctx) {
-    const plateau = detectPlateau(ctx.history, { excluded: ctx.excluded });
-    const record = current || NORMAL(plateau ? plateau.weight : 0, ctx.today);
-    switch (record.state) {
-      case "normal": {
-        if (!plateau) return record;
-        if (record.cooldownUntil && ctx.today < record.cooldownUntil) return record;
-        if (plateau.cause === "programming") return record;
-        if (plateau.cause === "rest_compression") return record;
-        const flagDx = diagnose(ctx, plateau);
-        return {
-          ...record,
-          state: "flagged",
-          kind: flagDx.kind,
-          confidence: flagDx.confidence,
-          priorWeight: plateau.weight,
-          since: ctx.today,
-          sessions: 0
-        };
-      }
-      case "flagged": {
-        if (!plateau) return { ...record, state: "normal", kind: null, since: ctx.today, sessions: 0 };
-        const { kind, confidence } = diagnose(ctx, plateau);
-        return {
-          ...record,
-          state: "deloading",
-          kind,
-          confidence,
-          priorWeight: plateau.weight,
-          since: ctx.today,
-          sessions: 0
-        };
-      }
-      case "deloading": {
-        if (!ctx.sessionLogged) return record;
-        const sessions = record.sessions + 1;
-        if (sessions < DELOAD_HOLD_SESSIONS) return { ...record, sessions };
-        return { ...record, state: "reapproach", since: ctx.today, sessions: 0 };
-      }
-      case "reapproach": {
-        if (!ctx.sessionLogged) return record;
-        return {
-          ...record,
-          state: "normal",
-          kind: null,
-          since: ctx.today,
-          sessions: 0,
-          // a lift that just finished a deload must not immediately re-flag,
-          // or the machine oscillates instead of resolving
-          cooldownUntil: addDays(ctx.today, COOLDOWN_DAYS)
-        };
-      }
-    }
-    return record;
-  }
-  var VOLUME_CUT = 2 / 3;
-  var REAPPROACH = 0.95;
-  function deloadPlan(record, trainingAge) {
-    if (!record) return { weight: null, setsFactor: 1 };
-    const round7 = (n) => Math.round(n * 100) / 100;
-    if (record.state === "reapproach") {
-      return { weight: round7(record.priorWeight * REAPPROACH), setsFactor: 1 };
-    }
-    if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
-    if (record.kind === "volume") {
-      return { weight: round7(record.priorWeight), setsFactor: VOLUME_CUT };
-    }
-    return {
-      weight: round7(record.priorWeight * deloadCut(trainingAge, record.confidence)),
-      setsFactor: 1
-    };
-  }
-  function plateauAdvice(plateau) {
-    if (!plateau) return "";
-    if (plateau.cause === "rest_compression") {
-      return "Rest between sets has been getting shorter. Rest longer before the next set \u2014 the weight is not the problem.";
-    }
-    if (plateau.cause === "fatigue") {
-      return plateau.amrapFalling ? "Your all-out set has been falling at the same weight. That is fatigue, not programming." : "Effort has been climbing at the same weight. That is fatigue.";
-    }
-    if (plateau.cause === "programming") {
-      return "Steady effort at a flat weight \u2014 there is capacity here that is not being asked for.";
-    }
-    return "Flat for a while, with nothing logged that says why.";
-  }
-  function limitDeloads(candidates, max = 2) {
-    return (candidates || []).slice().sort((a, b) => b.plateauLength - a.plateauLength || b.weight - a.weight).slice(0, max).map((c) => c.id);
   }
 
   // lib/train/session.ts
@@ -2936,7 +2989,7 @@ var TrainEngine = (() => {
   function describeWeight(weight) {
     return weight > 0 ? `${tidy2(weight)} lb` : "bodyweight";
   }
-  function realSessions(history) {
+  function realSessions2(history) {
     return (history || []).filter((entry) => entry && !entry.off);
   }
   function rangeFor(exercise) {
@@ -2973,7 +3026,7 @@ var TrainEngine = (() => {
     return done >= 0 ? plan.slice(0, done + 1) : plan;
   }
   function suggestLoad(history, exercise, now) {
-    const sessions = realSessions(history);
+    const sessions = realSessions2(history);
     const last = sessions.length ? sessions[sessions.length - 1] : null;
     const [minReps, maxReps] = rangeFor(exercise);
     const hasRange = maxReps > minReps;
@@ -3186,7 +3239,7 @@ var TrainEngine = (() => {
     return put(current + step, "clean", `+${step}${unit} \u2014 clean ${sets}\xD7${current}${unit} last time`);
   }
   function suggestTarget(history, exercise, now) {
-    const all = realSessions(history);
+    const all = realSessions2(history);
     const declared = exercise.kind;
     const kind = declared || (all.length ? entryKind(all[all.length - 1]) : DEFAULT_SET_KIND);
     const sessions = declared ? all.filter((entry) => entryKind(entry) === kind) : all;
@@ -5351,8 +5404,25 @@ function noteRecovery(rec){
    finished session and cached — this is the mentor's "noticer" role,
    automated for Train. Silent on failure; it's a bonus, not core flow. */
 const RECOVERY_FLOOR=55; // below this, a plateau is treated as fatigue-driven, not a programming problem
+/**
+ * One staleness note per context, not one per lift.
+ *
+ * The engine already returns a single finding; this only stops the loop
+ * over exercises repeating it.
+ */
+let STALE_SAID=false;
+function staleNoteFor(){
+  return TrainEngine.stalenessFor({
+    history: STATE.history||{},
+    customLib: STATE.customLib||{},
+    equipment: equipmentAvailable().equipment||[],
+    now: Date.now(),
+  });
+}
+
 async function buildInsightContext(session){
   const lines=[];
+  STALE_SAID=false;
   lines.push('Streak: '+currentStreak()+' consecutive week(s) hitting '+weeklyTarget()+'+ sessions. Rest days do not break this.');
   const t=sessionTotals(session);
   lines.push('Today: '+t.logged+'/'+t.total+' sets logged across '+session.ex.length+' exercise(s).');
@@ -5362,6 +5432,8 @@ async function buildInsightContext(session){
     const misses=e.log.filter(s=>s&&s.fail).length;
     const pr=exHasPR(e)?' (PR today)':'';
     const plateau=plateauFor(e);
+    const stale=staleNoteFor();
+    if(stale && !STALE_SAID){ STALE_SAID=true; lines.push('STALE: '+stale.text); }
     const gap=TrainEngine.asymmetryFor(histFor(e));
     if(gap) lines.push('SIDES ('+e.name+'): '+gap.text);
     if(plateau){
