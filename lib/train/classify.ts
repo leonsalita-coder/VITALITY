@@ -18,6 +18,8 @@ import { DEFAULT_SET_KIND, type SetKind } from './sets'
 export const SET_KINDS: SetKind[] = [
   'reps_weight',
   'reps_only',
+  'bodyweight',
+  'weighted_bodyweight',
   'time',
   'distance',
   'time_distance',

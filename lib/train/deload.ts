@@ -125,7 +125,12 @@ function readCause(window: HistoryEntry[]): { cause: PlateauCause; rpe: number |
  */
 export function detectPlateau(
   history: HistoryEntry[],
-  opts: { excluded?: ExclusionWindow[] } = {},
+  opts: {
+    excluded?: ExclusionWindow[]
+    /** Lets bodyweight lifts be scored on real load rather than reps. */
+    bodyweightLb?: number | null
+    bodyweightFactor?: number | null
+  } = {},
 ): Plateau | null {
   const usable = (history || []).filter(
     (entry) => entry && !entry.off && !isExcluded(entry.date, opts.excluded),
@@ -138,7 +143,12 @@ export function detectPlateau(
    * weights here instead would read a lifter dropping from 40 lb of help to
    * 20 as a decline, and deload them for getting stronger.
    */
-  const scores = recent.map(entryScore)
+  /* Explicit arrow, not a bare reference: map passes the index as the
+     second argument, which would land in the options slot. */
+  const scores = recent.map((entry) => entryScore(entry, {
+    bodyweightLb: opts.bodyweightLb,
+    bodyweightFactor: opts.bodyweightFactor,
+  }))
   const flat = (arr: number[]) => arr.every((v, i) => i === 0 || v <= arr[i - 1])
   const primary = scores.map((s) => s.primary)
   const secondary = scores.map((s) => s.secondary)

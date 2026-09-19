@@ -336,6 +336,8 @@ var TrainEngine = (() => {
     analyse: () => analyse,
     assessReadiness: () => assessReadiness,
     bestE1RM: () => bestE1RM,
+    bodyweightAt: () => bodyweightAt,
+    bodyweightLoad: () => bodyweightLoad,
     briefFor: () => briefFor,
     catalogExercise: () => catalogExercise,
     chooseRestore: () => chooseRestore,
@@ -344,6 +346,7 @@ var TrainEngine = (() => {
     collectSignals: () => collectSignals,
     contributionOf: () => contributionOf,
     countsForProgression: () => countsForProgression,
+    currentBodyweight: () => currentBodyweight,
     currentWeekStreak: () => currentWeekStreak,
     defaultPlateConfig: () => defaultPlateConfig,
     defaultRepRange: () => defaultRepRange,
@@ -386,6 +389,7 @@ var TrainEngine = (() => {
     prefillPlan: () => prefillPlan,
     pushSnapshot: () => pushSnapshot,
     ratios: () => ratios,
+    recordBodyweight: () => recordBodyweight,
     remapRoutines: () => remapRoutines,
     resolveExercise: () => resolveExercise,
     reviewWorthSending: () => reviewWorthSending,
@@ -419,10 +423,37 @@ var TrainEngine = (() => {
     workingVolume: () => workingVolume
   });
 
+  // lib/train/bodyweight.ts
+  function bodyweightAt(history, date) {
+    let best = null;
+    for (const entry of history || []) {
+      if (!entry || typeof entry.lb !== "number" || !Number.isFinite(entry.lb) || entry.lb <= 0) continue;
+      if (entry.date > date) continue;
+      if (!best || entry.date > best.date) best = entry;
+    }
+    return best ? best.lb : null;
+  }
+  function currentBodyweight(history) {
+    const sorted = (history || []).filter((e) => e && e.lb > 0).sort((a, b) => a.date.localeCompare(b.date));
+    return sorted.length ? sorted[sorted.length - 1].lb : null;
+  }
+  function recordBodyweight(history, date, lb) {
+    if (!Number.isFinite(lb) || lb <= 0) return history || [];
+    const rest = (history || []).filter((e) => e && e.date !== date);
+    return [...rest, { date, lb: Math.round(lb * 10) / 10 }].sort((a, b) => a.date.localeCompare(b.date));
+  }
+  function bodyweightLoad(opts) {
+    if (opts.bodyweightLb == null || !Number.isFinite(opts.bodyweightLb)) return null;
+    const factor = typeof opts.factor === "number" && opts.factor > 0 ? opts.factor : 1;
+    const base = opts.bodyweightLb * factor;
+    const load = base + (opts.added || 0) - (opts.assistance || 0);
+    return Math.max(0, Math.round(load * 10) / 10);
+  }
+
   // lib/train/sets.ts
   var DEFAULT_SET_KIND = "reps_weight";
   function emptyVolume() {
-    return { load: 0, reps: 0, seconds: 0, metres: 0 };
+    return { load: 0, loadUnavailable: false, reps: 0, seconds: 0, metres: 0 };
   }
   function setKind(set) {
     return set.kind || DEFAULT_SET_KIND;
@@ -448,11 +479,29 @@ var TrainEngine = (() => {
     for (const set of workingSets(entry)) {
       const sides = isPerSide(set, opts) ? 2 : 1;
       const reps = (set.r || 0) * sides;
+      const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
+      const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
       switch (setKind(set)) {
         case "reps_weight":
-          if (set.assisted) totals.reps += reps;
-          else totals.load += setWeight(entry, set) * reps;
+          if (set.assisted) {
+            const load = bodyweightLoad({ bodyweightLb: bw, factor, assistance: setWeight(entry, set) });
+            if (load == null) totals.loadUnavailable = true;
+            else totals.load += load * reps;
+            totals.reps += reps;
+          } else {
+            totals.load += setWeight(entry, set) * reps;
+          }
           break;
+        case "bodyweight":
+        case "weighted_bodyweight": {
+          const added = setKind(set) === "weighted_bodyweight" ? setWeight(entry, set) : 0;
+          const help = set.assisted ? setWeight(entry, set) : 0;
+          const load = bodyweightLoad({ bodyweightLb: bw, factor, added, assistance: help });
+          if (load == null) totals.loadUnavailable = true;
+          else totals.load += load * reps;
+          totals.reps += reps;
+          break;
+        }
         case "reps_only":
           totals.reps += reps;
           break;
@@ -478,7 +527,7 @@ var TrainEngine = (() => {
     const values = workingSets(entry).filter((set) => setKind(set) === "distance" || setKind(set) === "time_distance").map((set) => set.m || 0);
     return values.length ? Math.max(...values) : 0;
   }
-  function entryScore(entry) {
+  function entryScore(entry, opts = {}) {
     const kind = entryKind(entry);
     const sets = workingSets(entry);
     const best = (pick) => sets.length ? Math.max(...sets.map(pick)) : 0;
@@ -493,6 +542,19 @@ var TrainEngine = (() => {
         const metres = best((s) => s.m || 0);
         const seconds = sets.length ? Math.min(...sets.map((s) => s.s || Infinity)) : 0;
         return { kind, primary: metres, secondary: Number.isFinite(seconds) ? -seconds : 0 };
+      }
+      case "bodyweight":
+      case "weighted_bodyweight": {
+        const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
+        const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
+        if (bw == null) return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
+        const load = (s) => bodyweightLoad({
+          bodyweightLb: bw,
+          factor,
+          added: kind === "weighted_bodyweight" ? setWeight(entry, s) : 0,
+          assistance: s.assisted ? setWeight(entry, s) : 0
+        }) || 0;
+        return { kind, primary: best(load), secondary: best((s) => s.r || 0) };
       }
       default: {
         const assisted = sets.some((s) => s.assisted);
@@ -543,7 +605,10 @@ var TrainEngine = (() => {
     );
     if (usable.length < PLATEAU_WINDOW + 1) return null;
     const recent = usable.slice(-PLATEAU_WINDOW);
-    const scores = recent.map(entryScore);
+    const scores = recent.map((entry) => entryScore(entry, {
+      bodyweightLb: opts.bodyweightLb,
+      bodyweightFactor: opts.bodyweightFactor
+    }));
     const flat = (arr) => arr.every((v, i) => i === 0 || v <= arr[i - 1]);
     const primary = scores.map((s) => s.primary);
     const secondary = scores.map((s) => s.secondary);
@@ -1299,6 +1364,8 @@ var TrainEngine = (() => {
   var SET_KINDS = [
     "reps_weight",
     "reps_only",
+    "bodyweight",
+    "weighted_bodyweight",
     "time",
     "distance",
     "time_distance"
@@ -1914,10 +1981,11 @@ var TrainEngine = (() => {
       pattern: "hinge",
       equipment: "bodyweight",
       loading: "free",
-      defaultSetKind: "reps_only",
+      defaultSetKind: "bodyweight",
       e1rmValid: false,
       incrementLb: 2.5,
-      primary: [m("lower_back", 0.5), m("glutes", 0.3), m("hamstrings", 0.2)]
+      primary: [m("lower_back", 0.5), m("glutes", 0.3), m("hamstrings", 0.2)],
+      bodyweightFactor: 0.45
     }),
     bar({
       id: "kettlebell_swing",
@@ -1995,10 +2063,11 @@ var TrainEngine = (() => {
       pattern: "horizontal_push",
       equipment: "bodyweight",
       loading: "free",
-      defaultSetKind: "reps_only",
+      defaultSetKind: "bodyweight",
       e1rmValid: false,
       incrementLb: 2.5,
-      primary: [m("chest", 0.65), m("triceps", 0.2), m("front_delts", 0.15)]
+      primary: [m("chest", 0.65), m("triceps", 0.2), m("front_delts", 0.15)],
+      bodyweightFactor: 0.65
     }),
     bar({
       id: "chest_fly",
@@ -2044,10 +2113,11 @@ var TrainEngine = (() => {
       pattern: "vertical_push",
       equipment: "bodyweight",
       loading: "free",
-      defaultSetKind: "reps_only",
+      defaultSetKind: "bodyweight",
       e1rmValid: false,
       incrementLb: 2.5,
-      primary: [m("chest", 0.45), m("triceps", 0.4), m("front_delts", 0.15)]
+      primary: [m("chest", 0.45), m("triceps", 0.4), m("front_delts", 0.15)],
+      bodyweightFactor: 1
     }),
     // ── vertical pull ─────────────────────────────────────────────────
     bar({
@@ -2057,10 +2127,11 @@ var TrainEngine = (() => {
       pattern: "vertical_pull",
       equipment: "bodyweight",
       loading: "free",
-      defaultSetKind: "reps_only",
+      defaultSetKind: "bodyweight",
       e1rmValid: false,
       incrementLb: 2.5,
-      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)]
+      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)],
+      bodyweightFactor: 1
     }),
     bar({
       id: "chin_up",
@@ -2069,10 +2140,11 @@ var TrainEngine = (() => {
       pattern: "vertical_pull",
       equipment: "bodyweight",
       loading: "free",
-      defaultSetKind: "reps_only",
+      defaultSetKind: "bodyweight",
       e1rmValid: false,
       incrementLb: 2.5,
-      primary: [m("lats", 0.5), m("biceps", 0.35), m("upper_back", 0.15)]
+      primary: [m("lats", 0.5), m("biceps", 0.35), m("upper_back", 0.15)],
+      bodyweightFactor: 1
     }),
     bar({
       id: "lat_pulldown",
@@ -2238,10 +2310,11 @@ var TrainEngine = (() => {
       pattern: "core",
       equipment: "bodyweight",
       loading: "free",
-      defaultSetKind: "reps_only",
+      defaultSetKind: "bodyweight",
       e1rmValid: false,
       incrementLb: 2.5,
-      primary: [m("abs", 0.7), m("obliques", 0.15), m("forearms", 0.15)]
+      primary: [m("abs", 0.7), m("obliques", 0.15), m("forearms", 0.15)],
+      bodyweightFactor: 0.4
     }),
     bar({
       id: "cable_woodchop",
@@ -2263,10 +2336,11 @@ var TrainEngine = (() => {
       pattern: "jump",
       equipment: "bodyweight",
       loading: "free",
-      defaultSetKind: "reps_only",
+      defaultSetKind: "bodyweight",
       e1rmValid: false,
       incrementLb: 2.5,
-      primary: [m("quads", 0.45), m("glutes", 0.4), m("calves", 0.15)]
+      primary: [m("quads", 0.45), m("glutes", 0.4), m("calves", 0.15)],
+      bodyweightFactor: 1
     }),
     bar({
       id: "broad_jump",
@@ -3251,7 +3325,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, aliases:{}, routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
+    history:{}, customLib:{}, aliases:{}, bodyweight:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -3445,6 +3519,28 @@ function restoreIfEmpty(loaded){
   if(!best) return { state:loaded, restored:null };
   const merged=Object.assign({}, best.state, { snapshots:candidates.slice(0,5) });
   return { state:merged, restored:best };
+}
+/* ── bodyweight ──────────────────────────────────────────────────────
+   Tracked, not set: a pull-up at 160 lb and the same pull-up at 185 lb are
+   different sets, and one stored number would rewrite years of history
+   every time someone's weight changed. */
+function bodyweightOn(date){
+  return TrainEngine.bodyweightAt(STATE.bodyweight||[], date||today);
+}
+/** How much of the athlete a lift moves, from the catalog where authored. */
+function bodyweightFactorFor(e){
+  const info=(STATE.customLib||{})[e.id];
+  if(info && typeof info.bodyweightFactor==='number') return info.bodyweightFactor;
+  const def=TrainEngine.catalogExercise(e.id);
+  return def && typeof def.bodyweightFactor==='number' ? def.bodyweightFactor : null;
+}
+/** Volume options for one lift on one date. */
+function volumeOptsFor(e, date){
+  return {
+    perSide: !!e.perHand,
+    bodyweightLb: bodyweightOn(date),
+    bodyweightFactor: bodyweightFactorFor(e),
+  };
 }
 function plateConfig(){
   return STATE.plateConfig || TrainEngine.defaultPlateConfig();
@@ -3645,7 +3741,7 @@ function sessionVolume(session){
   let total=0;
   /* .load is the pounds figure this rail has always shown. Other kinds
      keep their own units and are deliberately not folded in. */
-  session.ex.forEach(e=>{ total += TrainEngine.workingVolume(todayEntry(e), { perSide:!!e.perHand }).load; });
+  session.ex.forEach(e=>{ total += TrainEngine.workingVolume(todayEntry(e), volumeOptsFor(e, today)).load; });
   return Math.round(total);
 }
 function renderRail(){
@@ -3847,7 +3943,9 @@ function deloadExplain(dl){
   return '';
 }
 function plateauFor(e){
-  return TrainEngine.detectPlateau(histFor(e).filter(x=>!x.off), plateauOptsFor());
+  return TrainEngine.detectPlateau(histFor(e).filter(x=>!x.off), Object.assign(plateauOptsFor(), {
+    bodyweightLb: bodyweightOn(today), bodyweightFactor: bodyweightFactorFor(e),
+  }));
 }
 /* ---- recovery cross-reference: Vitals is a whitelisted cross-tile read
    (window.Vitality.read), same recovery formula Vitals itself uses
@@ -5119,6 +5217,11 @@ function openSettings(){
     + '<div class="secLbl">Theme</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Dark</span>'+SKY_TOGGLE_HTML+'</div>'
     + '<p class="settingsNote">Just a preview for now — not wired to a real light mode yet.</p>'
+    + '<div class="secLbl">Bodyweight</div>'
+    + '<p class="settingsNote" id="bwNote"></p>'
+    + '<div class="searchRow"><input id="bwInput" type="number" inputmode="decimal" placeholder="Today\'s weight in '+STATE.unit+'" /></div>'
+    + '<button class="pbtn ghost" id="bwSave" style="width:100%;margin-top:8px">Record it</button>'
+    + '<p class="settingsNote">Pull-ups, dips and push-ups move a known share of you, so this is what turns them into real volume. Without it they count reps and say the load is unavailable.</p>'
     + '<div class="secLbl">Sessions per week</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal" id="wkTarget">'+weeklyTarget()+'</span><button class="step" data-t="1">+</button></div></div>'
     + '<p class="settingsNote">Your streak counts weeks that hit this. Rest days never break it.</p>'
@@ -5159,6 +5262,21 @@ function openSettings(){
         scrim.querySelectorAll('.swapItem[data-rm]').forEach(b=> b.onclick=()=>{
           STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
         });
+      };
+      const bwNote=scrim.querySelector('#bwNote');
+      const paintBw=()=>{
+        const now=TrainEngine.currentBodyweight(STATE.bodyweight||[]);
+        bwNote.textContent = now!=null
+          ? 'Currently '+now+' '+STATE.unit+', '+(STATE.bodyweight||[]).length+' reading(s) on record.'
+          : 'Nothing on record yet.';
+      };
+      paintBw();
+      const bwBtn=scrim.querySelector('#bwSave');
+      if(bwBtn) bwBtn.onclick=()=>{
+        const v=parseFloat(scrim.querySelector('#bwInput').value);
+        if(!Number.isFinite(v) || v<=0) return;
+        STATE.bodyweight=TrainEngine.recordBodyweight(STATE.bodyweight||[], today, v);
+        saveState(); paintBw(); render();
       };
       const note=scrim.querySelector('#storageNote');
       if(note) note.textContent='CSV is for reading; JSON round-trips everything. '+STORAGE.detail+'.';
@@ -6080,7 +6198,10 @@ function muscleVolumeBreakdown(){
     split.unmapped.forEach(u=>{ unmapped[u]=true; });
     if(!split.primary.length && !split.secondary.length) return;
     if(split.estimated) anyEstimated=true;
-    const vol=(STATE.history[id]||[]).filter(s=>!s.off).reduce((a,s)=>a+TrainEngine.workingVolume(s).load,0);
+    const factor=(STATE.customLib&&STATE.customLib[id]&&STATE.customLib[id].bodyweightFactor)
+      || (TrainEngine.catalogExercise(id)||{}).bodyweightFactor || null;
+    const vol=(STATE.history[id]||[]).filter(s=>!s.off).reduce((a,s)=>a+TrainEngine.workingVolume(s, {
+      bodyweightLb: bodyweightOn(s.date), bodyweightFactor: factor }).load,0);
     const spread=TrainEngine.distribute(vol, split);
     Object.keys(spread).forEach(m=>{ map[m]=(map[m]||0)+spread[m]; });
   });
@@ -6435,7 +6556,11 @@ function aggregateVolumeByDate(){
   Object.keys(STATE.history||{}).forEach(id=>{
     (STATE.history[id]||[]).forEach(entry=>{
       if(entry.off) return;
-      const vol=TrainEngine.workingVolume(entry).load;
+      const vol=TrainEngine.workingVolume(entry, {
+        bodyweightLb: bodyweightOn(entry.date),
+        bodyweightFactor: (STATE.customLib&&STATE.customLib[id]&&STATE.customLib[id].bodyweightFactor)
+          || (TrainEngine.catalogExercise(id)||{}).bodyweightFactor || null,
+      }).load;
       map[entry.date]=(map[entry.date]||0)+vol;
     });
   });
@@ -6843,6 +6968,7 @@ function spawnParticles(root){
   STATE.routines = STATE.routines || [];
   STATE.routineDays = STATE.routineDays || {};
   STATE.snapshots = STATE.snapshots || [];
+  STATE.bodyweight = STATE.bodyweight || [];
   STORAGE = TrainEngine.storageReport(hostStatus, localLayer()?'ok':'unavailable', STATE.snapshots.length);
   console.info('[train] storage — '+STORAGE.detail);
   if(!STATE.snapshots.length) snapshotNow('first boot');

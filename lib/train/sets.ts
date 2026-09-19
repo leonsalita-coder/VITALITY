@@ -1,3 +1,5 @@
+import { bodyweightLoad } from './bodyweight'
+
 /**
  * Set-level primitives.
  *
@@ -15,7 +17,16 @@
  * existing row migrates: nothing stored is rewritten, exactly as with the
  * warm-up flag.
  */
-export type SetKind = 'reps_weight' | 'reps_only' | 'time' | 'distance' | 'time_distance'
+export type SetKind =
+  | 'reps_weight'
+  | 'reps_only'
+  /** Reps moving a known fraction of the athlete: pull-ups, push-ups, dips. */
+  | 'bodyweight'
+  /** The same, plus a belt. */
+  | 'weighted_bodyweight'
+  | 'time'
+  | 'distance'
+  | 'time_distance'
 
 export const DEFAULT_SET_KIND: SetKind = 'reps_weight'
 
@@ -76,6 +87,14 @@ export interface HistoryEntry {
 export interface VolumeOptions {
   /** Exercise-level default, used only when the set itself says nothing. */
   perSide?: boolean
+  /**
+   * What the athlete weighed on the day of this entry. Null or absent means
+   * unknown, and bodyweight lifts then report reps with no load rather than
+   * a load of zero — zero is a claim, and the wrong one.
+   */
+  bodyweightLb?: number | null
+  /** How much of the athlete the movement lifts. Defaults to all of them. */
+  bodyweightFactor?: number | null
 }
 
 /**
@@ -86,8 +105,14 @@ export interface VolumeOptions {
  * caller that wants "volume" has to say volume of what.
  */
 export interface VolumeTotals {
-  /** lb x reps, from reps_weight. */
+  /** lb x reps, from reps_weight and bodyweight kinds. */
   load: number
+  /**
+   * True when a set moved a real load that could not be computed — a
+   * bodyweight lift with no bodyweight on record. Lets a caller say "not
+   * available" instead of showing a confident zero.
+   */
+  loadUnavailable: boolean
   /** Reps, from reps_only. */
   reps: number
   /** Seconds, from time and time_distance. */
@@ -97,7 +122,7 @@ export interface VolumeTotals {
 }
 
 export function emptyVolume(): VolumeTotals {
-  return { load: 0, reps: 0, seconds: 0, metres: 0 }
+  return { load: 0, loadUnavailable: false, reps: 0, seconds: 0, metres: 0 }
 }
 
 export function setKind(set: HistorySet): SetKind {
@@ -147,11 +172,33 @@ export function workingVolume(entry: HistoryEntry, opts: VolumeOptions = {}): Vo
   for (const set of workingSets(entry)) {
     const sides = isPerSide(set, opts) ? 2 : 1
     const reps = (set.r || 0) * sides
+    const bw = typeof opts.bodyweightLb === 'number' && opts.bodyweightLb > 0 ? opts.bodyweightLb : null
+    const factor = typeof opts.bodyweightFactor === 'number' && opts.bodyweightFactor > 0
+      ? opts.bodyweightFactor : 1
+
     switch (setKind(set)) {
       case 'reps_weight':
-        if (set.assisted) totals.reps += reps
-        else totals.load += setWeight(entry, set) * reps
+        if (set.assisted) {
+          /* `w` is the help. What is left of the athlete after the machine
+             takes its share — one rule, computed in one place. */
+          const load = bodyweightLoad({ bodyweightLb: bw, factor, assistance: setWeight(entry, set) })
+          if (load == null) totals.loadUnavailable = true
+          else totals.load += load * reps
+          totals.reps += reps
+        } else {
+          totals.load += setWeight(entry, set) * reps
+        }
         break
+      case 'bodyweight':
+      case 'weighted_bodyweight': {
+        const added = setKind(set) === 'weighted_bodyweight' ? setWeight(entry, set) : 0
+        const help = set.assisted ? setWeight(entry, set) : 0
+        const load = bodyweightLoad({ bodyweightLb: bw, factor, added, assistance: help })
+        if (load == null) totals.loadUnavailable = true
+        else totals.load += load * reps
+        totals.reps += reps
+        break
+      }
       case 'reps_only':
         totals.reps += reps
         break
@@ -195,7 +242,10 @@ export function topWorkingMetres(entry: HistoryEntry): number {
  * diagnosis all read this instead of re-deriving "which way is up" from the
  * kind and flags themselves.
  */
-export function entryScore(entry: HistoryEntry): {
+export function entryScore(
+  entry: HistoryEntry,
+  opts: { bodyweightLb?: number | null; bodyweightFactor?: number | null } = {},
+): {
   kind: SetKind
   primary: number
   secondary: number
@@ -218,6 +268,22 @@ export function entryScore(entry: HistoryEntry): {
       // the time term is negated to keep "higher is better" true
       const seconds = sets.length ? Math.min(...sets.map((s) => s.s || Infinity)) : 0
       return { kind, primary: metres, secondary: Number.isFinite(seconds) ? -seconds : 0 }
+    }
+    case 'bodyweight':
+    case 'weighted_bodyweight': {
+      /* Once bodyweight is known these score on real load like any other
+         lift; without it, reps are the only honest measure. */
+      const bw = typeof opts.bodyweightLb === 'number' && opts.bodyweightLb > 0 ? opts.bodyweightLb : null
+      const factor = typeof opts.bodyweightFactor === 'number' && opts.bodyweightFactor > 0
+        ? opts.bodyweightFactor : 1
+      if (bw == null) return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) }
+      const load = (s: HistorySet) => bodyweightLoad({
+        bodyweightLb: bw,
+        factor,
+        added: kind === 'weighted_bodyweight' ? setWeight(entry, s) : 0,
+        assistance: s.assisted ? setWeight(entry, s) : 0,
+      }) || 0
+      return { kind, primary: best(load), secondary: best((s) => s.r || 0) }
     }
     default: {
       const assisted = sets.some((s) => s.assisted)

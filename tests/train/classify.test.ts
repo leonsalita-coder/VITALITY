@@ -10,7 +10,10 @@ import { SET_KINDS, normalizeClassification, defaultRepRange } from '../../lib/t
 
 describe('SET_KINDS', () => {
   it('is the closed list the rest of the engine dispatches on', () => {
-    expect(SET_KINDS).toEqual(['reps_weight', 'reps_only', 'time', 'distance', 'time_distance'])
+    expect(SET_KINDS).toEqual([
+      'reps_weight', 'reps_only', 'bodyweight', 'weighted_bodyweight',
+      'time', 'distance', 'time_distance',
+    ])
   })
 })
 

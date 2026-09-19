@@ -81,7 +81,7 @@ describe('volume never sums across kinds', () => {
         { r: 12, kind: 'reps_only' },
       ]),
     )
-    expect(v).toEqual({ load: 925, reps: 12, seconds: 60, metres: 40 })
+    expect(v).toEqual({ load: 925, loadUnavailable: false, reps: 12, seconds: 60, metres: 40 })
     // there is deliberately no `total` — adding lb·reps to seconds is meaningless
     expect('total' in v).toBe(false)
   })
@@ -228,7 +228,7 @@ describe('a real explosiveness session', () => {
 
   it('never produces a single combined number', () => {
     const v = workingVolume(session) as unknown as Record<string, unknown>
-    expect(Object.keys(v).sort()).toEqual(['load', 'metres', 'reps', 'seconds'])
+    expect(Object.keys(v).sort()).toEqual(['load', 'loadUnavailable', 'metres', 'reps', 'seconds'])
   })
 })
 

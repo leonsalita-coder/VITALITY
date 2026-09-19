@@ -46,6 +46,12 @@ export interface CatalogExercise {
   incrementLb: number
   primary: MuscleContribution[]
   secondary: MuscleContribution[]
+  /**
+   * How much of the athlete this movement lifts, for bodyweight kinds.
+   * Authored, not estimated: a push-up is about two thirds, a pull-up is
+   * all of it, a back extension is the torso alone.
+   */
+  bodyweightFactor?: number
 }
 
 const m = (muscle: string, share: number) => ({ muscle, share }) as MuscleContribution
@@ -79,8 +85,8 @@ export const CATALOG: CatalogExercise[] = [
   bar({ id: 'hip_thrust', name: 'Hip Thrust', aliases: ['barbell hip thrust', 'glute bridge'],
     pattern: 'hinge', incrementLb: 10, primary: [m('glutes', 0.75), m('hamstrings', 0.25)] }),
   bar({ id: 'back_extension', name: 'Back Extension', aliases: ['hyperextension', '45 degree back extension'],
-    pattern: 'hinge', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'reps_only',
-    e1rmValid: false, incrementLb: 2.5, primary: [m('lower_back', 0.5), m('glutes', 0.3), m('hamstrings', 0.2)] }),
+    pattern: 'hinge', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'bodyweight',
+    e1rmValid: false, incrementLb: 2.5, primary: [m('lower_back', 0.5), m('glutes', 0.3), m('hamstrings', 0.2)], bodyweightFactor: 0.45 }),
   bar({ id: 'kettlebell_swing', name: 'Kettlebell Swing', aliases: ['kb swing', 'swing'],
     pattern: 'hinge', equipment: 'kettlebell', loading: 'free', e1rmValid: false, incrementLb: 8,
     primary: [m('glutes', 0.5), m('hamstrings', 0.3), m('lower_back', 0.2)] }),
@@ -106,8 +112,8 @@ export const CATALOG: CatalogExercise[] = [
     primary: [m('chest', 0.68), m('triceps', 0.16), m('front_delts', 0.16)] }),
   bar({ id: 'push_up', name: 'Push-Up', aliases: ['pushup', 'push ups', 'pressup'],
     pattern: 'horizontal_push', equipment: 'bodyweight', loading: 'free',
-    defaultSetKind: 'reps_only', e1rmValid: false, incrementLb: 2.5,
-    primary: [m('chest', 0.65), m('triceps', 0.2), m('front_delts', 0.15)] }),
+    defaultSetKind: 'bodyweight', e1rmValid: false, incrementLb: 2.5,
+    primary: [m('chest', 0.65), m('triceps', 0.2), m('front_delts', 0.15)], bodyweightFactor: 0.65 }),
   bar({ id: 'chest_fly', name: 'Chest Fly', aliases: ['fly', 'flye', 'pec deck', 'cable fly', 'db fly'],
     pattern: 'isolation', equipment: 'cable', loading: 'stack', e1rmValid: false,
     primary: [m('chest', 0.85), m('front_delts', 0.15)] }),
@@ -123,18 +129,18 @@ export const CATALOG: CatalogExercise[] = [
     primary: [m('side_delts', 0.85), m('traps', 0.15)] }),
   bar({ id: 'dip', name: 'Dip', aliases: ['dips', 'parallel bar dip', 'chest dip', 'tricep dip'],
     pattern: 'vertical_push', equipment: 'bodyweight', loading: 'free',
-    defaultSetKind: 'reps_only', e1rmValid: false, incrementLb: 2.5,
-    primary: [m('chest', 0.45), m('triceps', 0.4), m('front_delts', 0.15)] }),
+    defaultSetKind: 'bodyweight', e1rmValid: false, incrementLb: 2.5,
+    primary: [m('chest', 0.45), m('triceps', 0.4), m('front_delts', 0.15)], bodyweightFactor: 1.0 }),
 
   // ── vertical pull ─────────────────────────────────────────────────
   bar({ id: 'pull_up', name: 'Pull-Up', aliases: ['pullup', 'pull ups', 'pullups'],
     pattern: 'vertical_pull', equipment: 'bodyweight', loading: 'free',
-    defaultSetKind: 'reps_only', e1rmValid: false, incrementLb: 2.5,
-    primary: [m('lats', 0.6), m('upper_back', 0.2), m('biceps', 0.2)] }),
+    defaultSetKind: 'bodyweight', e1rmValid: false, incrementLb: 2.5,
+    primary: [m('lats', 0.6), m('upper_back', 0.2), m('biceps', 0.2)], bodyweightFactor: 1.0 }),
   bar({ id: 'chin_up', name: 'Chin-Up', aliases: ['chinup', 'chin ups', 'chinups'],
     pattern: 'vertical_pull', equipment: 'bodyweight', loading: 'free',
-    defaultSetKind: 'reps_only', e1rmValid: false, incrementLb: 2.5,
-    primary: [m('lats', 0.5), m('biceps', 0.35), m('upper_back', 0.15)] }),
+    defaultSetKind: 'bodyweight', e1rmValid: false, incrementLb: 2.5,
+    primary: [m('lats', 0.5), m('biceps', 0.35), m('upper_back', 0.15)], bodyweightFactor: 1.0 }),
   bar({ id: 'lat_pulldown', name: 'Lat Pulldown', aliases: ['pulldown', 'lat pull down', 'cable pulldown'],
     pattern: 'vertical_pull', equipment: 'machine', loading: 'stack', incrementLb: 10,
     primary: [m('lats', 0.6), m('upper_back', 0.2), m('biceps', 0.2)] }),
@@ -186,16 +192,16 @@ export const CATALOG: CatalogExercise[] = [
     pattern: 'core', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'time',
     unilateral: true, e1rmValid: false, incrementLb: 2.5, primary: [m('obliques', 0.75), m('abs', 0.25)] }),
   bar({ id: 'hanging_leg_raise', name: 'Hanging Leg Raise', aliases: ['leg raise', 'hanging knee raise', 'leg raises'],
-    pattern: 'core', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'reps_only',
-    e1rmValid: false, incrementLb: 2.5, primary: [m('abs', 0.7), m('obliques', 0.15), m('forearms', 0.15)] }),
+    pattern: 'core', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'bodyweight',
+    e1rmValid: false, incrementLb: 2.5, primary: [m('abs', 0.7), m('obliques', 0.15), m('forearms', 0.15)], bodyweightFactor: 0.4 }),
   bar({ id: 'cable_woodchop', name: 'Cable Woodchop', aliases: ['woodchop', 'wood chop', 'cable chop'],
     pattern: 'rotation', equipment: 'cable', loading: 'stack', unilateral: true, e1rmValid: false, incrementLb: 5,
     primary: [m('obliques', 0.7), m('abs', 0.3)] }),
 
   // ── explosiveness: what taekwondo and soccer actually need ────────
   bar({ id: 'box_jump', name: 'Box Jump', aliases: ['box jumps', 'jump box'],
-    pattern: 'jump', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'reps_only',
-    e1rmValid: false, incrementLb: 2.5, primary: [m('quads', 0.45), m('glutes', 0.4), m('calves', 0.15)] }),
+    pattern: 'jump', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'bodyweight',
+    e1rmValid: false, incrementLb: 2.5, primary: [m('quads', 0.45), m('glutes', 0.4), m('calves', 0.15)], bodyweightFactor: 1.0 }),
   bar({ id: 'broad_jump', name: 'Broad Jump', aliases: ['standing broad jump', 'long jump'],
     pattern: 'jump', equipment: 'bodyweight', loading: 'free', defaultSetKind: 'distance',
     e1rmValid: false, incrementLb: 2.5, primary: [m('glutes', 0.4), m('quads', 0.35), m('hamstrings', 0.25)] }),
