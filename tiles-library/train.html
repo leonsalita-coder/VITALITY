@@ -318,6 +318,27 @@ var TrainEngine = (() => {
     return reps.length ? Math.max(...reps) : 0;
   }
 
+  // lib/train/deload.ts
+  var DELOAD_HOLD_SESSIONS = 2;
+  var INTENSITY_CUT = { measured: 0.9, inferred: 0.95 };
+  var VOLUME_CUT = 2 / 3;
+  var REAPPROACH = 0.95;
+  function deloadPlan(record) {
+    if (!record) return { weight: null, setsFactor: 1 };
+    const round = (n) => Math.round(n * 100) / 100;
+    if (record.state === "reapproach") {
+      return { weight: round(record.priorWeight * REAPPROACH), setsFactor: 1 };
+    }
+    if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
+    if (record.kind === "volume") {
+      return { weight: round(record.priorWeight), setsFactor: VOLUME_CUT };
+    }
+    return {
+      weight: round(record.priorWeight * INTENSITY_CUT[record.confidence]),
+      setsFactor: 1
+    };
+  }
+
   // lib/train/progression.ts
   var LAYOFF_DAYS = 14;
   var DEFAULT_INCREMENT = {
@@ -407,6 +428,33 @@ var TrainEngine = (() => {
     const last = sessions.length ? sessions[sessions.length - 1] : null;
     const [minReps, maxReps] = rangeFor(exercise);
     const hasRange = maxReps > minReps;
+    const plan = deloadPlan(exercise.deload || null);
+    if (plan.weight != null && exercise.deload) {
+      const weight = snapWeight(plan.weight, exercise, plan.weight);
+      if (exercise.deload.state === "reapproach") {
+        return {
+          weight,
+          reps: minReps,
+          basis: "deload",
+          reason: `back to ${describeWeight(weight)} \u2014 easing out of the deload`
+        };
+      }
+      if (exercise.deload.kind === "volume") {
+        const cut = Math.round((1 - plan.setsFactor) * 100);
+        return {
+          weight,
+          reps: minReps,
+          basis: "deload",
+          reason: `holding at ${describeWeight(weight)} \u2014 ${cut}% fewer sets while recovery catches up`
+        };
+      }
+      return {
+        weight,
+        reps: minReps,
+        basis: "deload",
+        reason: `holding at ${describeWeight(weight)} \u2014 deload, ${exercise.deload.sessions + 1} of ${DELOAD_HOLD_SESSIONS}`
+      };
+    }
     const override = exercise.deloadOverride;
     if (override && !sessions.some((entry) => entry.date > override.date)) {
       const weight = snapWeight(override.kg, exercise, override.kg);

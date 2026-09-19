@@ -22,6 +22,7 @@ export type ProgressionBasis = 'clean' | 'miss' | 'deload' | 'layoff' | 'new'
 export type LoadingStyle = 'barbell' | 'dumbbell' | 'stack' | 'free'
 
 import { topWorkingWeight, workingSets, type HistoryEntry, type HistorySet } from './sets'
+import { deloadPlan, DELOAD_HOLD_SESSIONS as DELOAD_HOLD, type DeloadRecord } from './deload'
 
 export type { HistoryEntry, HistorySet }
 
@@ -46,6 +47,12 @@ export interface ProgressionExercise {
   loading?: LoadingStyle
   /** An automatic deload, applied until a newer session supersedes it. */
   deloadOverride?: { kg: number; date: string } | null
+  /**
+   * The lift's deload state machine. While deloading or re-approaching it
+   * owns the suggestion outright — otherwise a clean session at the reduced
+   * weight bumps straight back and walks into the same plateau.
+   */
+  deload?: DeloadRecord | null
 }
 
 export interface Suggestion {
@@ -220,6 +227,39 @@ export function suggestWeight(
   const last = sessions.length ? sessions[sessions.length - 1] : null
   const [minReps, maxReps] = rangeFor(exercise)
   const hasRange = maxReps > minReps
+
+  /**
+   * A live deload outranks everything, including a clean session. That is
+   * the entire point of giving it a duration: progression must not be able
+   * to undo it one session later.
+   */
+  const plan = deloadPlan(exercise.deload || null)
+  if (plan.weight != null && exercise.deload) {
+    const weight = snapWeight(plan.weight, exercise, plan.weight)
+    if (exercise.deload.state === 'reapproach') {
+      return {
+        weight,
+        reps: minReps,
+        basis: 'deload',
+        reason: `back to ${describeWeight(weight)} — easing out of the deload`,
+      }
+    }
+    if (exercise.deload.kind === 'volume') {
+      const cut = Math.round((1 - plan.setsFactor) * 100)
+      return {
+        weight,
+        reps: minReps,
+        basis: 'deload',
+        reason: `holding at ${describeWeight(weight)} — ${cut}% fewer sets while recovery catches up`,
+      }
+    }
+    return {
+      weight,
+      reps: minReps,
+      basis: 'deload',
+      reason: `holding at ${describeWeight(weight)} — deload, ${exercise.deload.sessions + 1} of ${DELOAD_HOLD}`,
+    }
+  }
 
   // an automatic deload stands until a session lands after it
   const override = exercise.deloadOverride

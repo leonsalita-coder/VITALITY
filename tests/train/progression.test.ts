@@ -494,3 +494,59 @@ describe('warm-ups are excluded from progression', () => {
     expect(s.weight).toBe(190)
   })
 })
+
+/* ────────────────────────────────────────────────────────────────────
+   Deload state drives the suggestion. The loop this closes: drop once,
+   see a clean session at the reduced weight, bump straight back, and
+   arrive at the same plateau three sessions later.
+   ──────────────────────────────────────────────────────────────────── */
+describe('suggestWeight honours deload state', () => {
+  const held = [clean('2026-09-16', 165, 5, 3)]
+  const rec = (over: Record<string, unknown> = {}) => ({
+    state: 'deloading', kind: 'intensity', priorWeight: 185,
+    since: '2026-09-16', sessions: 0, confidence: 'measured', ...over,
+  })
+
+  it('does NOT bump after a clean session while deloading', () => {
+    const s = suggestWeight(held, ex({ reps: 5, loading: 'barbell', deload: rec() as never }), at('2026-09-18'))
+    expect(s.basis).toBe('deload')
+    // 185 * 0.9 = 166.5, snapped to a loadable 165 — and crucially NOT 170,
+    // which is where plain progression would have taken the clean session
+    expect(s.weight).toBe(165)
+  })
+
+  it('says it is holding, not that it is dropping again', () => {
+    const s = suggestWeight(held, ex({ reps: 5, deload: rec() as never }), at('2026-09-18'))
+    expect(s.reason).toContain('holding')
+  })
+
+  it('cuts sets rather than weight for a volume deload', () => {
+    const s = suggestWeight(held, ex({ reps: 5, deload: rec({ kind: 'volume' }) as never }), at('2026-09-18'))
+    expect(s.weight).toBe(185)
+    expect(s.reason).toContain('sets')
+  })
+
+  it('climbs to just under the prior weight on re-approach', () => {
+    const s = suggestWeight(held, ex({ reps: 5, deload: rec({ state: 'reapproach' }) as never }), at('2026-09-18'))
+    expect(s.weight).toBe(175) // 185 * 0.95, snapped to something loadable
+    expect(s.basis).toBe('deload')
+  })
+
+  it('resumes normal progression once the state is back to normal', () => {
+    const s = suggestWeight(held, ex({ reps: 5, loading: 'barbell', deload: rec({ state: 'normal' }) as never }), at('2026-09-18'))
+    expect(s.basis).toBe('clean')
+    expect(s.weight).toBe(170)
+  })
+
+  it('progresses normally while merely flagged — noticing is not acting', () => {
+    const s = suggestWeight(held, ex({ reps: 5, loading: 'barbell', deload: rec({ state: 'flagged' }) as never }), at('2026-09-18'))
+    expect(s.basis).toBe('clean')
+  })
+
+  it('never climbs across a full hold, no matter how clean the sessions', () => {
+    const sessions = [clean('2026-09-14', 165, 5, 3), clean('2026-09-16', 165, 5, 3)]
+    const first = suggestWeight(sessions.slice(0, 1), ex({ reps: 5, deload: rec() as never }), at('2026-09-15'))
+    const second = suggestWeight(sessions, ex({ reps: 5, deload: rec({ sessions: 1 }) as never }), at('2026-09-17'))
+    expect(second.weight).toBe(first.weight)
+  })
+})
