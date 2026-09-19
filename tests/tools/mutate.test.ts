@@ -144,6 +144,15 @@ describe('the absence lint', () => {
   it('recognises a positive control', () => {
     expect(CONTROL.test('expect(rows.length).toBeGreaterThan(0)')).toBe(true)
     expect(CONTROL.test('expect(ctx).toBeDefined()')).toBe(true)
+    expect(CONTROL.test('expect(result.logged).toBe(1)')).toBe(true)
+    expect(CONTROL.test('expect(gap).toBeCloseTo(0.05, 2)')).toBe(true)
+  })
+
+  it('does not accept a ZERO expectation as a control', () => {
+    /* toBe(0) and toBeCloseTo(0) assert absence. Counting them as
+       controls would let an absence assertion vouch for itself. */
+    expect(CONTROL.test('expect(found.length).toBe(0)')).toBe(false)
+    expect(CONTROL.test('expect(gap).toBeCloseTo(0, 2)')).toBe(false)
   })
 
   it('does not mistake an absence assertion for a control', () => {

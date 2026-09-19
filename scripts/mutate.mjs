@@ -387,7 +387,11 @@ const ABSENCE = /expect\(([^;]*?)\)\s*\.(?:toEqual\(\[\]\)|toBeNull\(\)|toHaveLe
 /* `toBeCloseTo` counts only when the expected value is NOT zero:
    toBeCloseTo(0.05) proves the fixture produced something, while
    toBeCloseTo(0) is another way of asserting absence. */
-const CONTROL = /toBeGreaterThan|toBeTruthy|not\.toBeNull|toBe\(true\)|toContain|toMatch|not\.toEqual|toBeDefined|toBeCloseTo\((?!0[,)\s])/
+/* A NON-ZERO expected value is a positive control: toBe(1) on a count and
+   toBeCloseTo(0.05) on a gap both prove the fixture produced something.
+   Zero is excluded from both, since toBe(0) is another way of asserting
+   absence — which is the thing being looked for, not a control for it. */
+const CONTROL = /toBeGreaterThan|toBeTruthy|not\.toBeNull|toBe\(true\)|toContain|toMatch|not\.toEqual|toBeDefined|toBeCloseTo\((?!0[,)\s])|toBe\([1-9]|toHaveLength\([1-9]/
 
 /**
  * Only absence assertions made against a BUILT FIXTURE.
