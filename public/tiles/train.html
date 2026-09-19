@@ -280,33 +280,49 @@ var TrainEngine = (() => {
     DELOAD_HOLD_SESSIONS: () => DELOAD_HOLD_SESSIONS,
     E1RM_MAX_REPS: () => E1RM_MAX_REPS,
     ENGINE_VERSION: () => ENGINE_VERSION,
+    GAP_DAYS: () => GAP_DAYS,
     HIGH_RPE: () => HIGH_RPE,
     LAYOFF_DAYS: () => LAYOFF_DAYS,
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
+    MUSCLES: () => MUSCLES,
+    PULL_MUSCLES: () => PULL_MUSCLES,
+    PUSH_MUSCLES: () => PUSH_MUSCLES,
+    RAMP_LIMIT: () => RAMP_LIMIT,
+    RATIO_BAND: () => RATIO_BAND,
     RECENT_HEAVY_SETS: () => RECENT_HEAVY_SETS,
     RECOVERY_FLOOR: () => RECOVERY_FLOOR,
     ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
+    SECONDARY_SHARE: () => SECONDARY_SHARE,
     SET_KINDS: () => SET_KINDS,
+    WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
+    analyse: () => analyse,
     bestE1RM: () => bestE1RM,
     classifyPR: () => classifyPR,
     currentWeekStreak: () => currentWeekStreak,
     defaultRepRange: () => defaultRepRange,
     deloadPlan: () => deloadPlan,
     detectPlateau: () => detectPlateau,
+    distribute: () => distribute,
     emptyVolume: () => emptyVolume,
     entryKind: () => entryKind,
     entryScore: () => entryScore,
     epley1RM: () => epley1RM,
     estimateMinutes: () => estimateMinutes,
+    frequencyGaps: () => frequencyGaps,
+    indexFrom: () => indexFrom,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
     limitDeloads: () => limitDeloads,
     longestWeekStreak: () => longestWeekStreak,
+    mapMuscle: () => mapMuscle,
+    muscleSplitFrom: () => muscleSplitFrom,
     nearMissCue: () => nearMissCue,
     nextDeloadState: () => nextDeloadState,
     normalizeClassification: () => normalizeClassification,
+    normalizeShares: () => normalizeShares,
     planSession: () => planSession,
+    ratios: () => ratios,
     sessionsPerWeek: () => sessionsPerWeek,
     setKind: () => setKind,
     setWeight: () => setWeight,
@@ -317,6 +333,8 @@ var TrainEngine = (() => {
     topWorkingReps: () => topWorkingReps,
     topWorkingSeconds: () => topWorkingSeconds,
     topWorkingWeight: () => topWorkingWeight,
+    volumeRamp: () => volumeRamp,
+    weeklySets: () => weeklySets,
     workingRpe: () => workingRpe,
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
@@ -550,16 +568,16 @@ var TrainEngine = (() => {
   var REAPPROACH = 0.95;
   function deloadPlan(record) {
     if (!record) return { weight: null, setsFactor: 1 };
-    const round = (n) => Math.round(n * 100) / 100;
+    const round2 = (n) => Math.round(n * 100) / 100;
     if (record.state === "reapproach") {
-      return { weight: round(record.priorWeight * REAPPROACH), setsFactor: 1 };
+      return { weight: round2(record.priorWeight * REAPPROACH), setsFactor: 1 };
     }
     if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
     if (record.kind === "volume") {
-      return { weight: round(record.priorWeight), setsFactor: VOLUME_CUT };
+      return { weight: round2(record.priorWeight), setsFactor: VOLUME_CUT };
     }
     return {
-      weight: round(record.priorWeight * INTENSITY_CUT[record.confidence]),
+      weight: round2(record.priorWeight * INTENSITY_CUT[record.confidence]),
       setsFactor: 1
     };
   }
@@ -1241,9 +1259,9 @@ var TrainEngine = (() => {
     const chosen = [];
     const seen = /* @__PURE__ */ new Set();
     for (const entry of list) {
-      const { def, label } = resolve(entry, constraints.known || []);
+      const { def, label: label2 } = resolve(entry, constraints.known || []);
       if (!def) {
-        violations.push(`${label}: not a known exercise`);
+        violations.push(`${label2}: not a known exercise`);
         continue;
       }
       if (seen.has(def.id)) continue;
@@ -1257,6 +1275,349 @@ var TrainEngine = (() => {
       return { ...fallback, violations: [...violations, ...fallback.violations] };
     }
     return { ok: true, exercises, violations, source: "model" };
+  }
+
+  // lib/train/muscles.ts
+  var MUSCLES = [
+    "chest",
+    "front_delts",
+    "side_delts",
+    "rear_delts",
+    "triceps",
+    "biceps",
+    "forearms",
+    "lats",
+    "traps",
+    "upper_back",
+    "lower_back",
+    "abs",
+    "obliques",
+    "glutes",
+    "quads",
+    "hamstrings",
+    "adductors",
+    "abductors",
+    "calves",
+    "neck",
+    "full_body",
+    "cardio"
+  ];
+  var SECONDARY_SHARE = 0.5;
+  var SYNONYMS = {
+    chest: "chest",
+    pecs: "chest",
+    pectorals: "chest",
+    pectoral: "chest",
+    front_delts: "front_delts",
+    front_delt: "front_delts",
+    anterior_deltoid: "front_delts",
+    side_delts: "side_delts",
+    lateral_deltoid: "side_delts",
+    medial_delts: "side_delts",
+    rear_delts: "rear_delts",
+    posterior_deltoid: "rear_delts",
+    rear_delt: "rear_delts",
+    triceps: "triceps",
+    tricep: "triceps",
+    tris: "triceps",
+    biceps: "biceps",
+    bicep: "biceps",
+    bis: "biceps",
+    forearms: "forearms",
+    forearm: "forearms",
+    grip: "forearms",
+    lats: "lats",
+    lat: "lats",
+    latissimus: "lats",
+    traps: "traps",
+    trapezius: "traps",
+    upper_back: "upper_back",
+    rhomboids: "upper_back",
+    mid_back: "upper_back",
+    lower_back: "lower_back",
+    erectors: "lower_back",
+    spinal_erectors: "lower_back",
+    abs: "abs",
+    core: "abs",
+    abdominals: "abs",
+    rectus_abdominis: "abs",
+    obliques: "obliques",
+    oblique: "obliques",
+    glutes: "glutes",
+    glute: "glutes",
+    butt: "glutes",
+    quads: "quads",
+    quadriceps: "quads",
+    quad: "quads",
+    hamstrings: "hamstrings",
+    hamstring: "hamstrings",
+    hams: "hamstrings",
+    adductors: "adductors",
+    inner_thigh: "adductors",
+    abductors: "abductors",
+    outer_thigh: "abductors",
+    calves: "calves",
+    calf: "calves",
+    soleus: "calves",
+    gastrocnemius: "calves",
+    neck: "neck",
+    full_body: "full_body",
+    total_body: "full_body",
+    cardio: "cardio",
+    conditioning: "cardio",
+    aerobic: "cardio"
+  };
+  var AMBIGUOUS = {
+    shoulders: "front_delts",
+    shoulder: "front_delts",
+    delts: "front_delts",
+    deltoids: "front_delts",
+    back: "upper_back",
+    upper_body: "full_body",
+    lower_body: "quads",
+    legs: "quads",
+    arms: "biceps",
+    hips: "glutes",
+    posterior_chain: "hamstrings"
+  };
+  function normalizeName(raw) {
+    return String(raw || "").toLowerCase().trim().replace(/[\s-]+/g, "_").replace(/[^a-z_]/g, "");
+  }
+  function mapMuscle(raw) {
+    const key = normalizeName(raw);
+    if (!key) return { muscle: null, exact: false };
+    if (SYNONYMS[key] && MUSCLES.includes(SYNONYMS[key])) return { muscle: SYNONYMS[key], exact: true };
+    if (AMBIGUOUS[key]) return { muscle: AMBIGUOUS[key], exact: false };
+    const singular = key.replace(/s$/, "");
+    if (SYNONYMS[singular] && MUSCLES.includes(SYNONYMS[singular])) {
+      return { muscle: SYNONYMS[singular], exact: true };
+    }
+    return { muscle: null, exact: false };
+  }
+  function normalizeShares(list) {
+    if (!list.length) return [];
+    const total = list.reduce((sum, c) => sum + (Number.isFinite(c.share) ? c.share : 0), 0);
+    if (total <= 0) {
+      const even = 1 / list.length;
+      return list.map((c) => ({ muscle: c.muscle, share: even }));
+    }
+    return list.map((c) => ({ muscle: c.muscle, share: c.share / total }));
+  }
+  function collect(raw) {
+    const names = Array.isArray(raw) ? raw : [];
+    const seen = /* @__PURE__ */ new Map();
+    const unmapped = [];
+    let exact = true;
+    for (const name of names) {
+      const { muscle, exact: hit } = mapMuscle(name);
+      if (!muscle) {
+        const label2 = String(name || "").trim();
+        if (label2) unmapped.push(label2);
+        continue;
+      }
+      if (!hit) exact = false;
+      seen.set(muscle, (seen.get(muscle) || 0) + 1);
+    }
+    const list = [...seen.entries()].map(([muscle, count]) => ({ muscle, share: count }));
+    return { list: normalizeShares(list), unmapped, exact };
+  }
+  function muscleSplitFrom(info) {
+    const def = info && typeof info === "object" ? info : {};
+    const primary = collect(def.primary);
+    const secondary = collect(def.secondary);
+    const authored = Array.isArray(def.primary) && def.primary.some((m) => m && typeof m === "object" && "share" in m);
+    return {
+      primary: primary.list,
+      secondary: secondary.list,
+      estimated: !authored || !primary.exact || !secondary.exact,
+      unmapped: [...primary.unmapped, ...secondary.unmapped]
+    };
+  }
+  function distribute(sets, split) {
+    const out = {};
+    const add = (muscle, amount) => {
+      out[muscle] = (out[muscle] || 0) + amount;
+    };
+    split.primary.forEach((c) => add(c.muscle, sets * c.share));
+    split.secondary.forEach((c) => add(c.muscle, sets * c.share * SECONDARY_SHARE));
+    return out;
+  }
+  var PUSH_MUSCLES = ["chest", "front_delts", "side_delts", "triceps"];
+  var PULL_MUSCLES = ["lats", "upper_back", "rear_delts", "biceps", "traps"];
+
+  // lib/train/analysis.ts
+  var GAP_DAYS = 14;
+  var WEEKLY_SET_BAND = [10, 20];
+  var RATIO_BAND = [0.6, 1.7];
+  var RAMP_LIMIT = 1.5;
+  var DAY_MS2 = 864e5;
+  function indexFrom(customLib) {
+    const out = {};
+    for (const id of Object.keys(customLib || {})) out[id] = muscleSplitFrom(customLib[id]);
+    return out;
+  }
+  function localMidnight3(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m || 1) - 1, d || 1).getTime();
+  }
+  function startOfDay2(ms) {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  }
+  function daysAgo(dateStr, now) {
+    return Math.round((startOfDay2(now) - localMidnight3(dateStr)) / DAY_MS2);
+  }
+  function attribute(history, index) {
+    const rows = [];
+    for (const id of Object.keys(history || {})) {
+      const split = index[id];
+      if (!split || !split.primary.length && !split.secondary.length) continue;
+      for (const entry of history[id] || []) {
+        if (entry.off) continue;
+        const sets = workingSets(entry).length;
+        if (!sets) continue;
+        const spread = distribute(sets, split);
+        for (const muscle of Object.keys(spread)) {
+          rows.push({ muscle, sets: spread[muscle] || 0, date: entry.date, estimated: split.estimated });
+        }
+      }
+    }
+    return rows;
+  }
+  var round = (n) => Math.round(n * 10) / 10;
+  function frequencyGaps(history, index, now) {
+    const rows = attribute(history, index);
+    const byMuscle = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      const seen = byMuscle.get(row.muscle) || { dates: /* @__PURE__ */ new Set(), last: row.date, estimated: false };
+      seen.dates.add(row.date);
+      if (row.date > seen.last) seen.last = row.date;
+      seen.estimated = seen.estimated || row.estimated;
+      byMuscle.set(row.muscle, seen);
+    }
+    const findings = [];
+    for (const [muscle, seen] of byMuscle) {
+      if (seen.dates.size < 2) continue;
+      const gap = daysAgo(seen.last, now);
+      if (gap < GAP_DAYS) continue;
+      findings.push({
+        kind: "frequency_gap",
+        muscle,
+        text: `${label(muscle)} haven't been trained in ${gap} days.`,
+        estimated: seen.estimated
+      });
+    }
+    return findings.sort((a, b) => a.text.localeCompare(b.text));
+  }
+  function weeklySets(history, index, now) {
+    const rows = attribute(history, index).filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0);
+    if (!rows.length) return [];
+    const totals = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      const t = totals.get(row.muscle) || { sets: 0, estimated: false };
+      t.sets += row.sets;
+      t.estimated = t.estimated || row.estimated;
+      totals.set(row.muscle, t);
+    }
+    const findings = [];
+    for (const [muscle, t] of totals) {
+      const sets = round(t.sets);
+      if (sets > WEEKLY_SET_BAND[1]) {
+        findings.push({
+          kind: "weekly_sets",
+          muscle,
+          text: `${label(muscle)} took ${sets} hard sets this week, above the ${WEEKLY_SET_BAND[1]}-set band.`,
+          estimated: t.estimated
+        });
+      } else if (sets > 0 && sets < WEEKLY_SET_BAND[0] && totals.size >= 3) {
+        findings.push({
+          kind: "weekly_sets",
+          muscle,
+          text: `${label(muscle)} got ${sets} hard sets this week, under the ${WEEKLY_SET_BAND[0]}-set band.`,
+          estimated: t.estimated
+        });
+      }
+    }
+    return findings.sort((a, b) => a.text.localeCompare(b.text));
+  }
+  function sumOf(rows, muscles) {
+    return rows.filter((r) => muscles.includes(r.muscle)).reduce((n, r) => n + r.sets, 0);
+  }
+  function ratios(history, index, now, days = 28) {
+    const rows = attribute(history, index).filter((r) => {
+      const age = daysAgo(r.date, now);
+      return age >= 0 && age <= days;
+    });
+    if (!rows.length) return [];
+    const estimated = rows.some((r) => r.estimated);
+    const findings = [];
+    const MIN_TOTAL = 20;
+    const MIN_STRONG = 6;
+    const check = (aName, bName, a, b) => {
+      const left = sumOf(rows, a);
+      const right = sumOf(rows, b);
+      if (left + right < MIN_TOTAL) return;
+      if (Math.max(left, right) < MIN_STRONG) return;
+      if (right < 1 || left < 1) {
+        const [busy, idle, busyName, idleName] = left > right ? [left, right, aName, bName] : [right, left, bName, aName];
+        findings.push({
+          kind: "ratio",
+          text: `${round(busy)} sets of ${busyName.toLowerCase()} work in ${days} days and almost none of ${idleName.toLowerCase()}.`,
+          estimated
+        });
+        return;
+      }
+      const ratio = left / right;
+      if (ratio >= RATIO_BAND[0] && ratio <= RATIO_BAND[1]) return;
+      findings.push({
+        kind: "ratio",
+        text: `${aName} to ${bName} is running ${round(ratio)}:1 over the last ${days} days (${round(left)} vs ${round(right)} sets).`,
+        estimated
+      });
+    };
+    check("Push", "pull", PUSH_MUSCLES, PULL_MUSCLES);
+    check("Quads", "hamstrings", ["quads"], ["hamstrings"]);
+    return findings;
+  }
+  function volumeRamp(history, index, now) {
+    const rows = attribute(history, index);
+    const thisWeek = /* @__PURE__ */ new Map();
+    const lastWeek = /* @__PURE__ */ new Map();
+    let estimated = false;
+    for (const row of rows) {
+      const age = daysAgo(row.date, now);
+      if (age < 0) continue;
+      const bucket = age <= 6 ? thisWeek : age <= 13 ? lastWeek : null;
+      if (!bucket) continue;
+      bucket.set(row.muscle, (bucket.get(row.muscle) || 0) + row.sets);
+      estimated = estimated || row.estimated;
+    }
+    const MIN_BASE = 6;
+    const findings = [];
+    for (const [muscle, current] of thisWeek) {
+      const previous = lastWeek.get(muscle) || 0;
+      if (previous < MIN_BASE) continue;
+      const jump = current / previous;
+      if (jump < RAMP_LIMIT) continue;
+      findings.push({
+        kind: "volume_ramp",
+        muscle,
+        text: `${label(muscle)} jumped from ${round(previous)} to ${round(current)} hard sets week over week.`,
+        estimated
+      });
+    }
+    return findings.sort((a, b) => a.text.localeCompare(b.text));
+  }
+  function analyse(history, index, now) {
+    return [
+      ...frequencyGaps(history, index, now),
+      ...weeklySets(history, index, now),
+      ...ratios(history, index, now),
+      ...volumeRamp(history, index, now)
+    ];
+  }
+  function label(muscle) {
+    return muscle.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 
   // lib/train/index.ts
@@ -1801,6 +2162,17 @@ async function buildInsightContext(session){
       lines.push('- '+e.name+': first time logging this, '+misses+' missed set(s) today'+pr+'.');
     }
   });
+  /* The deterministic reads: frequency gaps, weekly set counts, push:pull
+     and quad:hamstring balance, and week-over-week ramps. Every one is
+     gated on enough data to mean something and says nothing otherwise, so
+     an empty list here is the normal case rather than a failure. */
+  const findings = TrainEngine.analyse(
+    STATE.history || {},
+    TrainEngine.indexFrom(STATE.customLib || {}),
+    Date.now(),
+  );
+  findings.forEach(f=> lines.push('PATTERN: '+f.text+(f.estimated?' (muscle split is estimated)':'')));
+
   const rec = noteRecovery(await readRecovery());
   /* Only a connected read with data feeds the deload diagnosis. The other
      two both mean "we do not know", and the engine treats an unknown
@@ -1979,7 +2351,7 @@ function knownExercises(){
     return {
       id, name:names[id]||id,
       equipment:String(info.equipment||'').toLowerCase(),
-      muscles:(info.primary||[]).map(m=>String(m).toLowerCase()),
+      muscles:TrainEngine.muscleSplitFrom(info).primary.map(c=>c.muscle),
       kind: TrainEngine.SET_KINDS.indexOf(info.kind)>=0 ? info.kind : 'reps_weight',
       sessions: hist.filter(x=>!x.off).length,
       sets: last ? (last.sets||[]).length || 3 : 3,
@@ -2006,16 +2378,19 @@ function equipmentOnRecord(){
 /* Hard sets per muscle over the last couple of days, so a muscle worked
    yesterday is not programmed hard again today. */
 function recentMuscleSets(days){
+  /* Mapped onto the closed muscle list before anything is counted. While
+     this read raw strings, "Pecs" and "Chest" accumulated separately and
+     neither ever reached a threshold — the constraint looked like it was
+     working and had never once fired. */
   const out={}, cutoff=new Date(); cutoff.setDate(cutoff.getDate()-(days||2));
   const key=ymd(cutoff);
   Object.keys(STATE.history||{}).forEach(id=>{
-    const info=(STATE.customLib||{})[id]||{};
-    const muscles=(info.primary||[]).map(m=>String(m).toLowerCase());
-    if(!muscles.length) return;
+    const split=TrainEngine.muscleSplitFrom((STATE.customLib||{})[id]||{});
+    if(!split.primary.length && !split.secondary.length) return;
     (STATE.history[id]||[]).forEach(entry=>{
       if(entry.off || entry.date < key) return;
-      const sets=TrainEngine.workingSets(entry).length;
-      muscles.forEach(m=>{ out[m]=(out[m]||0)+sets; });
+      const spread=TrainEngine.distribute(TrainEngine.workingSets(entry).length, split);
+      Object.keys(spread).forEach(m=>{ out[m]=(out[m]||0)+spread[m]; });
     });
   });
   return out;
@@ -3404,14 +3779,23 @@ function weekdayCounts(){
   return counts;
 }
 function muscleVolumeBreakdown(){
-  const map={};
+  /* Contribution-weighted and mapped to the closed list, so a lift that is
+     mostly chest is not counted as equally chest and triceps, and so two
+     spellings of one muscle are one bar rather than two short ones. */
+  const map={}; let anyEstimated=false; const unmapped={};
   Object.keys(STATE.history||{}).forEach(id=>{
-    const info=STATE.customLib && STATE.customLib[id];
-    const muscles=(info && info.primary && info.primary.length) ? info.primary : ['Other'];
+    const split=TrainEngine.muscleSplitFrom((STATE.customLib||{})[id]||{});
+    split.unmapped.forEach(u=>{ unmapped[u]=true; });
+    if(!split.primary.length && !split.secondary.length) return;
+    if(split.estimated) anyEstimated=true;
     const vol=(STATE.history[id]||[]).filter(s=>!s.off).reduce((a,s)=>a+TrainEngine.workingVolume(s).load,0);
-    muscles.forEach(m=>{ map[m]=(map[m]||0)+vol/muscles.length; });
+    const spread=TrainEngine.distribute(vol, split);
+    Object.keys(spread).forEach(m=>{ map[m]=(map[m]||0)+spread[m]; });
   });
-  return Object.keys(map).map(m=>({m,vol:r1(map[m])})).sort((a,b)=>b.vol-a.vol);
+  const rows=Object.keys(map).map(m=>({ m:m.replace(/_/g,' '), vol:r1(map[m]) })).sort((a,b)=>b.vol-a.vol);
+  rows.estimated=anyEstimated;
+  rows.unmapped=Object.keys(unmapped);
+  return rows;
 }
 /* weekly-bucketed real history — no invented series, just the same dated
    entries (finishedDates / volume-by-date / sessionDurations) the rest of
@@ -3604,7 +3988,9 @@ function drawMuscles(){
   const max=Math.max(...data.map(d=>d.vol),1);
   plot.innerHTML='<div class="muscleBars">'+data.map(d=>'<div class="mbRow"><span class="mbLbl">'+escapeHtml(d.m)+'</span><div class="mbTrack"><div class="mbFill" data-w="'+Math.round(d.vol/max*100)+'" style="width:0%"></div></div><span class="mbVal">'+Math.round(d.vol)+'</span></div>').join('')+'</div>';
   growBars(plot);
-  cap.textContent='Volume by primary muscle worked, from AI-classified exercises';
+  cap.textContent='Volume by muscle, weighted by how much each lift works it'
+    + (data.estimated ? ' — splits are estimated, so read the shape, not the numbers' : '')
+    + (data.unmapped && data.unmapped.length ? '. Unrecognised: '+data.unmapped.join(', ') : '');
   $('#statsRow').innerHTML='';
 }
 function drawGoals(){

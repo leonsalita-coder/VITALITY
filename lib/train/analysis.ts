@@ -1,0 +1,283 @@
+/**
+ * The reads the closed muscle list makes possible.
+ *
+ * Every one of these was impossible while "Pecs" and "Chest" were separate
+ * muscles: nothing ever accumulated enough volume under a single name to
+ * cross a threshold, so every check silently returned nothing.
+ *
+ * Four rules run the whole file:
+ *
+ *   deterministic  — same input, same findings, no clock read inside
+ *   pure           — no DOM, no storage, `now` passed in
+ *   gated          — nothing is said until there is enough data to mean it
+ *   silent         — no finding is better than a vague one
+ *
+ * That last rule is the load-bearing one. An observation that fires on thin
+ * data teaches the athlete to ignore observations.
+ */
+
+import { distribute, muscleSplitFrom, PULL_MUSCLES, PUSH_MUSCLES, type Muscle, type MuscleSplit } from './muscles'
+import { workingSets, type HistoryEntry } from './sets'
+
+/** Days without training a muscle before that is worth mentioning. */
+export const GAP_DAYS = 14
+
+/** Weekly hard sets per muscle that most people grow on. */
+export const WEEKLY_SET_BAND: [number, number] = [10, 20]
+
+/** A ratio outside this in either direction is worth flagging. */
+export const RATIO_BAND: [number, number] = [0.6, 1.7]
+
+/** Week-over-week increase that counts as a hard jump. */
+export const RAMP_LIMIT = 1.5
+
+const DAY_MS = 86_400_000
+
+export interface Finding {
+  kind: 'frequency_gap' | 'weekly_sets' | 'ratio' | 'volume_ramp'
+  muscle?: Muscle
+  /** One sentence, ready to render. */
+  text: string
+  /** True when it rests on guessed muscle splits. */
+  estimated: boolean
+}
+
+/** Everything the analysis needs to know about one exercise. */
+export interface ExerciseIndex {
+  [exerciseId: string]: MuscleSplit
+}
+
+/** Builds the index from stored definitions, mapping on read. */
+export function indexFrom(customLib: Record<string, unknown>): ExerciseIndex {
+  const out: ExerciseIndex = {}
+  for (const id of Object.keys(customLib || {})) out[id] = muscleSplitFrom(customLib[id])
+  return out
+}
+
+function localMidnight(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, (m || 1) - 1, d || 1).getTime()
+}
+
+function startOfDay(ms: number): number {
+  const d = new Date(ms)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+
+function daysAgo(dateStr: string, now: number): number {
+  return Math.round((startOfDay(now) - localMidnight(dateStr)) / DAY_MS)
+}
+
+export interface History {
+  [exerciseId: string]: HistoryEntry[]
+}
+
+interface Attribution {
+  muscle: Muscle
+  sets: number
+  date: string
+  estimated: boolean
+}
+
+/** Every muscle-set the record contains, one row per muscle per session. */
+function attribute(history: History, index: ExerciseIndex): Attribution[] {
+  const rows: Attribution[] = []
+  for (const id of Object.keys(history || {})) {
+    const split = index[id]
+    if (!split || (!split.primary.length && !split.secondary.length)) continue
+    for (const entry of history[id] || []) {
+      if (entry.off) continue
+      const sets = workingSets(entry).length
+      if (!sets) continue
+      const spread = distribute(sets, split)
+      for (const muscle of Object.keys(spread) as Muscle[]) {
+        rows.push({ muscle, sets: spread[muscle] || 0, date: entry.date, estimated: split.estimated })
+      }
+    }
+  }
+  return rows
+}
+
+const round = (n: number) => Math.round(n * 10) / 10
+
+/**
+ * Muscles that were being trained and then stopped.
+ *
+ * Gated on having been trained at least twice: once is not a habit, and
+ * calling a single session six weeks ago a "gap" is noise.
+ */
+export function frequencyGaps(history: History, index: ExerciseIndex, now: number): Finding[] {
+  const rows = attribute(history, index)
+  const byMuscle = new Map<Muscle, { dates: Set<string>; last: string; estimated: boolean }>()
+  for (const row of rows) {
+    const seen = byMuscle.get(row.muscle) || { dates: new Set<string>(), last: row.date, estimated: false }
+    seen.dates.add(row.date)
+    if (row.date > seen.last) seen.last = row.date
+    seen.estimated = seen.estimated || row.estimated
+    byMuscle.set(row.muscle, seen)
+  }
+
+  const findings: Finding[] = []
+  for (const [muscle, seen] of byMuscle) {
+    if (seen.dates.size < 2) continue // not yet a habit to have broken
+    const gap = daysAgo(seen.last, now)
+    if (gap < GAP_DAYS) continue
+    findings.push({
+      kind: 'frequency_gap',
+      muscle,
+      text: `${label(muscle)} haven't been trained in ${gap} days.`,
+      estimated: seen.estimated,
+    })
+  }
+  return findings.sort((a, b) => a.text.localeCompare(b.text))
+}
+
+/** Hard sets per muscle over the last seven days, against a target band. */
+export function weeklySets(history: History, index: ExerciseIndex, now: number): Finding[] {
+  const rows = attribute(history, index).filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0)
+  if (!rows.length) return []
+
+  const totals = new Map<Muscle, { sets: number; estimated: boolean }>()
+  for (const row of rows) {
+    const t = totals.get(row.muscle) || { sets: 0, estimated: false }
+    t.sets += row.sets
+    t.estimated = t.estimated || row.estimated
+    totals.set(row.muscle, t)
+  }
+
+  const findings: Finding[] = []
+  for (const [muscle, t] of totals) {
+    const sets = round(t.sets)
+    if (sets > WEEKLY_SET_BAND[1]) {
+      findings.push({
+        kind: 'weekly_sets',
+        muscle,
+        text: `${label(muscle)} took ${sets} hard sets this week, above the ${WEEKLY_SET_BAND[1]}-set band.`,
+        estimated: t.estimated,
+      })
+    }
+    // being under the band only means something once they are training
+    // enough for "under" to be a choice rather than a starting point
+    else if (sets > 0 && sets < WEEKLY_SET_BAND[0] && totals.size >= 3) {
+      findings.push({
+        kind: 'weekly_sets',
+        muscle,
+        text: `${label(muscle)} got ${sets} hard sets this week, under the ${WEEKLY_SET_BAND[0]}-set band.`,
+        estimated: t.estimated,
+      })
+    }
+  }
+  return findings.sort((a, b) => a.text.localeCompare(b.text))
+}
+
+function sumOf(rows: Attribution[], muscles: Muscle[]): number {
+  return rows.filter((r) => muscles.includes(r.muscle)).reduce((n, r) => n + r.sets, 0)
+}
+
+/**
+ * Push against pull, and quad against hamstring, over a rolling window.
+ *
+ * Gated on the PAIR carrying real volume rather than on each side doing
+ * so, because a month of pressing with almost no pulling is precisely the
+ * finding — requiring a minimum from the weak side would silence it.
+ */
+export function ratios(history: History, index: ExerciseIndex, now: number, days = 28): Finding[] {
+  const rows = attribute(history, index).filter((r) => {
+    const age = daysAgo(r.date, now)
+    return age >= 0 && age <= days
+  })
+  if (!rows.length) return []
+  const estimated = rows.some((r) => r.estimated)
+
+  const findings: Finding[] = []
+  /**
+   * Gated on the PAIR carrying real volume, not on each side doing so.
+   * Requiring a minimum from the weaker side would silence the one case
+   * most worth saying out loud — a month of pressing with almost no
+   * pulling is the finding, not a reason to withhold it.
+   */
+  /* High enough that one session cannot produce a verdict on someone's
+     balance: 20 combined hard sets across a movement pair inside the
+     window is a pattern, 12 is a Tuesday. */
+  const MIN_TOTAL = 20
+  const MIN_STRONG = 6
+  const check = (aName: string, bName: string, a: Muscle[], b: Muscle[]) => {
+    const left = sumOf(rows, a)
+    const right = sumOf(rows, b)
+    if (left + right < MIN_TOTAL) return
+    if (Math.max(left, right) < MIN_STRONG) return
+    if (right < 1 || left < 1) {
+      const [busy, idle, busyName, idleName] =
+        left > right ? [left, right, aName, bName] : [right, left, bName, aName]
+      findings.push({
+        kind: 'ratio',
+        text: `${round(busy)} sets of ${busyName.toLowerCase()} work in ${days} days and almost none of ${idleName.toLowerCase()}.`,
+        estimated,
+      })
+      return
+    }
+    const ratio = left / right
+    if (ratio >= RATIO_BAND[0] && ratio <= RATIO_BAND[1]) return
+    findings.push({
+      kind: 'ratio',
+      text: `${aName} to ${bName} is running ${round(ratio)}:1 over the last ${days} days (${round(left)} vs ${round(right)} sets).`,
+      estimated,
+    })
+  }
+  check('Push', 'pull', PUSH_MUSCLES, PULL_MUSCLES)
+  check('Quads', 'hamstrings', ['quads'], ['hamstrings'])
+  return findings
+}
+
+/**
+ * Week-over-week jumps in hard sets per muscle.
+ *
+ * Gated on a real base: going from 2 sets to 4 doubles the load and means
+ * nothing, so the previous week has to carry enough volume for a jump to
+ * be a jump.
+ */
+export function volumeRamp(history: History, index: ExerciseIndex, now: number): Finding[] {
+  const rows = attribute(history, index)
+  const thisWeek = new Map<Muscle, number>()
+  const lastWeek = new Map<Muscle, number>()
+  let estimated = false
+
+  for (const row of rows) {
+    const age = daysAgo(row.date, now)
+    if (age < 0) continue
+    const bucket = age <= 6 ? thisWeek : age <= 13 ? lastWeek : null
+    if (!bucket) continue
+    bucket.set(row.muscle, (bucket.get(row.muscle) || 0) + row.sets)
+    estimated = estimated || row.estimated
+  }
+
+  const MIN_BASE = 6
+  const findings: Finding[] = []
+  for (const [muscle, current] of thisWeek) {
+    const previous = lastWeek.get(muscle) || 0
+    if (previous < MIN_BASE) continue
+    const jump = current / previous
+    if (jump < RAMP_LIMIT) continue
+    findings.push({
+      kind: 'volume_ramp',
+      muscle,
+      text: `${label(muscle)} jumped from ${round(previous)} to ${round(current)} hard sets week over week.`,
+      estimated,
+    })
+  }
+  return findings.sort((a, b) => a.text.localeCompare(b.text))
+}
+
+/** Every finding worth making, or an empty list when there is nothing to say. */
+export function analyse(history: History, index: ExerciseIndex, now: number): Finding[] {
+  return [
+    ...frequencyGaps(history, index, now),
+    ...weeklySets(history, index, now),
+    ...ratios(history, index, now),
+    ...volumeRamp(history, index, now),
+  ]
+}
+
+function label(muscle: Muscle): string {
+  return muscle.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
