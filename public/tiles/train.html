@@ -318,13 +318,11 @@ var TrainEngine = (() => {
     LB_PER_KG: () => LB_PER_KG,
     LOAD_SPIKE: () => LOAD_SPIKE,
     LOW_RECOVERY: () => LOW_RECOVERY,
-    MAX_PROJECTION_DAYS: () => MAX_PROJECTION_DAYS,
     MAX_RAMP_SETS: () => MAX_RAMP_SETS,
     MAX_REST_SECONDS: () => MAX_REST_SECONDS,
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
     MAX_SNAPSHOTS: () => MAX_SNAPSHOTS,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
-    MIN_PROJECTION_POINTS: () => MIN_PROJECTION_POINTS,
     MIN_TIMED_SESSIONS: () => MIN_TIMED_SESSIONS,
     MODERATE_OTHER_LOAD: () => MODERATE_OTHER_LOAD,
     MODERATE_RECOVERY: () => MODERATE_RECOVERY,
@@ -345,7 +343,6 @@ var TrainEngine = (() => {
     SECONDARY_SHARE: () => SECONDARY_SHARE,
     SET_KINDS: () => SET_KINDS,
     SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
-    STATIC_WEEKS: () => STATIC_WEEKS,
     SWAP_WEIGHTS: () => SWAP_WEIGHTS,
     SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
@@ -420,7 +417,6 @@ var TrainEngine = (() => {
     plateauAdvice: () => plateauAdvice,
     prefillPlan: () => prefillPlan,
     profileFor: () => profileFor,
-    projectGoal: () => projectGoal,
     pushSnapshot: () => pushSnapshot,
     rangeSets: () => rangeSets,
     rankSwaps: () => rankSwaps,
@@ -467,97 +463,6 @@ var TrainEngine = (() => {
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
-
-  // lib/train/projection.ts
-  var MIN_PROJECTION_POINTS = 4;
-  var STATIC_WEEKS = 6;
-  var MAX_PROJECTION_DAYS = 365;
-  var STALE_DAYS = 180;
-  var NOISE_PER_WEEK = 0.01;
-  var DAY_MS = 864e5;
-  function localMidnight(dateStr) {
-    const [y, m2, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-  }
-  function isoOf(ms) {
-    const d = new Date(ms);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  }
-  function unitLabel(unit) {
-    if (unit === "seconds") return "seconds";
-    if (unit === "metres") return "metres";
-    return "lb";
-  }
-  function slopePerDay(points) {
-    return slopeOf(points.map((p) => ({ t: p.t / DAY_MS, v: p.v })));
-  }
-  function slopeOf(points) {
-    const n = points.length;
-    const meanT = points.reduce((sum, p) => sum + p.t, 0) / n;
-    const meanV = points.reduce((sum, p) => sum + p.v, 0) / n;
-    let top = 0;
-    let bottom = 0;
-    for (const p of points) {
-      top += (p.t - meanT) * (p.v - meanV);
-      bottom += (p.t - meanT) ** 2;
-    }
-    return bottom === 0 ? 0 : top / bottom;
-  }
-  function projectGoal(series, target, now, opts = {}) {
-    if (typeof target !== "number" || !Number.isFinite(target) || target <= 0) return null;
-    const points = (series || []).filter((p) => p && typeof p.value === "number" && Number.isFinite(p.value) && p.date).map((p) => ({ t: localMidnight(p.date), v: p.value })).filter((p) => Number.isFinite(p.t) && (now - p.t) / DAY_MS <= STALE_DAYS && p.t <= now).sort((a, b) => a.t - b.t);
-    if (points.length < 1) return null;
-    const latest = points[points.length - 1];
-    const earliest = points[0];
-    const unit = unitLabel(opts.unit);
-    const perDay = slopePerDay(points);
-    const perWeek = Math.round(perDay * 7 * 100) / 100;
-    if (latest.v >= target) {
-      return {
-        verdict: "reached",
-        date: null,
-        weeks: null,
-        perWeek,
-        staticWeeks: null,
-        text: `Goal reached \u2014 ${Math.round(latest.v)} ${unit} against a ${Math.round(target)} target.`
-      };
-    }
-    const spanWeeks = Math.round((latest.t - earliest.t) / DAY_MS / 7);
-    if (perWeek <= NOISE_PER_WEEK) {
-      if (spanWeeks < STATIC_WEEKS) return null;
-      return {
-        verdict: "static",
-        date: null,
-        weeks: null,
-        perWeek,
-        staticWeeks: spanWeeks,
-        text: `Hasn't moved in ${spanWeeks} weeks \u2014 still ${Math.round(target - latest.v)} ${unit} short.`
-      };
-    }
-    const remaining = target - latest.v;
-    const days = remaining / perDay;
-    if (!Number.isFinite(days) || days > MAX_PROJECTION_DAYS) {
-      return {
-        verdict: "unreachable",
-        date: null,
-        weeks: null,
-        perWeek,
-        staticWeeks: null,
-        text: `Not on this trajectory \u2014 ${perWeek} ${unit} a week leaves ${Math.round(remaining)} ${unit} to go.`
-      };
-    }
-    const arrival = now + days * DAY_MS;
-    const weeks = Math.max(1, Math.round(days / 7));
-    return {
-      verdict: "on_track",
-      date: isoOf(arrival),
-      weeks,
-      perWeek,
-      staticWeeks: null,
-      text: `About ${weeks} week${weeks === 1 ? "" : "s"} away at ${perWeek} ${unit} a week.`
-    };
-  }
 
   // lib/train/bodyweight.ts
   function bodyweightAt(history, date) {
@@ -1835,12 +1740,12 @@ var TrainEngine = (() => {
     const step = stepFor(reference, exercise);
     return tidy2(Math.round(weight / step) * step);
   }
-  function localMidnight2(dateStr) {
+  function localMidnight(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function daysSince(dateStr, now) {
-    const then = localMidnight2(dateStr);
+    const then = localMidnight(dateStr);
     const nowDate = new Date(now);
     const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
     return Math.round((today - then) / 864e5);
@@ -1870,7 +1775,7 @@ var TrainEngine = (() => {
       return { days: trailing, priorWeight: topWorkingWeight(last), sessionsSince: 0 };
     }
     for (let i = sessions.length - 1; i > 0; i--) {
-      const gap = daysSince(sessions[i - 1].date, localMidnight2(sessions[i].date));
+      const gap = daysSince(sessions[i - 1].date, localMidnight(sessions[i].date));
       if (gap >= LAYOFF_DAYS) {
         return { days: gap, priorWeight: topWorkingWeight(sessions[i - 1]), sessionsSince: sessions.length - i };
       }
@@ -2269,8 +2174,8 @@ var TrainEngine = (() => {
 
   // lib/train/streaks.ts
   var DEFAULT_WEEKLY_TARGET = 4;
-  var DAY_MS2 = 864e5;
-  function localMidnight3(dateStr) {
+  var DAY_MS = 864e5;
+  function localMidnight2(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
@@ -2285,7 +2190,7 @@ var TrainEngine = (() => {
     for (const date of finishedDates || []) {
       if (!date || seen.has(date)) continue;
       seen.add(date);
-      const age = Math.round((today - localMidnight3(date)) / DAY_MS2);
+      const age = Math.round((today - localMidnight2(date)) / DAY_MS);
       if (age < 0) continue;
       const bucket = Math.floor(age / 7);
       if (bucket < weeks) buckets[bucket] += 1;
@@ -2691,13 +2596,13 @@ var TrainEngine = (() => {
   var WEEKLY_SET_BAND = [10, 20];
   var RATIO_BAND = [0.6, 1.7];
   var RAMP_LIMIT = 1.5;
-  var DAY_MS3 = 864e5;
+  var DAY_MS2 = 864e5;
   function indexFrom(customLib) {
     const out = {};
     for (const id of Object.keys(customLib || {})) out[id] = muscleSplitFrom(customLib[id]);
     return out;
   }
-  function localMidnight4(dateStr) {
+  function localMidnight3(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
@@ -2706,7 +2611,7 @@ var TrainEngine = (() => {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   }
   function daysAgo(dateStr, now) {
-    return Math.round((startOfDay2(now) - localMidnight4(dateStr)) / DAY_MS3);
+    return Math.round((startOfDay2(now) - localMidnight3(dateStr)) / DAY_MS2);
   }
   function attribute(history, index) {
     const rows = [];
@@ -3664,19 +3569,19 @@ Say that back in one short sentence, in the second person, keeping the number ex
   }
 
   // lib/train/series.ts
-  var DAY_MS4 = 864e5;
+  var DAY_MS3 = 864e5;
   function dateKey3(ms) {
     const d = new Date(ms);
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
-  function localMidnight5(date) {
+  function localMidnight4(date) {
     const [y, m2, d] = date.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function daysAgo2(date, now) {
-    const today = localMidnight5(dateKey3(now));
-    return Math.round((today - localMidnight5(date)) / DAY_MS4);
+    const today = localMidnight4(dateKey3(now));
+    return Math.round((today - localMidnight4(date)) / DAY_MS3);
   }
   function e1rmSeries(entries) {
     const points = [];
@@ -7626,34 +7531,6 @@ function drawMuscles(){
     + (anyEstimated ? ' * rests on an estimated muscle split.' : '');
   $('#statsRow').innerHTML='';
 }
-/**
- * The series a goal is measured against, in the goal's own unit.
- *
- * A loaded lift is judged on estimated 1RM; a plank on seconds and a
- * carry on metres, because e1RM means nothing for either. Returns null
- * when the kind has no number a goal could be about.
- */
-function goalSeriesFor(id){
-  const h=(STATE.history[id]||[]).filter(s=>!s.off);
-  if(!h.length) return null;
-  const kind=kindFor({ id: id });
-  if(kind==='time'){
-    return { unit:'seconds', points:h.map(e=>({ date:e.date, value:TrainEngine.topWorkingSeconds(e) })) };
-  }
-  if(kind==='distance' || kind==='time_distance'){
-    return { unit:'metres', points:h.map(e=>({ date:e.date, value:TrainEngine.topWorkingMetres(e) })) };
-  }
-  return { unit:'lb', points:TrainEngine.e1rmSeries(h) };
-}
-/* Where this goal actually lands, or null when there is not enough to
-   say. Null renders nothing — an "unknown" row would be the app taking
-   up space to announce it has no idea. */
-function goalProjectionFor(goal){
-  const series=goalSeriesFor(goal.id);
-  if(!series) return null;
-  return TrainEngine.projectGoal(series.points, goal.target, Date.now(), { unit: series.unit });
-}
-
 function drawGoals(){
   const plot=$('#statsPlot'), cap=$('#statsCap');
   plot.style.aspectRatio='auto';
@@ -7662,10 +7539,7 @@ function drawGoals(){
     const h=(STATE.history[g.id]||[]).filter(s=>!s.off);
     const cur=h.length?Math.max(...h.map(s=>s.kg)):0;
     const pct=Math.max(0,Math.min(100,Math.round(cur/g.target*100)));
-    const proj=goalProjectionFor(g);
-    return '<div class="goalRow"><div class="goalTop"><span>'+escapeHtml(names[g.id]||g.id)+'</span><span>'+cur+' / '+g.target+' '+STATE.unit+'</span></div><div class="mbTrack"><div class="mbFill" data-w="'+pct+'" style="width:0%"></div></div>'
-      + (proj ? '<div class="goalProj goal-'+proj.verdict+'">'+escapeHtml(proj.text)+'</div>' : '')
-      + '<button class="photoX" data-i="'+i+'" aria-label="Remove goal">×</button></div>';
+    return '<div class="goalRow"><div class="goalTop"><span>'+escapeHtml(names[g.id]||g.id)+'</span><span>'+cur+' / '+g.target+' '+STATE.unit+'</span></div><div class="mbTrack"><div class="mbFill" data-w="'+pct+'" style="width:0%"></div></div><button class="photoX" data-i="'+i+'" aria-label="Remove goal">×</button></div>';
   }).join('');
   plot.innerHTML = (rows||'<p class="emptyHist">No lift goals yet.</p>') + '<button class="pbtn ghost" id="addGoalBtn" style="width:100%;margin-top:14px">+ Add a lift goal</button>';
   growBars(plot);
