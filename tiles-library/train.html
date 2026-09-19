@@ -344,6 +344,7 @@ var TrainEngine = (() => {
     epley1RM: () => epley1RM,
     estimateMinutes: () => estimateMinutes,
     frequencyGaps: () => frequencyGaps,
+    hasLoggedWork: () => hasLoggedWork,
     indexFrom: () => indexFrom,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
@@ -361,9 +362,12 @@ var TrainEngine = (() => {
     normalizeShares: () => normalizeShares,
     planSession: () => planSession,
     plateBreakdown: () => plateBreakdown,
+    prefillPlan: () => prefillPlan,
     ratios: () => ratios,
+    remapRoutines: () => remapRoutines,
     resolveExercise: () => resolveExercise,
     reviewWorthSending: () => reviewWorthSending,
+    routineForDate: () => routineForDate,
     sameAsLastTime: () => sameAsLastTime,
     sessionState: () => sessionState,
     sessionsPerWeek: () => sessionsPerWeek,
@@ -2742,6 +2746,38 @@ Say that back in one short sentence, in the second person, keeping the number ex
     return !review.quiet_week;
   }
 
+  // lib/train/routine.ts
+  function weekdayOf(date) {
+    const [y, m2, d] = date.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getDay();
+  }
+  function routineForDate(routines, assignment, date) {
+    const id = (assignment || {})[weekdayOf(date)];
+    if (!id) return null;
+    return (routines || []).find((r) => r.id === id) || null;
+  }
+  function prefillPlan(routine, presentIds) {
+    if (!routine) return [];
+    const present = new Set(presentIds || []);
+    return routine.exercises.filter((e) => !present.has(e.exerciseId));
+  }
+  function hasLoggedWork(session) {
+    return (session.ex || []).some((ex) => (ex.log || []).some((s) => s != null));
+  }
+  function remapRoutines(routines, fromId, intoId) {
+    return (routines || []).map((routine) => {
+      const seen = /* @__PURE__ */ new Set();
+      const exercises = [];
+      for (const exercise of routine.exercises) {
+        const id = exercise.exerciseId === fromId ? intoId : exercise.exerciseId;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        exercises.push({ ...exercise, exerciseId: id });
+      }
+      return { ...routine, exercises };
+    });
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -2811,7 +2847,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, aliases:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
+    history:{}, customLib:{}, aliases:{}, routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -2896,11 +2932,46 @@ async function computeReadiness(){
   });
   if(READINESS.verdict==='rest_advised'){
     STATE.restAdvisedDates = STATE.restAdvisedDates || [];
+  STATE.routines = STATE.routines || [];
+  STATE.routineDays = STATE.routineDays || {};
     if(STATE.restAdvisedDates.indexOf(today)<0){ STATE.restAdvisedDates.push(today); saveState(); }
   }
   return READINESS;
 }
 function readiness(){ return READINESS || { verdict:'normal', setsFactor:1, weightFactor:1, reason:null }; }
+/**
+ * Pre-fills today's session from the routine assigned to this weekday.
+ *
+ * Runs only on a session with NOTHING logged: a pre-fill that overwrites
+ * work is worse than no pre-fill. Everything it adds is an ordinary
+ * exercise the athlete can edit or remove.
+ */
+function applyRoutine(session){
+  const routines = STATE.routines || [];
+  if(!routines.length) return;                      // nothing set: unchanged
+  if(TrainEngine.hasLoggedWork(session)) return;    // never clobber work
+  const routine = TrainEngine.routineForDate(routines, STATE.routineDays || {}, session.date);
+  if(!routine) return;
+  const plan = TrainEngine.prefillPlan(routine, session.ex.map(x=>x.id));
+  if(!plan.length) return;
+  plan.forEach(item=>{
+    const def = TrainEngine.catalogExercise(item.exerciseId);
+    const name = (STATE.exerciseNames||{})[item.exerciseId] || (def && def.name) || item.exerciseId;
+    if(def) installExerciseDef(def.id, def.name, {
+      kind:def.defaultSetKind, perSide:def.unilateral, assisted:false,
+      repRange:item.repRange||null, equipment:def.equipment, primary:def.primary,
+    });
+    if(item.repRange) setExerciseField({id:item.exerciseId}, 'repRange', item.repRange);
+    session.ex.push(sessionExerciseFrom({
+      id:item.exerciseId, name,
+      kind:(def && def.defaultSetKind) || kindFor({id:item.exerciseId}),
+      sets:item.sets, reps:item.reps,
+      weight:lastKgFromHistory(item.exerciseId)||0,
+      rest:item.rest, perSide:!!(def && def.unilateral),
+    }));
+  });
+  saveState();
+}
 function plateConfig(){
   return STATE.plateConfig || TrainEngine.defaultPlateConfig();
 }
@@ -3507,7 +3578,19 @@ async function fetchInsight(session){
   render();
 }
 /** The rolling week, as data — displayable, loggable, pushable later. */
+/* Memoized per day. The review is pure and its inputs only change when
+   history does, so recomputing analyse() on every render is waste that
+   grows with the size of the record. */
+let REVIEW_CACHE = null;
+function invalidateReview(){ REVIEW_CACHE = null; }
 function buildWeeklyReview(){
+  const stamp = today + ':' + Object.keys(STATE.history||{}).length + ':' + (STATE.finishedDates||[]).length;
+  if(REVIEW_CACHE && REVIEW_CACHE.stamp === stamp) return REVIEW_CACHE.review;
+  const review = weeklyReviewUncached();
+  REVIEW_CACHE = { stamp, review };
+  return review;
+}
+function weeklyReviewUncached(){
   return TrainEngine.weeklyReview({
     history: STATE.history||{},
     customLib: STATE.customLib||{},
@@ -4016,6 +4099,7 @@ function markAbandoned(date){
  * it looks authoritative. Anything derived is derived again from the rows.
  */
 function rederiveFromHistory(){
+  invalidateReview();
   const finished = new Set(STATE.finishedDates||[]);
   Object.keys(STATE.history||{}).forEach(id=>{
     const rows=(STATE.history[id]||[]).filter(x=>!x.off);
@@ -4085,6 +4169,7 @@ function rollupFor(e, date){
   }
   STATE.history[e.id]=h;
   STATE.exerciseNames=STATE.exerciseNames||{}; STATE.exerciseNames[e.id]=e.name;
+  invalidateReview();
 }
 function rollupToday(e){ return rollupFor(e, today); }
 
@@ -4292,6 +4377,60 @@ const SKY_TOGGLE_HTML =
  * writes through rollupFor — the same validation and the same
  * invalidation as a live session.
  */
+const WEEKDAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+/* Named days, and which weekday each falls on. Deliberately small: this
+   answers "today is probably push day" and nothing more. */
+function openRoutines(){
+  const routines=STATE.routines||[];
+  const days=STATE.routineDays||{};
+  const assignedTo=id=>WEEKDAYS.map((d,i)=>days[i]===id?d:null).filter(Boolean).join(' ');
+  openPop(popHead('Routines','Named days')
+    + (routines.length
+        ? '<div class="swapList">'+routines.map(r=>'<button class="swapItem" data-r="'+r.id+'"><span class="nm">'+escapeHtml(r.name)+'</span><span class="mu">'+(assignedTo(r.id)||r.exercises.length+' lifts')+'</span></button>').join('')+'</div>'
+        : '<p class="emptyHist">No routines yet.</p>')
+    + '<div class="searchRow" style="margin-top:10px"><input id="rtName" placeholder="Name today\'s lifts, e.g. Push" autocomplete="off"/></div>'
+    + '<button class="pbtn save" id="rtSave" style="width:100%;margin-top:8px">Save today as a routine</button>',
+    scrim=>{
+      const saveBtn=scrim.querySelector('#rtSave');
+      saveBtn.disabled=!curSession().ex.length;
+      saveBtn.onclick=()=>{
+        const name=(scrim.querySelector('#rtName').value||'').trim();
+        if(!name || !curSession().ex.length) return;
+        STATE.routines=STATE.routines||[];
+        STATE.routines.push({
+          id:'r'+Date.now(), name,
+          exercises: curSession().ex.map(e=>({
+            exerciseId:e.id, sets:e.log.length||e.sets, reps:e.reps,
+            repRange:repRangeFor(e)||null, rest:e.rest,
+          })),
+        });
+        saveState(); closePop(); openRoutines();
+      };
+      scrim.querySelectorAll('.swapItem[data-r]').forEach(b=> b.onclick=()=>{ closePop(); assignRoutine(b.dataset.r); });
+    });
+}
+function assignRoutine(id){
+  const routine=(STATE.routines||[]).find(r=>r.id===id);
+  if(!routine) return;
+  const days=STATE.routineDays||{};
+  openPop(popHead(routine.name,'Which days')
+    + '<p class="formGist">'+routine.exercises.length+' lifts. Tap a day to assign or clear it.</p>'
+    + '<div class="swapList" id="rtDays">'+WEEKDAYS.map((d,i)=>'<button class="swapItem" data-d="'+i+'"><span class="nm">'+d+'</span><span class="mu">'+(days[i]===id?'assigned':(days[i]?'other routine':'—'))+'</span></button>').join('')+'</div>'
+    + '<button class="pbtn ghost danger" id="rtDelete" style="width:100%;margin-top:12px">Delete this routine</button>',
+    scrim=>{
+      scrim.querySelectorAll('.swapItem[data-d]').forEach(b=> b.onclick=()=>{
+        const i=+b.dataset.d;
+        STATE.routineDays=STATE.routineDays||{};
+        if(STATE.routineDays[i]===id) delete STATE.routineDays[i]; else STATE.routineDays[i]=id;
+        saveState(); closePop(); assignRoutine(id);
+      });
+      scrim.querySelector('#rtDelete').onclick=()=>{
+        STATE.routines=(STATE.routines||[]).filter(r=>r.id!==id);
+        Object.keys(STATE.routineDays||{}).forEach(k=>{ if(STATE.routineDays[k]===id) delete STATE.routineDays[k]; });
+        saveState(); closePop(); render();
+      };
+    });
+}
 function openBackdate(){
   const ids=Object.keys(STATE.exerciseNames||{});
   if(!ids.length){
@@ -4406,6 +4545,10 @@ function confirmMerge(fromId, intoId){
       scrim.querySelector('#mgGo').onclick=()=>{
         const out=TrainEngine.mergeExercises(STATE, fromId, intoId);
         Object.assign(STATE, out.state);
+        /* A routine still pointing at the folded-away id would silently
+           stop pre-filling that day. */
+        STATE.routines=TrainEngine.remapRoutines(STATE.routines||[], fromId, intoId);
+        invalidateReview();
         saveState(); closePop(); render();
         renderStatsPicker && renderStatsPicker(); drawStatsSection && drawStatsSection();
       };
@@ -4419,6 +4562,9 @@ function openSettings(){
     + '<div class="secLbl">Sessions per week</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal" id="wkTarget">'+weeklyTarget()+'</span><button class="step" data-t="1">+</button></div></div>'
     + '<p class="settingsNote">Your streak counts weeks that hit this. Rest days never break it.</p>'
+    + '<div class="secLbl">Routine</div>'
+    + '<p class="settingsNote">Save today\'s lifts as a named day and assign it to weekdays. It pre-fills an empty session and never touches anything already logged.</p>'
+    + '<button class="pbtn ghost" id="openRoutines" style="width:100%">Routines</button>'
     + '<div class="secLbl">A day you missed</div>'
     + '<p class="settingsNote">Every hole in the history weakens plateau detection and the weekly reads. Fill one in.</p>'
     + '<button class="pbtn ghost" id="openBackdate" style="width:100%">Log a past session</button>'
@@ -4446,6 +4592,8 @@ function openSettings(){
           STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
         });
       };
+      const rtBtn=scrim.querySelector('#openRoutines');
+      if(rtBtn) rtBtn.onclick=()=>{ closePop(); openRoutines(); };
       const bdBtn=scrim.querySelector('#openBackdate');
       if(bdBtn) bdBtn.onclick=()=>{ closePop(); openBackdate(); };
       const mergeBtn=scrim.querySelector('#openMerge');
@@ -5980,6 +6128,7 @@ function spawnParticles(root){
   STATE.sessionDurations = STATE.sessionDurations || [];
   STATE.liftGoals = STATE.liftGoals || [];
   try{ await computeReadiness(); }catch(err){ READINESS=null; }
+  applyRoutine(curSession());
   render(); wireFresh();
   renderGoalBubble(); renderPhotos(); wirePhotoUpload(); renderOverviewCards(); renderStatsPicker(); drawStatsSection();
   const exportBtn=$('#exportCsvBtn'); if(exportBtn) exportBtn.onclick=exportCSV;
