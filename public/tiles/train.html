@@ -311,6 +311,7 @@ var TrainEngine = (() => {
     DEFAULT_WEEKLY_TARGET: () => DEFAULT_WEEKLY_TARGET,
     DELOAD_HOLD_SESSIONS: () => DELOAD_HOLD_SESSIONS,
     E1RM_MAX_REPS: () => E1RM_MAX_REPS,
+    EASY_MARGIN: () => EASY_MARGIN,
     ENGINE_VERSION: () => ENGINE_VERSION,
     GAP_DAYS: () => GAP_DAYS,
     HARD_OTHER_LOAD: () => HARD_OTHER_LOAD,
@@ -329,6 +330,7 @@ var TrainEngine = (() => {
     MIN_ASYMMETRY_SESSIONS: () => MIN_ASYMMETRY_SESSIONS,
     MIN_LOAD_GAP: () => MIN_LOAD_GAP,
     MIN_PROJECTION_POINTS: () => MIN_PROJECTION_POINTS,
+    MIN_SCORED_FOR_FEEDBACK: () => MIN_SCORED_FOR_FEEDBACK,
     MIN_TIMED_SESSIONS: () => MIN_TIMED_SESSIONS,
     MODERATE_OTHER_LOAD: () => MODERATE_OTHER_LOAD,
     MODERATE_RECOVERY: () => MODERATE_RECOVERY,
@@ -354,6 +356,7 @@ var TrainEngine = (() => {
     SWAP_WEIGHTS: () => SWAP_WEIGHTS,
     SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
+    accuracyOver: () => accuracyOver,
     amrapOf: () => amrapOf,
     amrapSignal: () => amrapSignal,
     amrapTrend: () => amrapTrend,
@@ -435,6 +438,7 @@ var TrainEngine = (() => {
     plateauAdvice: () => plateauAdvice,
     prefillPlan: () => prefillPlan,
     profileFor: () => profileFor,
+    progressionDamping: () => progressionDamping,
     projectGoal: () => projectGoal,
     pushSnapshot: () => pushSnapshot,
     rangeSets: () => rangeSets,
@@ -442,6 +446,7 @@ var TrainEngine = (() => {
     ratios: () => ratios,
     recentOtherLoad: () => recentOtherLoad,
     recordBodyweight: () => recordBodyweight,
+    recordPrediction: () => recordPrediction,
     remapRoutines: () => remapRoutines,
     repRangeFor: () => repRangeFor,
     resolveExercise: () => resolveExercise,
@@ -451,6 +456,7 @@ var TrainEngine = (() => {
     rollingWindow: () => rollingWindow,
     routineForDate: () => routineForDate,
     sameAsLastTime: () => sameAsLastTime,
+    scorePrediction: () => scorePrediction,
     sessionState: () => sessionState,
     sessionsPerWeek: () => sessionsPerWeek,
     sessionsPerWeekSeries: () => sessionsPerWeekSeries,
@@ -488,6 +494,283 @@ var TrainEngine = (() => {
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
+
+  // lib/train/bodyweight.ts
+  function bodyweightAt(history, date) {
+    let best = null;
+    for (const entry of history || []) {
+      if (!entry || typeof entry.lb !== "number" || !Number.isFinite(entry.lb) || entry.lb <= 0) continue;
+      if (entry.date > date) continue;
+      if (!best || entry.date > best.date) best = entry;
+    }
+    return best ? best.lb : null;
+  }
+  function currentBodyweight(history) {
+    const sorted = (history || []).filter((e) => e && e.lb > 0).sort((a, b) => a.date.localeCompare(b.date));
+    return sorted.length ? sorted[sorted.length - 1].lb : null;
+  }
+  function recordBodyweight(history, date, lb) {
+    if (!Number.isFinite(lb) || lb <= 0) return history || [];
+    const rest = (history || []).filter((e) => e && e.date !== date);
+    return [...rest, { date, lb: Math.round(lb * 10) / 10 }].sort((a, b) => a.date.localeCompare(b.date));
+  }
+  function bodyweightLoad(opts) {
+    if (opts.bodyweightLb == null || !Number.isFinite(opts.bodyweightLb)) return null;
+    const factor = typeof opts.factor === "number" && opts.factor > 0 ? opts.factor : 1;
+    const base = opts.bodyweightLb * factor;
+    const load = base + (opts.added || 0) - (opts.assistance || 0);
+    return Math.max(0, Math.round(load * 10) / 10);
+  }
+
+  // lib/train/sets.ts
+  var DEFAULT_SET_KIND = "reps_weight";
+  function emptyVolume() {
+    return { load: 0, loadUnavailable: false, reps: 0, seconds: 0, metres: 0 };
+  }
+  function setKind(set) {
+    return set.kind || DEFAULT_SET_KIND;
+  }
+  function entryKind(entry) {
+    const first = workingSets(entry)[0];
+    return first ? setKind(first) : DEFAULT_SET_KIND;
+  }
+  function isPerSide(set, opts) {
+    return set.perSide !== void 0 ? set.perSide === true : opts.perSide === true;
+  }
+  function sidesOf(set) {
+    const sides = set && set.sides;
+    if (!sides || !sides.left || !sides.right) return null;
+    const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+    return {
+      left: { w: num2(sides.left.w), r: num2(sides.left.r) },
+      right: { w: num2(sides.right.w), r: num2(sides.right.r) }
+    };
+  }
+  function isWorkingSet(set) {
+    return !!set && set.fail !== true && set.warmup !== true;
+  }
+  function workingSets(entry) {
+    return (entry.sets || []).filter(isWorkingSet);
+  }
+  function isAmrapSet(set) {
+    return !!set && set.amrap === true && isWorkingSet(set);
+  }
+  function amrapOf(entry) {
+    const flagged = (entry.sets || []).filter(isAmrapSet);
+    return flagged.length ? flagged[flagged.length - 1] : null;
+  }
+  function rangeSets(entry) {
+    return workingSets(entry).filter((set) => !isAmrapSet(set));
+  }
+  function setWeight(entry, set) {
+    const limbs = sidesOf(set);
+    if (limbs) return Math.min(limbs.left.w, limbs.right.w);
+    return typeof set.w === "number" ? set.w : entry.kg || 0;
+  }
+  function workingVolume(entry, opts = {}) {
+    const totals = emptyVolume();
+    for (const set of workingSets(entry)) {
+      const limbs = sidesOf(set);
+      if (limbs) {
+        totals.load += limbs.left.w * limbs.left.r + limbs.right.w * limbs.right.r;
+        continue;
+      }
+      const sides = isPerSide(set, opts) ? 2 : 1;
+      const reps = (set.r || 0) * sides;
+      const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
+      const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
+      switch (setKind(set)) {
+        case "reps_weight":
+          if (set.assisted) {
+            const load = bodyweightLoad({ bodyweightLb: bw, factor, assistance: setWeight(entry, set) });
+            if (load == null) totals.loadUnavailable = true;
+            else totals.load += load * reps;
+            totals.reps += reps;
+          } else {
+            totals.load += setWeight(entry, set) * reps;
+          }
+          break;
+        case "bodyweight":
+        case "weighted_bodyweight": {
+          const added = setKind(set) === "weighted_bodyweight" ? setWeight(entry, set) : 0;
+          const help = set.assisted ? setWeight(entry, set) : 0;
+          const load = bodyweightLoad({ bodyweightLb: bw, factor, added, assistance: help });
+          if (load == null) totals.loadUnavailable = true;
+          else totals.load += load * reps;
+          totals.reps += reps;
+          break;
+        }
+        case "reps_only":
+          totals.reps += reps;
+          break;
+        case "time":
+          totals.seconds += (set.s || 0) * sides;
+          break;
+        case "distance":
+          totals.metres += (set.m || 0) * sides;
+          break;
+        case "time_distance":
+          totals.seconds += (set.s || 0) * sides;
+          totals.metres += (set.m || 0) * sides;
+          break;
+      }
+    }
+    return totals;
+  }
+  function topWorkingSeconds(entry) {
+    const values = workingSets(entry).filter((set) => setKind(set) === "time" || setKind(set) === "time_distance").map((set) => set.s || 0);
+    return values.length ? Math.max(...values) : 0;
+  }
+  function topWorkingMetres(entry) {
+    const values = workingSets(entry).filter((set) => setKind(set) === "distance" || setKind(set) === "time_distance").map((set) => set.m || 0);
+    return values.length ? Math.max(...values) : 0;
+  }
+  function entryScore(entry, opts = {}) {
+    const kind = entryKind(entry);
+    const sets = workingSets(entry);
+    const best = (pick) => sets.length ? Math.max(...sets.map(pick)) : 0;
+    switch (kind) {
+      case "reps_only":
+        return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
+      case "time":
+        return { kind, primary: best((s) => s.s || 0), secondary: 0 };
+      case "distance":
+        return { kind, primary: best((s) => s.m || 0), secondary: 0 };
+      case "time_distance": {
+        const metres = best((s) => s.m || 0);
+        const seconds = sets.length ? Math.min(...sets.map((s) => s.s || Infinity)) : 0;
+        return { kind, primary: metres, secondary: Number.isFinite(seconds) ? -seconds : 0 };
+      }
+      case "bodyweight":
+      case "weighted_bodyweight": {
+        const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
+        const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
+        if (bw == null) return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
+        const load = (s) => bodyweightLoad({
+          bodyweightLb: bw,
+          factor,
+          added: kind === "weighted_bodyweight" ? setWeight(entry, s) : 0,
+          assistance: s.assisted ? setWeight(entry, s) : 0
+        }) || 0;
+        return { kind, primary: best(load), secondary: best((s) => s.r || 0) };
+      }
+      default: {
+        const assisted = sets.some((s) => s.assisted);
+        if (assisted) {
+          const least = sets.length ? Math.min(...sets.map((s) => setWeight(entry, s))) : 0;
+          return { kind, primary: -least, secondary: best((s) => s.r || 0) };
+        }
+        const weight = sets.length ? best((s) => setWeight(entry, s)) : entry.kg || 0;
+        return { kind, primary: weight, secondary: best((s) => s.r || 0) };
+      }
+    }
+  }
+  function topWorkingWeight(entry) {
+    const weights = workingSets(entry).map((set) => setWeight(entry, set));
+    return weights.length ? Math.max(...weights) : 0;
+  }
+  function topWorkingReps(entry) {
+    const reps = workingSets(entry).map((set) => set.r || 0);
+    return reps.length ? Math.max(...reps) : 0;
+  }
+  function workingRpe(entry) {
+    const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
+    if (!values.length) return null;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  // lib/train/predictions.ts
+  var EASY_MARGIN = 3;
+  var MIN_SCORED_FOR_FEEDBACK = 10;
+  var POOR_RATE = 0.6;
+  var MOSTLY_HIGH = 0.6;
+  var keyOf = (p) => `${p.date}:${p.id}`;
+  function recordPrediction(store, prediction) {
+    if (!store || !prediction || !prediction.id || !prediction.date) return false;
+    const key = keyOf(prediction);
+    if (key in store) return false;
+    store[key] = { ...prediction };
+    return true;
+  }
+  function scorePrediction(prediction, entry) {
+    if (!entry || entry.off || !workingSets(entry).length) return "not_attempted";
+    if (prediction.seconds != null) {
+      const held = topWorkingSeconds(entry);
+      if (held >= prediction.seconds + EASY_MARGIN * 5) return "missed_low";
+      return held >= prediction.seconds ? "hit" : "missed_high";
+    }
+    if (prediction.metres != null) {
+      const covered = topWorkingMetres(entry);
+      if (covered >= prediction.metres * 1.2) return "missed_low";
+      return covered >= prediction.metres ? "hit" : "missed_high";
+    }
+    const targetWeight = prediction.weight ?? 0;
+    const targetReps = prediction.reps ?? 0;
+    const loaded = topWorkingWeight(entry);
+    if (loaded < targetWeight) return "missed_high";
+    const reps = workingSets(entry).map((s) => s.r || 0);
+    const lowest = reps.length ? Math.min(...reps) : 0;
+    if (lowest >= targetReps + EASY_MARGIN) return "missed_low";
+    return lowest >= targetReps ? "hit" : "missed_high";
+  }
+  var EMPTY = {
+    total: 0,
+    hit: 0,
+    missedHigh: 0,
+    missedLow: 0,
+    notAttempted: 0,
+    rate: null,
+    byBasis: {},
+    byLift: {},
+    whenWrong: null
+  };
+  function accuracyOver(store, history, opts = {}) {
+    const predictions = Object.values(store || {}).filter((p) => p && (!opts.since || p.date >= opts.since)).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    if (!predictions.length) return { ...EMPTY };
+    const out = {
+      ...EMPTY,
+      byBasis: {},
+      byLift: {}
+    };
+    for (const p of predictions) {
+      const entries = (history || {})[p.id] || [];
+      const entry = entries.find((e) => e && e.date === p.date) || null;
+      const outcome = scorePrediction(p, entry);
+      if (outcome === "not_attempted") {
+        out.notAttempted++;
+        continue;
+      }
+      out.total++;
+      if (outcome === "hit") out.hit++;
+      if (outcome === "missed_high") out.missedHigh++;
+      if (outcome === "missed_low") out.missedLow++;
+      for (const [bucket, key] of [[out.byBasis, p.basis], [out.byLift, p.id]]) {
+        const seen = bucket[key] || { total: 0, hit: 0, rate: null };
+        seen.total++;
+        if (outcome === "hit") seen.hit++;
+        seen.rate = Math.round(seen.hit / seen.total * 100) / 100;
+        bucket[key] = seen;
+      }
+    }
+    out.rate = out.total ? Math.round(out.hit / out.total * 100) / 100 : null;
+    const wrong = out.missedHigh + out.missedLow;
+    if (wrong > 0) {
+      out.whenWrong = out.missedHigh >= out.missedLow ? `usually too high (${out.missedHigh} of ${wrong})` : `usually too light (${out.missedLow} of ${wrong})`;
+    }
+    return out;
+  }
+  function progressionDamping(accuracy) {
+    if (!accuracy || accuracy.total < MIN_SCORED_FOR_FEEDBACK) return null;
+    if (accuracy.rate == null || accuracy.rate >= POOR_RATE) return null;
+    const wrong = accuracy.missedHigh + accuracy.missedLow;
+    if (!wrong || accuracy.missedHigh / wrong < MOSTLY_HIGH) return null;
+    return {
+      maxMultiplier: 1,
+      /* Reportable, with the numbers, because an adjustment nobody can see
+         the reason for is indistinguishable from the app being broken. */
+      reason: `Easing off \u2014 you've missed ${accuracy.missedHigh} of the last ${accuracy.total} suggestions, ${accuracy.whenWrong}.`
+    };
+  }
 
   // lib/train/catalog.ts
   var m = (muscle, share) => ({ muscle, share });
@@ -988,190 +1271,6 @@ var TrainEngine = (() => {
     return CATALOG_BY_ID[id] || null;
   }
 
-  // lib/train/bodyweight.ts
-  function bodyweightAt(history, date) {
-    let best = null;
-    for (const entry of history || []) {
-      if (!entry || typeof entry.lb !== "number" || !Number.isFinite(entry.lb) || entry.lb <= 0) continue;
-      if (entry.date > date) continue;
-      if (!best || entry.date > best.date) best = entry;
-    }
-    return best ? best.lb : null;
-  }
-  function currentBodyweight(history) {
-    const sorted = (history || []).filter((e) => e && e.lb > 0).sort((a, b) => a.date.localeCompare(b.date));
-    return sorted.length ? sorted[sorted.length - 1].lb : null;
-  }
-  function recordBodyweight(history, date, lb) {
-    if (!Number.isFinite(lb) || lb <= 0) return history || [];
-    const rest = (history || []).filter((e) => e && e.date !== date);
-    return [...rest, { date, lb: Math.round(lb * 10) / 10 }].sort((a, b) => a.date.localeCompare(b.date));
-  }
-  function bodyweightLoad(opts) {
-    if (opts.bodyweightLb == null || !Number.isFinite(opts.bodyweightLb)) return null;
-    const factor = typeof opts.factor === "number" && opts.factor > 0 ? opts.factor : 1;
-    const base = opts.bodyweightLb * factor;
-    const load = base + (opts.added || 0) - (opts.assistance || 0);
-    return Math.max(0, Math.round(load * 10) / 10);
-  }
-
-  // lib/train/sets.ts
-  var DEFAULT_SET_KIND = "reps_weight";
-  function emptyVolume() {
-    return { load: 0, loadUnavailable: false, reps: 0, seconds: 0, metres: 0 };
-  }
-  function setKind(set) {
-    return set.kind || DEFAULT_SET_KIND;
-  }
-  function entryKind(entry) {
-    const first = workingSets(entry)[0];
-    return first ? setKind(first) : DEFAULT_SET_KIND;
-  }
-  function isPerSide(set, opts) {
-    return set.perSide !== void 0 ? set.perSide === true : opts.perSide === true;
-  }
-  function sidesOf(set) {
-    const sides = set && set.sides;
-    if (!sides || !sides.left || !sides.right) return null;
-    const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-    return {
-      left: { w: num2(sides.left.w), r: num2(sides.left.r) },
-      right: { w: num2(sides.right.w), r: num2(sides.right.r) }
-    };
-  }
-  function isWorkingSet(set) {
-    return !!set && set.fail !== true && set.warmup !== true;
-  }
-  function workingSets(entry) {
-    return (entry.sets || []).filter(isWorkingSet);
-  }
-  function isAmrapSet(set) {
-    return !!set && set.amrap === true && isWorkingSet(set);
-  }
-  function amrapOf(entry) {
-    const flagged = (entry.sets || []).filter(isAmrapSet);
-    return flagged.length ? flagged[flagged.length - 1] : null;
-  }
-  function rangeSets(entry) {
-    return workingSets(entry).filter((set) => !isAmrapSet(set));
-  }
-  function setWeight(entry, set) {
-    const limbs = sidesOf(set);
-    if (limbs) return Math.min(limbs.left.w, limbs.right.w);
-    return typeof set.w === "number" ? set.w : entry.kg || 0;
-  }
-  function workingVolume(entry, opts = {}) {
-    const totals = emptyVolume();
-    for (const set of workingSets(entry)) {
-      const limbs = sidesOf(set);
-      if (limbs) {
-        totals.load += limbs.left.w * limbs.left.r + limbs.right.w * limbs.right.r;
-        continue;
-      }
-      const sides = isPerSide(set, opts) ? 2 : 1;
-      const reps = (set.r || 0) * sides;
-      const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
-      const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
-      switch (setKind(set)) {
-        case "reps_weight":
-          if (set.assisted) {
-            const load = bodyweightLoad({ bodyweightLb: bw, factor, assistance: setWeight(entry, set) });
-            if (load == null) totals.loadUnavailable = true;
-            else totals.load += load * reps;
-            totals.reps += reps;
-          } else {
-            totals.load += setWeight(entry, set) * reps;
-          }
-          break;
-        case "bodyweight":
-        case "weighted_bodyweight": {
-          const added = setKind(set) === "weighted_bodyweight" ? setWeight(entry, set) : 0;
-          const help = set.assisted ? setWeight(entry, set) : 0;
-          const load = bodyweightLoad({ bodyweightLb: bw, factor, added, assistance: help });
-          if (load == null) totals.loadUnavailable = true;
-          else totals.load += load * reps;
-          totals.reps += reps;
-          break;
-        }
-        case "reps_only":
-          totals.reps += reps;
-          break;
-        case "time":
-          totals.seconds += (set.s || 0) * sides;
-          break;
-        case "distance":
-          totals.metres += (set.m || 0) * sides;
-          break;
-        case "time_distance":
-          totals.seconds += (set.s || 0) * sides;
-          totals.metres += (set.m || 0) * sides;
-          break;
-      }
-    }
-    return totals;
-  }
-  function topWorkingSeconds(entry) {
-    const values = workingSets(entry).filter((set) => setKind(set) === "time" || setKind(set) === "time_distance").map((set) => set.s || 0);
-    return values.length ? Math.max(...values) : 0;
-  }
-  function topWorkingMetres(entry) {
-    const values = workingSets(entry).filter((set) => setKind(set) === "distance" || setKind(set) === "time_distance").map((set) => set.m || 0);
-    return values.length ? Math.max(...values) : 0;
-  }
-  function entryScore(entry, opts = {}) {
-    const kind = entryKind(entry);
-    const sets = workingSets(entry);
-    const best = (pick) => sets.length ? Math.max(...sets.map(pick)) : 0;
-    switch (kind) {
-      case "reps_only":
-        return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
-      case "time":
-        return { kind, primary: best((s) => s.s || 0), secondary: 0 };
-      case "distance":
-        return { kind, primary: best((s) => s.m || 0), secondary: 0 };
-      case "time_distance": {
-        const metres = best((s) => s.m || 0);
-        const seconds = sets.length ? Math.min(...sets.map((s) => s.s || Infinity)) : 0;
-        return { kind, primary: metres, secondary: Number.isFinite(seconds) ? -seconds : 0 };
-      }
-      case "bodyweight":
-      case "weighted_bodyweight": {
-        const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
-        const factor = typeof opts.bodyweightFactor === "number" && opts.bodyweightFactor > 0 ? opts.bodyweightFactor : 1;
-        if (bw == null) return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
-        const load = (s) => bodyweightLoad({
-          bodyweightLb: bw,
-          factor,
-          added: kind === "weighted_bodyweight" ? setWeight(entry, s) : 0,
-          assistance: s.assisted ? setWeight(entry, s) : 0
-        }) || 0;
-        return { kind, primary: best(load), secondary: best((s) => s.r || 0) };
-      }
-      default: {
-        const assisted = sets.some((s) => s.assisted);
-        if (assisted) {
-          const least = sets.length ? Math.min(...sets.map((s) => setWeight(entry, s))) : 0;
-          return { kind, primary: -least, secondary: best((s) => s.r || 0) };
-        }
-        const weight = sets.length ? best((s) => setWeight(entry, s)) : entry.kg || 0;
-        return { kind, primary: weight, secondary: best((s) => s.r || 0) };
-      }
-    }
-  }
-  function topWorkingWeight(entry) {
-    const weights = workingSets(entry).map((set) => setWeight(entry, set));
-    return weights.length ? Math.max(...weights) : 0;
-  }
-  function topWorkingReps(entry) {
-    const reps = workingSets(entry).map((set) => set.r || 0);
-    return reps.length ? Math.max(...reps) : 0;
-  }
-  function workingRpe(entry) {
-    const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
-    if (!values.length) return null;
-    return values.reduce((a, b) => a + b, 0) / values.length;
-  }
-
   // lib/train/targets.ts
   var PROFILES = {
     beginner: {
@@ -1274,7 +1373,7 @@ var TrainEngine = (() => {
     const at = set.at;
     return typeof at === "number" && Number.isFinite(at) ? at : null;
   }
-  var EMPTY = { gaps: [], median: null, hasObservedTiming: false };
+  var EMPTY2 = { gaps: [], median: null, hasObservedTiming: false };
   function median(values) {
     if (!values.length) return null;
     const sorted = [...values].sort((a, b) => a - b);
@@ -1282,7 +1381,7 @@ var TrainEngine = (() => {
     return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
   }
   function restTaken(entry) {
-    if (!entry || entry.off) return EMPTY;
+    if (!entry || entry.off) return EMPTY2;
     const working = (entry.sets || []).filter(isWorkingSet);
     const gaps = [];
     let previous = null;
@@ -3190,7 +3289,9 @@ var TrainEngine = (() => {
         reason: `holding at ${describeWeight(held)} \u2014 clean ${shape} but grinding at RPE ${tidy2(rpe)}`
       };
     }
-    const multiplier = amrap && amrap.verdict === "under_loaded" ? amrap.multiplier : rpe != null && rpe <= EASY_RPE ? 2 : 1;
+    const base = amrap && amrap.verdict === "under_loaded" ? amrap.multiplier : rpe != null && rpe <= EASY_RPE ? 2 : 1;
+    const damp = exercise.damping;
+    const multiplier = damp ? Math.min(base, Math.max(1, damp.maxMultiplier)) : base;
     if (assisted) {
       const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held));
       const removed = tidy2(held - eased);
@@ -4672,7 +4773,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, aliases:{}, bodyweight:[], startingWeights:{}, equipment:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4, otherTraining:[],
+    history:{}, customLib:{}, aliases:{}, bodyweight:[], startingWeights:{}, equipment:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4, otherTraining:[], predictions:{},
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -5471,6 +5572,13 @@ async function buildInsightContext(session){
   );
   findings.forEach(f=> lines.push('PATTERN: '+f.text+(f.estimated?' (muscle split is estimated)':'')));
   TrainEngine.otherTrainingLines(otherLoadNow()).forEach(l=> lines.push(l));
+  const acc = accuracyNow();
+  if(acc.rate != null && acc.total >= 5){
+    lines.push('MY OWN ACCURACY: correct on ' + Math.round(acc.rate*100) + '% of '
+      + acc.total + ' suggestions' + (acc.whenWrong ? '; when wrong, ' + acc.whenWrong : '') + '.');
+  }
+  const damp = TrainEngine.progressionDamping(acc);
+  if(damp) lines.push('SELF-CORRECTION: ' + damp.reason);
 
   const rec = noteRecovery(await readRecovery());
   /* Only a connected read with data feeds the deload diagnosis. The other
@@ -5946,6 +6054,9 @@ function progressionInputFor(e, rx){
     incrementMetres: incrementFor(e,'incrementMetres'),
     deload: (STATE.deloadStates && STATE.deloadStates[e.id]) || null,
     trainingAge: trainingAge(),
+    /* The engine's own record against itself. Null below the sample gate,
+       which is the common case and means nothing changes. */
+    damping: TrainEngine.progressionDamping(accuracyNow()),
   };
 }
 /** Options every plateau read shares — currently the exclusion windows. */
@@ -6024,8 +6135,37 @@ function suggestionFor(e, rx){
   if(!(key in SUGGESTIONS)){
     SUGGESTIONS[key] = TrainEngine.suggestTarget(
       historyBeforeToday(e), progressionInputFor(e, rx), Date.now());
+    /* Every suggestion is a prediction, so it is recorded as one the
+       first time it is made — before any work is logged against it, and
+       never rewritten afterwards. recordPrediction refuses an overwrite,
+       so a re-render or a reload cannot quietly replace it with one made
+       in hindsight. */
+    recordPredictionFor(e, SUGGESTIONS[key]);
   }
   return SUGGESTIONS[key];
+}
+function recordPredictionFor(e, suggestion){
+  if(!suggestion) return;
+  STATE.predictions = STATE.predictions || {};
+  TrainEngine.recordPrediction(STATE.predictions, {
+    id: e.id,
+    date: sessionDate(),
+    weight: suggestion.weight,
+    reps: suggestion.reps,
+    seconds: suggestion.seconds,
+    metres: suggestion.metres,
+    basis: suggestion.basis,
+    deloadState: (STATE.deloadStates && STATE.deloadStates[e.id] && STATE.deloadStates[e.id].state) || null,
+    readiness: readiness().verdict,
+    madeAt: Date.now(),
+  });
+}
+/* How often the engine has been right lately, over the recent window. */
+function accuracyNow(){
+  const since = new Date(Date.now() - 120 * 86400000);
+  const key = since.getFullYear() + '-' + String(since.getMonth()+1).padStart(2,'0')
+            + '-' + String(since.getDate()).padStart(2,'0');
+  return TrainEngine.accuracyOver(STATE.predictions||{}, STATE.history||{}, { since: key });
 }
 /* Kind, perSide and assisted live with the exercise definition rather than
    the session, so they survive the day rolling over. Absent means
@@ -9120,6 +9260,7 @@ function spawnParticles(root){
   STATE.startingWeights = STATE.startingWeights || {};
   STATE.equipment = STATE.equipment || [];
   STATE.otherTraining = STATE.otherTraining || [];
+  STATE.predictions = STATE.predictions || {};
   STORAGE = TrainEngine.storageReport(hostStatus, localLayer()?'ok':'unavailable', STATE.snapshots.length);
   console.info('[train] storage — '+STORAGE.detail);
   if(!STATE.snapshots.length) snapshotNow('first boot');

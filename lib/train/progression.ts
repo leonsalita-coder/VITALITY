@@ -59,6 +59,15 @@ export interface ProgressionExercise {
   assisted?: boolean
   /** Scales how deep a deload cuts. Absent means the shipped 10%. */
   trainingAge?: TrainingAge | null
+  /**
+   * The engine's record against its own suggestions for this athlete.
+   *
+   * Absent means no adjustment, which is the case below the sample gate
+   * and therefore the case for almost everybody. When present it only
+   * ever eases off — see progressionDamping, which refuses to fire when
+   * the misses were toward being too LIGHT.
+   */
+  damping?: { maxMultiplier: number; reason: string } | null
   /** Seconds added to a time movement after a clean session. */
   incrementSeconds?: number
   /** Metres added to a distance movement after a clean session. */
@@ -494,9 +503,16 @@ function suggestLoad(
   }
 
   /* AMRAP first: it measured the load, where RPE estimated the lifter. */
-  const multiplier = amrap && amrap.verdict === 'under_loaded'
+  const base = amrap && amrap.verdict === 'under_loaded'
     ? amrap.multiplier
     : rpe != null && rpe <= EASY_RPE ? 2 : 1
+  /* Then the engine's own track record, which may only CAP the step.
+     A lifter missing most of what they are handed does not need a double
+     jump, whatever the AMRAP or the RPE said. A cap rather than a scale
+     because the result is snapped to a loadable weight: a fractional
+     increment rounds back to a whole one and changes nothing. */
+  const damp = exercise.damping
+  const multiplier = damp ? Math.min(base, Math.max(1, damp.maxMultiplier)) : base
   if (assisted) {
     // less assistance is the improvement; it can reach zero but not pass it
     const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held))

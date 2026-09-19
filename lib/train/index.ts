@@ -1,3 +1,4 @@
+export * from './predictions'
 export * from './staleness'
 export * from './asymmetry'
 export * from './trim'
