@@ -378,11 +378,12 @@ var TrainEngine = (() => {
     chooseSignal: () => chooseSignal,
     classifyPR: () => classifyPR,
     collectSignals: () => collectSignals,
+    compareScenarios: () => compareScenarios,
     contributionOf: () => contributionOf,
     countsForProgression: () => countsForProgression,
     currentBodyweight: () => currentBodyweight,
     currentWeekStreak: () => currentWeekStreak,
-    dateKey: () => dateKey,
+    dateKey: () => dateKey2,
     daysBetween: () => daysBetween,
     defaultPlateConfig: () => defaultPlateConfig,
     defaultRepRange: () => defaultRepRange,
@@ -413,7 +414,7 @@ var TrainEngine = (() => {
     lastSessionFor: () => lastSessionFor,
     limitDeloads: () => limitDeloads,
     loadableWeights: () => loadableWeights,
-    localMidnight: () => localMidnight,
+    localMidnight: () => localMidnight2,
     loggedSetCount: () => loggedSetCount,
     longestWeekStreak: () => longestWeekStreak,
     makeSnapshot: () => makeSnapshot,
@@ -465,6 +466,7 @@ var TrainEngine = (() => {
     sideGapOf: () => sideGapOf,
     sidesOf: () => sidesOf,
     similarity: () => similarity,
+    simulate: () => simulate,
     slugFromName: () => slugFromName,
     snapToLoadable: () => snapToLoadable,
     stalenessFor: () => stalenessFor,
@@ -679,6 +681,1061 @@ var TrainEngine = (() => {
     return values.reduce((a, b) => a + b, 0) / values.length;
   }
 
+  // lib/train/targets.ts
+  var PROFILES = {
+    beginner: {
+      ceiling: 14,
+      floor: 5,
+      deloadMeasured: 0.95,
+      deloadInferred: 0.97,
+      repRanges: [[5, 8], [8, 12], [12, 15]]
+    },
+    intermediate: {
+      ceiling: 20,
+      floor: 10,
+      deloadMeasured: 0.9,
+      deloadInferred: 0.95,
+      repRanges: [[4, 6], [6, 10], [10, 15]]
+    },
+    advanced: {
+      ceiling: 25,
+      floor: 12,
+      deloadMeasured: 0.85,
+      deloadInferred: 0.92,
+      repRanges: [[3, 5], [5, 8], [8, 12]]
+    }
+  };
+  var UNKNOWN = PROFILES.intermediate;
+  function profileFor(age) {
+    return age && PROFILES[age] ? PROFILES[age] : UNKNOWN;
+  }
+  var MIN_TRAILING = 4;
+  var DROP_FRACTION = 0.6;
+  function weeklySetBand(ctx = {}) {
+    const profile = profileFor(ctx.trainingAge);
+    const trailing = ctx.trailingSets;
+    if (typeof trailing === "number" && Number.isFinite(trailing) && trailing >= MIN_TRAILING) {
+      return {
+        floor: Math.round(trailing * DROP_FRACTION * 10) / 10,
+        ceiling: profile.ceiling,
+        floorSource: "trailing"
+      };
+    }
+    if (ctx.trainingAge) {
+      return { floor: profile.floor, ceiling: profile.ceiling, floorSource: "age" };
+    }
+    return { floor: null, ceiling: profile.ceiling, floorSource: "none" };
+  }
+  function deloadCut(age, confidence) {
+    const profile = profileFor(age);
+    return confidence === "measured" ? profile.deloadMeasured : profile.deloadInferred;
+  }
+  function repRangeFor(age, tier) {
+    const ranges = profileFor(age).repRanges;
+    if (tier <= 1) return ranges[0];
+    if (tier >= 3) return ranges[2];
+    return ranges[1];
+  }
+  function streakTarget(statedFrequency, fallback = 4) {
+    if (typeof statedFrequency !== "number" || !Number.isFinite(statedFrequency)) return fallback;
+    return Math.min(14, Math.max(1, Math.round(statedFrequency)));
+  }
+
+  // lib/train/amrap.ts
+  var AMRAP_OVER = 3;
+  var AMRAP_MAX_MULTIPLIER = 4;
+  function amrapSignal(entry, target) {
+    if (!entry) return null;
+    const set = amrapOf(entry);
+    if (!set || typeof set.r !== "number" || !Number.isFinite(set.r)) return null;
+    if (!Number.isFinite(target) || target <= 0) return null;
+    const reps = set.r;
+    const surplus = reps - target;
+    if (surplus < 0) {
+      return { reps, target, surplus, verdict: "struggling", multiplier: 1 };
+    }
+    if (surplus < AMRAP_OVER) {
+      return { reps, target, surplus, verdict: "on_target", multiplier: 1 };
+    }
+    const multiplier = Math.min(AMRAP_MAX_MULTIPLIER, 1 + Math.floor(surplus / AMRAP_OVER));
+    return { reps, target, surplus, verdict: "under_loaded", multiplier };
+  }
+  function amrapTrend(history) {
+    const reps = [];
+    for (const entry of history || []) {
+      if (!entry || entry.off) continue;
+      const set = amrapOf(entry);
+      if (set && typeof set.r === "number" && Number.isFinite(set.r)) reps.push(set.r);
+    }
+    if (reps.length < 2) return null;
+    const from = reps[0];
+    const to = reps[reps.length - 1];
+    return { from, to, sessions: reps.length, falling: to < from };
+  }
+
+  // lib/train/timing.ts
+  var MAX_REST_SECONDS = 900;
+  var MIN_TIMED_SESSIONS = 3;
+  var REST_COMPRESSION = 0.8;
+  function observedAt(set) {
+    if (!set) return null;
+    if (set.atEstimated === true) return null;
+    const at = set.at;
+    return typeof at === "number" && Number.isFinite(at) ? at : null;
+  }
+  var EMPTY = { gaps: [], median: null, hasObservedTiming: false };
+  function median(values) {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  }
+  function restTaken(entry) {
+    if (!entry || entry.off) return EMPTY;
+    const working = (entry.sets || []).filter(isWorkingSet);
+    const gaps = [];
+    let previous = null;
+    for (const set of working) {
+      const at = observedAt(set);
+      if (at == null) {
+        previous = null;
+        continue;
+      }
+      if (previous != null) {
+        const seconds = Math.round((at - previous) / 1e3);
+        if (seconds > 0 && seconds <= MAX_REST_SECONDS) gaps.push(seconds);
+      }
+      previous = at;
+    }
+    return { gaps, median: median(gaps), hasObservedTiming: gaps.length > 0 };
+  }
+  function medianRest(entry) {
+    return restTaken(entry).median;
+  }
+  function hasObservedTiming(history) {
+    return (history || []).some((entry) => restTaken(entry).hasObservedTiming);
+  }
+  function restTrend(history) {
+    const medians = [];
+    const shapes = [];
+    for (const entry of history || []) {
+      const value = medianRest(entry);
+      if (value == null) continue;
+      medians.push(value);
+      shapes.push(entry.group ? `g:${entry.group}` : "none");
+    }
+    if (medians.length < MIN_TIMED_SESSIONS) return null;
+    const grouped = shapes.map((s) => s !== "none");
+    const groupingChanged = grouped.some((g) => g !== grouped[0]);
+    const from = medians[0];
+    const to = medians[medians.length - 1];
+    return {
+      from,
+      to,
+      sessions: medians.length,
+      /* A structural change makes the two ends incomparable. Reporting a
+         softened version — "rest fell, but you changed things" — would be
+         worse than silence, because the reader takes the headline. */
+      compressing: !groupingChanged && from > 0 && to / from <= REST_COMPRESSION,
+      groupingChanged
+    };
+  }
+
+  // lib/train/deload.ts
+  var DELOAD_HOLD_SESSIONS = 2;
+  var RECOVERY_FLOOR = 55;
+  var HIGH_RPE = 9;
+  var PLATEAU_WINDOW = 3;
+  var COOLDOWN_DAYS = 14;
+  function isExcluded(date, windows = []) {
+    return (windows || []).some((w) => date >= w.from && date <= w.to);
+  }
+  var RPE_RISE = 1;
+  function readCause(window) {
+    const values = window.map(workingRpe).filter((v) => v != null);
+    const mean3 = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+    const trend = amrapTrend(window);
+    if (trend && trend.falling) {
+      return { cause: "fatigue", rpe: mean3, amrapFalling: true, restCompressing: false };
+    }
+    const rest = restTrend(window);
+    if (rest && rest.compressing) {
+      return { cause: "rest_compression", rpe: mean3, amrapFalling: false, restCompressing: true };
+    }
+    if (values.length < 2) {
+      return {
+        cause: "unknown",
+        rpe: values.length ? values[0] : null,
+        amrapFalling: false,
+        restCompressing: false
+      };
+    }
+    const rising = values[values.length - 1] - values[0] >= RPE_RISE;
+    if (rising || mean3 >= HIGH_RPE) {
+      return { cause: "fatigue", rpe: mean3, amrapFalling: false, restCompressing: false };
+    }
+    return { cause: "programming", rpe: mean3, amrapFalling: false, restCompressing: false };
+  }
+  function detectPlateau(history, opts = {}) {
+    const usable = (history || []).filter(
+      (entry) => entry && !entry.off && !isExcluded(entry.date, opts.excluded)
+    );
+    if (usable.length < PLATEAU_WINDOW + 1) return null;
+    const recent = usable.slice(-PLATEAU_WINDOW);
+    const scores = recent.map((entry) => entryScore(entry, {
+      bodyweightLb: opts.bodyweightLb,
+      bodyweightFactor: opts.bodyweightFactor
+    }));
+    const flat = (arr) => arr.every((v, i) => i === 0 || v <= arr[i - 1]);
+    const primary = scores.map((s) => s.primary);
+    const secondary = scores.map((s) => s.secondary);
+    if (flat(primary) && flat(secondary)) {
+      const { cause, rpe, amrapFalling, restCompressing } = readCause(recent);
+      const last = scores[scores.length - 1];
+      return {
+        sessions: PLATEAU_WINDOW,
+        // reported in the kind's own unit; assisted scores are negated
+        weight: Math.abs(last.primary),
+        kind: last.kind,
+        cause,
+        rpe,
+        amrapFalling,
+        restCompressing
+      };
+    }
+    return null;
+  }
+  function addDays(date, days) {
+    const [y, m2, d] = date.split("-").map(Number);
+    const dt = new Date(y, (m2 || 1) - 1, d || 1);
+    dt.setDate(dt.getDate() + days);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  }
+  function diagnose(ctx, plateau) {
+    if (typeof ctx.recovery === "number" && ctx.recovery < RECOVERY_FLOOR) {
+      return { kind: "volume", confidence: "measured" };
+    }
+    if (typeof ctx.rpe === "number" && ctx.rpe >= HIGH_RPE) {
+      return { kind: "intensity", confidence: "measured" };
+    }
+    if (plateau && plateau.cause === "fatigue") {
+      return { kind: "intensity", confidence: "measured" };
+    }
+    return { kind: "intensity", confidence: "inferred" };
+  }
+  var NORMAL = (weight, today) => ({
+    state: "normal",
+    kind: null,
+    priorWeight: weight,
+    since: today,
+    sessions: 0,
+    confidence: "measured"
+  });
+  function nextDeloadState(current, ctx) {
+    const plateau = detectPlateau(ctx.history, { excluded: ctx.excluded });
+    const record = current || NORMAL(plateau ? plateau.weight : 0, ctx.today);
+    switch (record.state) {
+      case "normal": {
+        if (!plateau) return record;
+        if (record.cooldownUntil && ctx.today < record.cooldownUntil) return record;
+        if (plateau.cause === "programming") return record;
+        if (plateau.cause === "rest_compression") return record;
+        const flagDx = diagnose(ctx, plateau);
+        return {
+          ...record,
+          state: "flagged",
+          kind: flagDx.kind,
+          confidence: flagDx.confidence,
+          priorWeight: plateau.weight,
+          since: ctx.today,
+          sessions: 0
+        };
+      }
+      case "flagged": {
+        if (!plateau) return { ...record, state: "normal", kind: null, since: ctx.today, sessions: 0 };
+        const { kind, confidence } = diagnose(ctx, plateau);
+        return {
+          ...record,
+          state: "deloading",
+          kind,
+          confidence,
+          priorWeight: plateau.weight,
+          since: ctx.today,
+          sessions: 0
+        };
+      }
+      case "deloading": {
+        if (!ctx.sessionLogged) return record;
+        const sessions = record.sessions + 1;
+        if (sessions < DELOAD_HOLD_SESSIONS) return { ...record, sessions };
+        return { ...record, state: "reapproach", since: ctx.today, sessions: 0 };
+      }
+      case "reapproach": {
+        if (!ctx.sessionLogged) return record;
+        return {
+          ...record,
+          state: "normal",
+          kind: null,
+          since: ctx.today,
+          sessions: 0,
+          // a lift that just finished a deload must not immediately re-flag,
+          // or the machine oscillates instead of resolving
+          cooldownUntil: addDays(ctx.today, COOLDOWN_DAYS)
+        };
+      }
+    }
+    return record;
+  }
+  var VOLUME_CUT = 2 / 3;
+  var REAPPROACH = 0.95;
+  function deloadPlan(record, trainingAge) {
+    if (!record) return { weight: null, setsFactor: 1 };
+    const round7 = (n) => Math.round(n * 100) / 100;
+    if (record.state === "reapproach") {
+      return { weight: round7(record.priorWeight * REAPPROACH), setsFactor: 1 };
+    }
+    if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
+    if (record.kind === "volume") {
+      return { weight: round7(record.priorWeight), setsFactor: VOLUME_CUT };
+    }
+    return {
+      weight: round7(record.priorWeight * deloadCut(trainingAge, record.confidence)),
+      setsFactor: 1
+    };
+  }
+  function plateauAdvice(plateau) {
+    if (!plateau) return "";
+    if (plateau.cause === "rest_compression") {
+      return "Rest between sets has been getting shorter. Rest longer before the next set \u2014 the weight is not the problem.";
+    }
+    if (plateau.cause === "fatigue") {
+      return plateau.amrapFalling ? "Your all-out set has been falling at the same weight. That is fatigue, not programming." : "Effort has been climbing at the same weight. That is fatigue.";
+    }
+    if (plateau.cause === "programming") {
+      return "Steady effort at a flat weight \u2014 there is capacity here that is not being asked for.";
+    }
+    return "Flat for a while, with nothing logged that says why.";
+  }
+  function limitDeloads(candidates, max = 2) {
+    return (candidates || []).slice().sort((a, b) => b.plateauLength - a.plateauLength || b.weight - a.weight).slice(0, max).map((c) => c.id);
+  }
+
+  // lib/train/session.ts
+  function loggedSetCount(session) {
+    return (session.ex || []).reduce(
+      (n, ex) => n + (ex.log || []).filter((s) => s != null).length,
+      0
+    );
+  }
+  function workingSetCount(session) {
+    return (session.ex || []).reduce(
+      (n, ex) => n + (ex.log || []).filter((s) => isWorkingSet(s)).length,
+      0
+    );
+  }
+  function sessionState(session, opts) {
+    if (session.off) return "rest";
+    const logged = loggedSetCount(session);
+    if (opts.finished) return "complete";
+    if (logged === 0) return "not_started";
+    return session.date < opts.today ? "abandoned" : "in_progress";
+  }
+  var CONTRIBUTIONS = {
+    complete: { volume: true, plateau: true, records: true, streak: true, progression: true },
+    // the sets happened; the session did not finish
+    abandoned: { volume: true, plateau: true, records: true, streak: false, progression: false },
+    in_progress: { volume: true, plateau: true, records: true, streak: false, progression: false },
+    not_started: { volume: false, plateau: false, records: false, streak: false, progression: false },
+    rest: { volume: false, plateau: false, records: false, streak: false, progression: false }
+  };
+  function contributionOf(state) {
+    return CONTRIBUTIONS[state];
+  }
+  function countsForProgression(entry) {
+    return entry.abandoned !== true;
+  }
+  function sameAsLastTime(history, opts = {}) {
+    const usable = (history || []).filter(
+      (e) => e && !e.off && e.date !== opts.excludeDate && (e.sets || []).some((s) => isWorkingSet(s))
+    );
+    if (!usable.length) return null;
+    const last = usable[usable.length - 1];
+    const sets = (last.sets || []).filter((s) => isWorkingSet(s));
+    if (!sets.length) return null;
+    return sets.map((s) => ({
+      weight: s.w,
+      reps: s.r,
+      seconds: s.s,
+      metres: s.m,
+      kind: s.kind,
+      perSide: s.perSide,
+      assisted: s.assisted
+    }));
+  }
+
+  // lib/train/plates.ts
+  var DEFAULT_BAR_LB = 45;
+  var DEFAULT_PLATES_LB = [45, 35, 25, 10, 5, 2.5];
+  function defaultPlateConfig() {
+    return { barLb: DEFAULT_BAR_LB, plates: [...DEFAULT_PLATES_LB] };
+  }
+  var tidy = (n) => Math.round(n * 100) / 100;
+  function loadableWeights(config, maxLb = 1e3) {
+    const bar2 = Math.max(0, config.barLb || 0);
+    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => a - b);
+    if (!plates.length) return [tidy(bar2)];
+    const perSide = /* @__PURE__ */ new Set([0]);
+    const smallest = plates[0];
+    const limit = (maxLb - bar2) / 2;
+    let frontier = [0];
+    while (frontier.length) {
+      const next = [];
+      for (const load of frontier) {
+        for (const plate of plates) {
+          const candidate = tidy(load + plate);
+          if (candidate > limit || perSide.has(candidate)) continue;
+          perSide.add(candidate);
+          next.push(candidate);
+        }
+      }
+      frontier = next;
+      if (perSide.size > 4e3) break;
+    }
+    return [...perSide].map((side) => tidy(bar2 + side * 2)).sort((a, b) => a - b);
+  }
+  function snapToLoadable(target, config) {
+    const options = loadableWeights(config, Math.max(target * 2, 1e3));
+    if (!options.length) return tidy(target);
+    const bar2 = Math.max(0, config.barLb || 0);
+    if (target <= bar2) return tidy(bar2);
+    let best = options[0];
+    let bestGap = Math.abs(options[0] - target);
+    for (const option of options) {
+      const gap = Math.abs(option - target);
+      if (gap < bestGap || gap === bestGap && option < best) {
+        best = option;
+        bestGap = gap;
+      }
+    }
+    return tidy(best);
+  }
+  function plateBreakdown(total, config) {
+    const bar2 = Math.max(0, config.barLb || 0);
+    if (tidy(total) === tidy(bar2)) return [];
+    let remaining = tidy((total - bar2) / 2);
+    if (remaining < 0) return null;
+    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => b - a);
+    const used = [];
+    for (const plate of plates) {
+      while (remaining >= plate - 1e-9) {
+        used.push(plate);
+        remaining = tidy(remaining - plate);
+      }
+    }
+    return remaining <= 1e-9 ? used : null;
+  }
+
+  // lib/train/progression.ts
+  var DEFAULT_SECONDS_STEP = 5;
+  var DEFAULT_METRES_STEP = 10;
+  var LAYOFF_DAYS = 14;
+  var DEFAULT_INCREMENT = {
+    barbell: 5,
+    // 2.5 lb plate pairs
+    dumbbell: 5,
+    // racks jump in 5s, and only in pairs
+    stack: 10,
+    // typical selectorized machine
+    free: 0
+  };
+  var EASY_RPE = 7;
+  var GRIND_RPE = 9;
+  function stepFor(weight, exercise) {
+    if (typeof exercise.incrementLb === "number" && exercise.incrementLb > 0) {
+      return exercise.incrementLb;
+    }
+    const preset = DEFAULT_INCREMENT[exercise.loading || "free"];
+    if (preset > 0) return preset;
+    if (weight >= 135) return 5;
+    if (weight >= 45) return 2.5;
+    return 1;
+  }
+  function tidy2(n) {
+    return Math.round(n * 100) / 100;
+  }
+  function snapWeight(weight, exercise, reference) {
+    if (weight <= 0) return 0;
+    if (exercise.plates && exercise.loading === "barbell") {
+      return snapToLoadable(weight, exercise.plates);
+    }
+    const step = stepFor(reference, exercise);
+    return tidy2(Math.round(weight / step) * step);
+  }
+  function localMidnight(dateStr) {
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+  function daysSince(dateStr, now) {
+    const then = localMidnight(dateStr);
+    const nowDate = new Date(now);
+    const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+    return Math.round((today - then) / 864e5);
+  }
+  function layoffFactor(days) {
+    if (days >= 84) return 0.7;
+    if (days >= 42) return 0.8;
+    if (days >= 21) return 0.85;
+    return 0.95;
+  }
+  function describeWeight(weight) {
+    return weight > 0 ? `${tidy2(weight)} lb` : "bodyweight";
+  }
+  function realSessions(history) {
+    return (history || []).filter((entry) => entry && !entry.off);
+  }
+  function rangeFor(exercise) {
+    const r = exercise.repRange;
+    if (Array.isArray(r) && r.length === 2 && r[1] >= r[0]) return [r[0], r[1]];
+    return [exercise.reps, exercise.reps];
+  }
+  function findLayoff(sessions, now) {
+    if (!sessions.length) return null;
+    const last = sessions[sessions.length - 1];
+    const trailing = daysSince(last.date, now);
+    if (trailing >= LAYOFF_DAYS) {
+      return { days: trailing, priorWeight: topWorkingWeight(last), sessionsSince: 0 };
+    }
+    for (let i = sessions.length - 1; i > 0; i--) {
+      const gap = daysSince(sessions[i - 1].date, localMidnight(sessions[i].date));
+      if (gap >= LAYOFF_DAYS) {
+        return { days: gap, priorWeight: topWorkingWeight(sessions[i - 1]), sessionsSince: sessions.length - i };
+      }
+    }
+    return null;
+  }
+  function rampWeights(prior, days, exercise) {
+    if (prior <= 0) return [0];
+    const dropped = snapWeight(prior * layoffFactor(days), exercise, prior);
+    const mid = snapWeight(dropped + (prior - dropped) / 2, exercise, prior);
+    const target = tidy2(prior);
+    const plan = [];
+    for (const w of [dropped, dropped, mid, target]) {
+      if (plan.length >= 2 && plan[plan.length - 1] === w) continue;
+      plan.push(w);
+    }
+    const done = plan.indexOf(target);
+    return done >= 0 ? plan.slice(0, done + 1) : plan;
+  }
+  function suggestLoad(history, exercise, now) {
+    const sessions = realSessions(history);
+    const last = sessions.length ? sessions[sessions.length - 1] : null;
+    const [minReps, maxReps] = rangeFor(exercise);
+    const hasRange = maxReps > minReps;
+    const plan = deloadPlan(exercise.deload || null, exercise.trainingAge);
+    if (plan.weight != null && exercise.deload) {
+      const weight = snapWeight(plan.weight, exercise, plan.weight);
+      if (exercise.deload.state === "reapproach") {
+        return {
+          weight,
+          reps: minReps,
+          basis: "deload",
+          reason: `back to ${describeWeight(weight)} \u2014 easing out of the deload`
+        };
+      }
+      if (exercise.deload.kind === "volume") {
+        const cut = Math.round((1 - plan.setsFactor) * 100);
+        return {
+          weight,
+          reps: minReps,
+          basis: "deload",
+          reason: `holding at ${describeWeight(weight)} \u2014 ${cut}% fewer sets while recovery catches up`
+        };
+      }
+      return {
+        weight,
+        reps: minReps,
+        basis: "deload",
+        reason: `holding at ${describeWeight(weight)} \u2014 deload, ${exercise.deload.sessions + 1} of ${DELOAD_HOLD_SESSIONS}`
+      };
+    }
+    if (!last) {
+      const weight = tidy2(exercise.lastKg != null ? exercise.lastKg : exercise.kg || 0);
+      return {
+        weight,
+        reps: minReps,
+        basis: "new",
+        reason: `starting at ${describeWeight(weight)} \u2014 first time logging this`
+      };
+    }
+    const sets = workingSets(last);
+    const ranged = rangeSets(last);
+    const missedLast = (last.sets || []).some((set) => set.fail);
+    const assisted = exercise.assisted === true || (last.sets || []).some((set) => set.assisted);
+    const assistUsed = sets.length ? Math.min(...sets.map((set) => setWeight(last, set))) : 0;
+    const held = assisted ? tidy2(assistUsed) : tidy2(topWorkingWeight(last) || last.kg || 0);
+    const layoff = findLayoff(sessions, now);
+    if (layoff) {
+      const ramp = rampWeights(layoff.priorWeight, layoff.days, exercise);
+      const step2 = layoff.sessionsSince;
+      const alreadyBack = step2 > 0 && held >= layoff.priorWeight;
+      if (step2 < ramp.length && !alreadyBack) {
+        if (step2 > 0 && missedLast) {
+          return {
+            weight: held,
+            reps: minReps,
+            basis: "miss",
+            reason: `holding at ${describeWeight(held)} \u2014 missed the last set`
+          };
+        }
+        const weight = ramp[step2];
+        if (step2 === 0) {
+          return {
+            weight,
+            reps: minReps,
+            basis: "layoff",
+            reason: `back to ${describeWeight(weight)} \u2014 first session after ${layoff.days} days off`
+          };
+        }
+        if (weight === ramp[step2 - 1]) {
+          return {
+            weight,
+            reps: minReps,
+            basis: "layoff",
+            reason: `holding at ${describeWeight(weight)} \u2014 second session back`
+          };
+        }
+        const delta2 = tidy2(weight - ramp[step2 - 1]);
+        return {
+          weight,
+          reps: minReps,
+          basis: "layoff",
+          reason: `+${delta2} lb \u2014 easing back to your ${describeWeight(layoff.priorWeight)} working weight`
+        };
+      }
+    }
+    if (!sets.length) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 nothing logged last time`
+      };
+    }
+    if (!countsForProgression(last)) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 last session was left unfinished`
+      };
+    }
+    if (missedLast) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 missed the last set`
+      };
+    }
+    const lowest = ranged.length ? Math.min(...ranged.map((set) => set.r || 0)) : Math.min(...sets.map((set) => set.r || 0));
+    if (lowest < minReps) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 short of ${minReps} reps last time`
+      };
+    }
+    const shape = `${ranged.length || sets.length}\xD7${lowest}`;
+    const amrap = amrapSignal(last, lowest);
+    if (amrap && amrap.verdict === "struggling") {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "amrap",
+        reason: `holding at ${describeWeight(held)} \u2014 ${amrap.reps} reps to failure, under the ${amrap.target} you were chasing`
+      };
+    }
+    if (lowest < maxReps) {
+      return {
+        weight: held,
+        reps: lowest + 1,
+        basis: "clean",
+        reason: `same weight, chase ${lowest + 1} reps \u2014 hit ${shape} last time`
+      };
+    }
+    if (held <= 0) {
+      return {
+        weight: 0,
+        reps: minReps,
+        basis: "clean",
+        reason: `bodyweight \u2014 clean ${shape} last time`
+      };
+    }
+    const step = stepFor(held, exercise);
+    const rpe = workingRpe(last);
+    if (rpe != null && rpe >= GRIND_RPE) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "clean",
+        reason: `holding at ${describeWeight(held)} \u2014 clean ${shape} but grinding at RPE ${tidy2(rpe)}`
+      };
+    }
+    const base = amrap && amrap.verdict === "under_loaded" ? amrap.multiplier : rpe != null && rpe <= EASY_RPE ? 2 : 1;
+    const damp = exercise.damping;
+    const multiplier = damp ? Math.min(base, Math.max(1, damp.maxMultiplier)) : base;
+    if (assisted) {
+      const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held));
+      const removed = tidy2(held - eased);
+      return {
+        weight: eased,
+        reps: minReps,
+        basis: "clean",
+        reason: eased === 0 ? `unassisted \u2014 clean ${shape} with only ${held} lb of help last time` : `\u2212${removed} lb assistance \u2014 clean ${shape} last time`
+      };
+    }
+    const next = snapWeight(held + step * multiplier, exercise, held);
+    const delta = tidy2(next - held);
+    if (multiplier > 1) {
+      return {
+        weight: next,
+        reps: minReps,
+        basis: "clean",
+        reason: amrap && amrap.verdict === "under_loaded" ? `+${delta} lb \u2014 ${amrap.reps} reps to failure on a ${amrap.target}-rep target, that was too light` : `+${delta} lb \u2014 ${shape} at RPE ${tidy2(rpe)}, room to move`
+      };
+    }
+    return {
+      weight: next,
+      reps: minReps,
+      basis: "clean",
+      reason: hasRange ? `+${delta} lb, back to ${minReps} reps \u2014 hit ${shape} last time` : `+${delta} lb \u2014 clean ${shape} last time`
+    };
+  }
+  function suggestNonLoad(kind, sessions, exercise) {
+    const real = sessions.filter((entry) => workingSets(entry).length > 0);
+    const read = kind === "reps_only" ? topWorkingReps : kind === "time" ? topWorkingSeconds : topWorkingMetres;
+    const unit = kind === "reps_only" ? " reps" : kind === "time" ? "s" : "m";
+    const step = kind === "reps_only" ? 1 : kind === "time" ? exercise.incrementSeconds || DEFAULT_SECONDS_STEP : exercise.incrementMetres || DEFAULT_METRES_STEP;
+    const put = (value, basis, reason) => ({
+      kind,
+      weight: null,
+      reps: kind === "reps_only" ? value : null,
+      seconds: kind === "time" || kind === "time_distance" ? value : null,
+      metres: kind === "distance" || kind === "time_distance" ? value : null,
+      basis,
+      reason
+    });
+    if (!real.length) {
+      return put(step, "new", `starting at ${step}${unit} \u2014 first time logging this`);
+    }
+    const last = real[real.length - 1];
+    const current = read(last);
+    const sets = workingSets(last).length;
+    if ((last.sets || []).some((set) => set.fail)) {
+      return put(current, "miss", `holding at ${current}${unit} \u2014 missed the last set`);
+    }
+    const previous = real.length > 1 ? read(real[real.length - 2]) : 0;
+    if (previous > 0 && current < previous) {
+      return put(current, "miss", `holding at ${current}${unit} \u2014 down from ${previous}${unit} last time`);
+    }
+    return put(current + step, "clean", `+${step}${unit} \u2014 clean ${sets}\xD7${current}${unit} last time`);
+  }
+  function suggestTarget(history, exercise, now) {
+    const all = realSessions(history);
+    const declared = exercise.kind;
+    const kind = declared || (all.length ? entryKind(all[all.length - 1]) : DEFAULT_SET_KIND);
+    const sessions = declared ? all.filter((entry) => entryKind(entry) === kind) : all;
+    if (kind !== "reps_weight") return suggestNonLoad(kind, sessions, exercise);
+    const answer = suggestLoad(sessions, exercise, now);
+    return {
+      kind: "reps_weight",
+      weight: answer.weight,
+      reps: answer.reps,
+      seconds: null,
+      metres: null,
+      basis: answer.basis,
+      reason: answer.reason
+    };
+  }
+
+  // lib/train/records.ts
+  var E1RM_MAX_REPS = 10;
+  var ROLLING_PR_DAYS = 365;
+  function epley1RM(weight, reps) {
+    if (!Number.isFinite(weight) || !Number.isFinite(reps)) return null;
+    if (weight <= 0 || reps < 1 || reps > E1RM_MAX_REPS) return null;
+    if (reps === 1) return weight;
+    return weight * (1 + reps / 30);
+  }
+  function eligible(entry, opts) {
+    if (entry.off) return false;
+    if (opts.excludeDate && entry.date === opts.excludeDate) return false;
+    if (opts.sinceDate && entry.date < opts.sinceDate) return false;
+    return true;
+  }
+  function bestE1RM(history, opts = {}) {
+    let best = null;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      for (const set of workingSets(entry)) {
+        if (setKind(set) !== "reps_weight" || set.assisted) continue;
+        const weight = setWeight(entry, set);
+        const reps = set.r || 0;
+        const value = epley1RM(weight, reps);
+        if (value == null) continue;
+        if (!best || value > best.value) best = { value, weight, reps, date: entry.date };
+      }
+    }
+    return best;
+  }
+  function bestRepsAtWeight(history, weight, opts = {}) {
+    let best = 0;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      for (const set of workingSets(entry)) {
+        if (setWeight(entry, set) === weight) best = Math.max(best, set.r || 0);
+      }
+    }
+    return best;
+  }
+  function bestRepsAnywhere(history, opts = {}) {
+    let best = 0;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      best = Math.max(best, topWorkingReps(entry));
+    }
+    return best;
+  }
+  var NO_PR = { kind: null, scope: null, e1rm: null, unit: null };
+  function bestBy(history, pick, opts) {
+    let best = 0;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      best = Math.max(best, pick(entry));
+    }
+    return best;
+  }
+  function leastAssistance(history, opts) {
+    let best = null;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      for (const set of workingSets(entry)) {
+        if (!set.assisted) continue;
+        const help = setWeight(entry, set);
+        if (best == null || help < best) best = help;
+      }
+    }
+    return best;
+  }
+  function dateKey(ms) {
+    const d = new Date(ms);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  function shiftDays(ms, delta) {
+    const d = new Date(ms);
+    d.setDate(d.getDate() + delta);
+    return dateKey(d.getTime());
+  }
+  function classifyPR(history, candidate, now) {
+    if (!isWorkingSet(candidate)) return NO_PR;
+    const today = dateKey(now);
+    const base = { excludeDate: today };
+    const kind = candidate.kind || DEFAULT_SET_KIND;
+    if (kind === "time") {
+      const best = bestBy(history, topWorkingSeconds, base);
+      const value2 = candidate.seconds || 0;
+      if (best > 0 && value2 > best) return { kind: "time", scope: "all-time", e1rm: null, unit: "s" };
+      return NO_PR;
+    }
+    if (kind === "distance" || kind === "time_distance") {
+      const best = bestBy(history, topWorkingMetres, base);
+      const value2 = candidate.metres || 0;
+      if (best > 0 && value2 > best) return { kind: "distance", scope: "all-time", e1rm: null, unit: "m" };
+      return NO_PR;
+    }
+    if (kind === "reps_only") {
+      const best = bestBy(history, topWorkingReps, base);
+      const value2 = candidate.reps || 0;
+      if (best > 0 && value2 > best) return { kind: "reps", scope: "all-time", e1rm: null, unit: "reps" };
+      return NO_PR;
+    }
+    if (candidate.assisted) {
+      const best = leastAssistance(history, base);
+      const value2 = candidate.weight || 0;
+      if (best != null && value2 < best) {
+        return { kind: "assist", scope: "all-time", e1rm: null, unit: "lb" };
+      }
+      return NO_PR;
+    }
+    const weight = candidate.weight || 0;
+    const reps = candidate.reps || 0;
+    const rolling = { excludeDate: today, sinceDate: shiftDays(now, -ROLLING_PR_DAYS) };
+    const value = epley1RM(weight, reps);
+    const allTime = bestE1RM(history, base);
+    if (value != null && allTime) {
+      if (value > allTime.value) return { kind: "e1rm", scope: "all-time", e1rm: value, unit: "lb" };
+      const recent = bestE1RM(history, rolling);
+      if (recent && value > recent.value) {
+        return { kind: "e1rm", scope: "12-month", e1rm: value, unit: "lb" };
+      }
+    }
+    const heaviest = bestBy(history, topWorkingWeight, base);
+    if (heaviest <= 0) return { ...NO_PR, e1rm: value };
+    if (weight > heaviest) return { kind: "weight", scope: "all-time", e1rm: value, unit: "lb" };
+    const repsHere = bestRepsAtWeight(history, weight, base);
+    if (repsHere > 0 && reps > repsHere) {
+      return { kind: "reps", scope: "all-time", e1rm: value, unit: "reps" };
+    }
+    if (value == null && reps > bestRepsAnywhere(history, base)) {
+      return { kind: "reps", scope: "all-time", e1rm: null, unit: "reps" };
+    }
+    return { ...NO_PR, e1rm: value };
+  }
+  function nearMissCue(history, prefill, incrementLb, now) {
+    const value = epley1RM(prefill.weight, prefill.reps);
+    if (value == null) return null;
+    const best = bestE1RM(history, { excludeDate: dateKey(now) });
+    if (!best) return null;
+    const deficit = best.value - value;
+    if (deficit <= 0) return null;
+    const window = Math.max(incrementLb, 0);
+    if (deficit > window) return null;
+    return `${Math.round(deficit * 10) / 10} lb under your best`;
+  }
+
+  // lib/train/windows.ts
+  var DAY_MS = 864e5;
+  function dateKey2(ms) {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function localMidnight2(dateStr) {
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+  function daysBetween(from, to) {
+    return Math.round((localMidnight2(to) - localMidnight2(from)) / DAY_MS);
+  }
+  function shiftDays2(ms, back) {
+    const d = new Date(ms);
+    d.setDate(d.getDate() - back);
+    return d;
+  }
+  function rollingWindow(now, endingDaysAgo = 0, days = 7) {
+    const end = shiftDays2(now, endingDaysAgo);
+    const start = shiftDays2(end.getTime(), days - 1);
+    return { from: dateKey2(start.getTime()), to: dateKey2(end.getTime()), days };
+  }
+  function baselineWindow(now, weeks = 4, skipDays = 7) {
+    return rollingWindow(now, skipDays, weeks * 7);
+  }
+  function inWindow(date, window) {
+    return !!date && date >= window.from && date <= window.to;
+  }
+  function deltaOf(current, baseline) {
+    if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline === 0) {
+      return { current, baseline, ratio: null, change: null };
+    }
+    const ratio = current / baseline;
+    return {
+      current,
+      baseline,
+      ratio: Math.round(ratio * 1e3) / 1e3,
+      change: Math.round((ratio - 1) * 1e3) / 1e3
+    };
+  }
+  function asPercent(change) {
+    if (change == null) return "";
+    const pct2 = Math.round(Math.abs(change) * 100);
+    return `${change >= 0 ? "up" : "down"} ${pct2}%`;
+  }
+
+  // lib/train/simulate.ts
+  var DAY_MS2 = 864e5;
+  var DELOAD_FACTOR = 0.9;
+  function simulate(history, scenario, now) {
+    const working = (history || []).map((e) => ({
+      ...e,
+      sets: (e.sets || []).map((s) => ({ ...s }))
+    }));
+    const startingE1rm = bestE1rm(working);
+    const sessions = [];
+    const weeks = Math.max(1, Math.floor(scenario.weeks || 1));
+    const perWeek2 = Math.max(1, Math.floor(scenario.sessionsPerWeek || 1));
+    const setCount = Math.max(1, Math.floor(scenario.setsPerSession || 1));
+    const spacing = Math.max(1, Math.floor(7 / perWeek2));
+    let dayOffset = 1;
+    for (let week = 0; week < weeks; week++) {
+      const deloadWeek = !!scenario.deloadEvery && (week + 1) % scenario.deloadEvery === 0;
+      for (let i = 0; i < perWeek2; i++) {
+        const date = dateKey2(now + dayOffset * DAY_MS2);
+        dayOffset += spacing;
+        const suggestion = suggestTarget(working, { ...scenario.exercise, sets: setCount }, now + dayOffset * DAY_MS2);
+        const weight = deloadWeek ? Math.round((suggestion.weight ?? scenario.exercise.kg ?? 0) * DELOAD_FACTOR) : suggestion.weight ?? scenario.exercise.kg ?? 0;
+        const reps = suggestion.reps ?? scenario.exercise.reps;
+        sessions.push({ date, weight, reps, sets: setCount, projected: true });
+        working.push({
+          date,
+          kg: weight,
+          sets: Array.from({ length: setCount }, () => ({ w: weight, r: reps }))
+        });
+      }
+    }
+    const muscles = scenario.exercise.muscles || [];
+    const projectedSets = sessions.reduce((n, s) => n + s.sets, 0);
+    const weeklyVolumeByMuscle = {};
+    for (const muscle of muscles) {
+      weeklyVolumeByMuscle[muscle] = Math.round(projectedSets / weeks * 10) / 10;
+    }
+    return {
+      name: scenario.name,
+      weeks,
+      sessions,
+      startingE1rm,
+      projectedE1rm: bestE1rm(working),
+      weeklyVolumeByMuscle,
+      projected: true
+    };
+  }
+  function bestE1rm(entries) {
+    let best = 0;
+    for (const entry of entries) {
+      for (const set of entry.sets || []) {
+        if (set.warmup) continue;
+        const e1 = epley1RM(set.w ?? entry.kg ?? 0, set.r ?? 0);
+        if (e1 != null && e1 > best) best = e1;
+      }
+    }
+    return Math.round(best * 10) / 10;
+  }
+  function compareScenarios(history, a, b, now) {
+    const left = simulate(history, a, now);
+    const right = simulate(history, b, now);
+    const volumeDelta = {};
+    const muscles = /* @__PURE__ */ new Set([
+      ...Object.keys(left.weeklyVolumeByMuscle),
+      ...Object.keys(right.weeklyVolumeByMuscle)
+    ]);
+    for (const muscle of muscles) {
+      volumeDelta[muscle] = Math.round(
+        ((right.weeklyVolumeByMuscle[muscle] || 0) - (left.weeklyVolumeByMuscle[muscle] || 0)) * 10
+      ) / 10;
+    }
+    const e1rmDelta = Math.round((right.projectedE1rm - left.projectedE1rm) * 10) / 10;
+    const direction = e1rmDelta === 0 ? "the same" : e1rmDelta > 0 ? `${e1rmDelta} lb higher` : `${Math.abs(e1rmDelta)} lb lower`;
+    return {
+      a: left,
+      b: right,
+      e1rmDelta,
+      volumeDelta,
+      text: `Over ${right.weeks} weeks, "${b.name}" projects ${direction} than "${a.name}". Both are projections from your own numbers, not promises.`
+    };
+  }
+
   // lib/train/predictions.ts
   var EASY_MARGIN = 3;
   var MIN_SCORED_FOR_FEEDBACK = 10;
@@ -713,7 +1770,7 @@ var TrainEngine = (() => {
     if (lowest >= targetReps + EASY_MARGIN) return "missed_low";
     return lowest >= targetReps ? "hit" : "missed_high";
   }
-  var EMPTY = {
+  var EMPTY2 = {
     total: 0,
     hit: 0,
     missedHigh: 0,
@@ -726,9 +1783,9 @@ var TrainEngine = (() => {
   };
   function accuracyOver(store, history, opts = {}) {
     const predictions = Object.values(store || {}).filter((p) => p && (!opts.since || p.date >= opts.since)).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-    if (!predictions.length) return { ...EMPTY };
+    if (!predictions.length) return { ...EMPTY2 };
     const out = {
-      ...EMPTY,
+      ...EMPTY2,
       byBasis: {},
       byLift: {}
     };
@@ -1271,346 +2328,6 @@ var TrainEngine = (() => {
     return CATALOG_BY_ID[id] || null;
   }
 
-  // lib/train/targets.ts
-  var PROFILES = {
-    beginner: {
-      ceiling: 14,
-      floor: 5,
-      deloadMeasured: 0.95,
-      deloadInferred: 0.97,
-      repRanges: [[5, 8], [8, 12], [12, 15]]
-    },
-    intermediate: {
-      ceiling: 20,
-      floor: 10,
-      deloadMeasured: 0.9,
-      deloadInferred: 0.95,
-      repRanges: [[4, 6], [6, 10], [10, 15]]
-    },
-    advanced: {
-      ceiling: 25,
-      floor: 12,
-      deloadMeasured: 0.85,
-      deloadInferred: 0.92,
-      repRanges: [[3, 5], [5, 8], [8, 12]]
-    }
-  };
-  var UNKNOWN = PROFILES.intermediate;
-  function profileFor(age) {
-    return age && PROFILES[age] ? PROFILES[age] : UNKNOWN;
-  }
-  var MIN_TRAILING = 4;
-  var DROP_FRACTION = 0.6;
-  function weeklySetBand(ctx = {}) {
-    const profile = profileFor(ctx.trainingAge);
-    const trailing = ctx.trailingSets;
-    if (typeof trailing === "number" && Number.isFinite(trailing) && trailing >= MIN_TRAILING) {
-      return {
-        floor: Math.round(trailing * DROP_FRACTION * 10) / 10,
-        ceiling: profile.ceiling,
-        floorSource: "trailing"
-      };
-    }
-    if (ctx.trainingAge) {
-      return { floor: profile.floor, ceiling: profile.ceiling, floorSource: "age" };
-    }
-    return { floor: null, ceiling: profile.ceiling, floorSource: "none" };
-  }
-  function deloadCut(age, confidence) {
-    const profile = profileFor(age);
-    return confidence === "measured" ? profile.deloadMeasured : profile.deloadInferred;
-  }
-  function repRangeFor(age, tier) {
-    const ranges = profileFor(age).repRanges;
-    if (tier <= 1) return ranges[0];
-    if (tier >= 3) return ranges[2];
-    return ranges[1];
-  }
-  function streakTarget(statedFrequency, fallback = 4) {
-    if (typeof statedFrequency !== "number" || !Number.isFinite(statedFrequency)) return fallback;
-    return Math.min(14, Math.max(1, Math.round(statedFrequency)));
-  }
-
-  // lib/train/amrap.ts
-  var AMRAP_OVER = 3;
-  var AMRAP_MAX_MULTIPLIER = 4;
-  function amrapSignal(entry, target) {
-    if (!entry) return null;
-    const set = amrapOf(entry);
-    if (!set || typeof set.r !== "number" || !Number.isFinite(set.r)) return null;
-    if (!Number.isFinite(target) || target <= 0) return null;
-    const reps = set.r;
-    const surplus = reps - target;
-    if (surplus < 0) {
-      return { reps, target, surplus, verdict: "struggling", multiplier: 1 };
-    }
-    if (surplus < AMRAP_OVER) {
-      return { reps, target, surplus, verdict: "on_target", multiplier: 1 };
-    }
-    const multiplier = Math.min(AMRAP_MAX_MULTIPLIER, 1 + Math.floor(surplus / AMRAP_OVER));
-    return { reps, target, surplus, verdict: "under_loaded", multiplier };
-  }
-  function amrapTrend(history) {
-    const reps = [];
-    for (const entry of history || []) {
-      if (!entry || entry.off) continue;
-      const set = amrapOf(entry);
-      if (set && typeof set.r === "number" && Number.isFinite(set.r)) reps.push(set.r);
-    }
-    if (reps.length < 2) return null;
-    const from = reps[0];
-    const to = reps[reps.length - 1];
-    return { from, to, sessions: reps.length, falling: to < from };
-  }
-
-  // lib/train/timing.ts
-  var MAX_REST_SECONDS = 900;
-  var MIN_TIMED_SESSIONS = 3;
-  var REST_COMPRESSION = 0.8;
-  function observedAt(set) {
-    if (!set) return null;
-    if (set.atEstimated === true) return null;
-    const at = set.at;
-    return typeof at === "number" && Number.isFinite(at) ? at : null;
-  }
-  var EMPTY2 = { gaps: [], median: null, hasObservedTiming: false };
-  function median(values) {
-    if (!values.length) return null;
-    const sorted = [...values].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-  }
-  function restTaken(entry) {
-    if (!entry || entry.off) return EMPTY2;
-    const working = (entry.sets || []).filter(isWorkingSet);
-    const gaps = [];
-    let previous = null;
-    for (const set of working) {
-      const at = observedAt(set);
-      if (at == null) {
-        previous = null;
-        continue;
-      }
-      if (previous != null) {
-        const seconds = Math.round((at - previous) / 1e3);
-        if (seconds > 0 && seconds <= MAX_REST_SECONDS) gaps.push(seconds);
-      }
-      previous = at;
-    }
-    return { gaps, median: median(gaps), hasObservedTiming: gaps.length > 0 };
-  }
-  function medianRest(entry) {
-    return restTaken(entry).median;
-  }
-  function hasObservedTiming(history) {
-    return (history || []).some((entry) => restTaken(entry).hasObservedTiming);
-  }
-  function restTrend(history) {
-    const medians = [];
-    const shapes = [];
-    for (const entry of history || []) {
-      const value = medianRest(entry);
-      if (value == null) continue;
-      medians.push(value);
-      shapes.push(entry.group ? `g:${entry.group}` : "none");
-    }
-    if (medians.length < MIN_TIMED_SESSIONS) return null;
-    const grouped = shapes.map((s) => s !== "none");
-    const groupingChanged = grouped.some((g) => g !== grouped[0]);
-    const from = medians[0];
-    const to = medians[medians.length - 1];
-    return {
-      from,
-      to,
-      sessions: medians.length,
-      /* A structural change makes the two ends incomparable. Reporting a
-         softened version — "rest fell, but you changed things" — would be
-         worse than silence, because the reader takes the headline. */
-      compressing: !groupingChanged && from > 0 && to / from <= REST_COMPRESSION,
-      groupingChanged
-    };
-  }
-
-  // lib/train/deload.ts
-  var DELOAD_HOLD_SESSIONS = 2;
-  var RECOVERY_FLOOR = 55;
-  var HIGH_RPE = 9;
-  var PLATEAU_WINDOW = 3;
-  var COOLDOWN_DAYS = 14;
-  function isExcluded(date, windows = []) {
-    return (windows || []).some((w) => date >= w.from && date <= w.to);
-  }
-  var RPE_RISE = 1;
-  function readCause(window) {
-    const values = window.map(workingRpe).filter((v) => v != null);
-    const mean3 = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
-    const trend = amrapTrend(window);
-    if (trend && trend.falling) {
-      return { cause: "fatigue", rpe: mean3, amrapFalling: true, restCompressing: false };
-    }
-    const rest = restTrend(window);
-    if (rest && rest.compressing) {
-      return { cause: "rest_compression", rpe: mean3, amrapFalling: false, restCompressing: true };
-    }
-    if (values.length < 2) {
-      return {
-        cause: "unknown",
-        rpe: values.length ? values[0] : null,
-        amrapFalling: false,
-        restCompressing: false
-      };
-    }
-    const rising = values[values.length - 1] - values[0] >= RPE_RISE;
-    if (rising || mean3 >= HIGH_RPE) {
-      return { cause: "fatigue", rpe: mean3, amrapFalling: false, restCompressing: false };
-    }
-    return { cause: "programming", rpe: mean3, amrapFalling: false, restCompressing: false };
-  }
-  function detectPlateau(history, opts = {}) {
-    const usable = (history || []).filter(
-      (entry) => entry && !entry.off && !isExcluded(entry.date, opts.excluded)
-    );
-    if (usable.length < PLATEAU_WINDOW + 1) return null;
-    const recent = usable.slice(-PLATEAU_WINDOW);
-    const scores = recent.map((entry) => entryScore(entry, {
-      bodyweightLb: opts.bodyweightLb,
-      bodyweightFactor: opts.bodyweightFactor
-    }));
-    const flat = (arr) => arr.every((v, i) => i === 0 || v <= arr[i - 1]);
-    const primary = scores.map((s) => s.primary);
-    const secondary = scores.map((s) => s.secondary);
-    if (flat(primary) && flat(secondary)) {
-      const { cause, rpe, amrapFalling, restCompressing } = readCause(recent);
-      const last = scores[scores.length - 1];
-      return {
-        sessions: PLATEAU_WINDOW,
-        // reported in the kind's own unit; assisted scores are negated
-        weight: Math.abs(last.primary),
-        kind: last.kind,
-        cause,
-        rpe,
-        amrapFalling,
-        restCompressing
-      };
-    }
-    return null;
-  }
-  function addDays(date, days) {
-    const [y, m2, d] = date.split("-").map(Number);
-    const dt = new Date(y, (m2 || 1) - 1, d || 1);
-    dt.setDate(dt.getDate() + days);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-  }
-  function diagnose(ctx, plateau) {
-    if (typeof ctx.recovery === "number" && ctx.recovery < RECOVERY_FLOOR) {
-      return { kind: "volume", confidence: "measured" };
-    }
-    if (typeof ctx.rpe === "number" && ctx.rpe >= HIGH_RPE) {
-      return { kind: "intensity", confidence: "measured" };
-    }
-    if (plateau && plateau.cause === "fatigue") {
-      return { kind: "intensity", confidence: "measured" };
-    }
-    return { kind: "intensity", confidence: "inferred" };
-  }
-  var NORMAL = (weight, today) => ({
-    state: "normal",
-    kind: null,
-    priorWeight: weight,
-    since: today,
-    sessions: 0,
-    confidence: "measured"
-  });
-  function nextDeloadState(current, ctx) {
-    const plateau = detectPlateau(ctx.history, { excluded: ctx.excluded });
-    const record = current || NORMAL(plateau ? plateau.weight : 0, ctx.today);
-    switch (record.state) {
-      case "normal": {
-        if (!plateau) return record;
-        if (record.cooldownUntil && ctx.today < record.cooldownUntil) return record;
-        if (plateau.cause === "programming") return record;
-        if (plateau.cause === "rest_compression") return record;
-        const flagDx = diagnose(ctx, plateau);
-        return {
-          ...record,
-          state: "flagged",
-          kind: flagDx.kind,
-          confidence: flagDx.confidence,
-          priorWeight: plateau.weight,
-          since: ctx.today,
-          sessions: 0
-        };
-      }
-      case "flagged": {
-        if (!plateau) return { ...record, state: "normal", kind: null, since: ctx.today, sessions: 0 };
-        const { kind, confidence } = diagnose(ctx, plateau);
-        return {
-          ...record,
-          state: "deloading",
-          kind,
-          confidence,
-          priorWeight: plateau.weight,
-          since: ctx.today,
-          sessions: 0
-        };
-      }
-      case "deloading": {
-        if (!ctx.sessionLogged) return record;
-        const sessions = record.sessions + 1;
-        if (sessions < DELOAD_HOLD_SESSIONS) return { ...record, sessions };
-        return { ...record, state: "reapproach", since: ctx.today, sessions: 0 };
-      }
-      case "reapproach": {
-        if (!ctx.sessionLogged) return record;
-        return {
-          ...record,
-          state: "normal",
-          kind: null,
-          since: ctx.today,
-          sessions: 0,
-          // a lift that just finished a deload must not immediately re-flag,
-          // or the machine oscillates instead of resolving
-          cooldownUntil: addDays(ctx.today, COOLDOWN_DAYS)
-        };
-      }
-    }
-    return record;
-  }
-  var VOLUME_CUT = 2 / 3;
-  var REAPPROACH = 0.95;
-  function deloadPlan(record, trainingAge) {
-    if (!record) return { weight: null, setsFactor: 1 };
-    const round7 = (n) => Math.round(n * 100) / 100;
-    if (record.state === "reapproach") {
-      return { weight: round7(record.priorWeight * REAPPROACH), setsFactor: 1 };
-    }
-    if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
-    if (record.kind === "volume") {
-      return { weight: round7(record.priorWeight), setsFactor: VOLUME_CUT };
-    }
-    return {
-      weight: round7(record.priorWeight * deloadCut(trainingAge, record.confidence)),
-      setsFactor: 1
-    };
-  }
-  function plateauAdvice(plateau) {
-    if (!plateau) return "";
-    if (plateau.cause === "rest_compression") {
-      return "Rest between sets has been getting shorter. Rest longer before the next set \u2014 the weight is not the problem.";
-    }
-    if (plateau.cause === "fatigue") {
-      return plateau.amrapFalling ? "Your all-out set has been falling at the same weight. That is fatigue, not programming." : "Effort has been climbing at the same weight. That is fatigue.";
-    }
-    if (plateau.cause === "programming") {
-      return "Steady effort at a flat weight \u2014 there is capacity here that is not being asked for.";
-    }
-    return "Flat for a while, with nothing logged that says why.";
-  }
-  function limitDeloads(candidates, max = 2) {
-    return (candidates || []).slice().sort((a, b) => b.plateauLength - a.plateauLength || b.weight - a.weight).slice(0, max).map((c) => c.id);
-  }
-
   // lib/train/swap.ts
   var SWAP_WEIGHTS = {
     pattern: 1,
@@ -1694,67 +2411,19 @@ var TrainEngine = (() => {
     return candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
   }
 
-  // lib/train/windows.ts
-  var DAY_MS = 864e5;
-  function dateKey(ms) {
-    const d = new Date(ms);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  }
-  function localMidnight(dateStr) {
-    const [y, m2, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-  }
-  function daysBetween(from, to) {
-    return Math.round((localMidnight(to) - localMidnight(from)) / DAY_MS);
-  }
-  function shiftDays(ms, back) {
-    const d = new Date(ms);
-    d.setDate(d.getDate() - back);
-    return d;
-  }
-  function rollingWindow(now, endingDaysAgo = 0, days = 7) {
-    const end = shiftDays(now, endingDaysAgo);
-    const start = shiftDays(end.getTime(), days - 1);
-    return { from: dateKey(start.getTime()), to: dateKey(end.getTime()), days };
-  }
-  function baselineWindow(now, weeks = 4, skipDays = 7) {
-    return rollingWindow(now, skipDays, weeks * 7);
-  }
-  function inWindow(date, window) {
-    return !!date && date >= window.from && date <= window.to;
-  }
-  function deltaOf(current, baseline) {
-    if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline === 0) {
-      return { current, baseline, ratio: null, change: null };
-    }
-    const ratio = current / baseline;
-    return {
-      current,
-      baseline,
-      ratio: Math.round(ratio * 1e3) / 1e3,
-      change: Math.round((ratio - 1) * 1e3) / 1e3
-    };
-  }
-  function asPercent(change) {
-    if (change == null) return "";
-    const pct2 = Math.round(Math.abs(change) * 100);
-    return `${change >= 0 ? "up" : "down"} ${pct2}%`;
-  }
-
   // lib/train/staleness.ts
   var STALE_WEEKS = 12;
   var MAX_CANDIDATES = 3;
-  var realSessions = (entries) => (entries || []).filter((e) => e && !e.off && e.date).sort((a, b) => a.date.localeCompare(b.date));
+  var realSessions2 = (entries) => (entries || []).filter((e) => e && !e.off && e.date).sort((a, b) => a.date.localeCompare(b.date));
   function weeksInRotation(entries, now) {
-    const sessions = realSessions(entries);
+    const sessions = realSessions2(entries);
     if (!sessions.length) return 0;
-    return Math.floor(daysBetween(sessions[0].date, dateKey(now)) / 7);
+    return Math.floor(daysBetween(sessions[0].date, dateKey2(now)) / 7);
   }
   function weeksSinceAnythingNew(history, now) {
     let newest = 0;
     for (const id of Object.keys(history || {})) {
-      const sessions = realSessions(history[id]);
+      const sessions = realSessions2(history[id]);
       if (!sessions.length) continue;
       const weeks = weeksInRotation(history[id], now);
       if (newest === 0 || weeks < newest) newest = weeks;
@@ -1773,7 +2442,7 @@ var TrainEngine = (() => {
       const plateau = detectPlateau(history[id], {});
       if (!plateau) continue;
       const sessions = {};
-      for (const other of ids) sessions[other] = realSessions(history[other]).length;
+      for (const other of ids) sessions[other] = realSessions2(history[other]).length;
       const def = catalogExercise(id);
       const candidates = def ? rankSwaps(def, { equipment: ctx.equipment || [], sessions }).slice(0, MAX_CANDIDATES) : [];
       if (!candidates.length) continue;
@@ -2167,13 +2836,13 @@ var TrainEngine = (() => {
   var WEEKLY_SET_BAND = [10, 20];
   var RATIO_BAND = [0.6, 1.7];
   var RAMP_LIMIT = 1.5;
-  var DAY_MS2 = 864e5;
+  var DAY_MS3 = 864e5;
   function indexFrom(customLib) {
     const out = {};
     for (const id of Object.keys(customLib || {})) out[id] = muscleSplitFrom(customLib[id]);
     return out;
   }
-  function localMidnight2(dateStr) {
+  function localMidnight3(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
@@ -2182,7 +2851,7 @@ var TrainEngine = (() => {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   }
   function daysAgo(dateStr, now) {
-    return Math.round((startOfDay(now) - localMidnight2(dateStr)) / DAY_MS2);
+    return Math.round((startOfDay(now) - localMidnight3(dateStr)) / DAY_MS3);
   }
   function attribute(history, index) {
     const rows = [];
@@ -2743,7 +3412,7 @@ var TrainEngine = (() => {
   }
 
   // lib/train/lastsession.ts
-  var DAY_MS3 = 864e5;
+  var DAY_MS4 = 864e5;
   function shapeOf(set, kind) {
     const base = {
       missed: set.fail === true,
@@ -2765,7 +3434,7 @@ var TrainEngine = (() => {
     }
   }
   function lastSessionFor(history, now) {
-    const today = dateKey2(now);
+    const today = dateKey3(now);
     const usable = (history || []).filter((entry) => entry && !entry.off && entry.date && entry.date < today).sort((a, b) => a.date.localeCompare(b.date));
     for (let i = usable.length - 1; i >= 0; i--) {
       const entry = usable[i];
@@ -2774,19 +3443,19 @@ var TrainEngine = (() => {
       const kind = entryKind(entry);
       return {
         date: entry.date,
-        daysAgo: Math.round((localMidnight3(today) - localMidnight3(entry.date)) / DAY_MS3),
+        daysAgo: Math.round((localMidnight4(today) - localMidnight4(entry.date)) / DAY_MS4),
         kind,
         sets: shown.map((set) => shapeOf(set, kind))
       };
     }
     return null;
   }
-  function dateKey2(ms) {
+  function dateKey3(ms) {
     const d = new Date(ms);
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
-  function localMidnight3(dateStr) {
+  function localMidnight4(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
@@ -2797,8 +3466,8 @@ var TrainEngine = (() => {
   var MAX_PROJECTION_DAYS = 365;
   var STALE_DAYS = 180;
   var NOISE_PER_WEEK = 0.01;
-  var DAY_MS4 = 864e5;
-  function localMidnight4(dateStr) {
+  var DAY_MS5 = 864e5;
+  function localMidnight5(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
@@ -2813,7 +3482,7 @@ var TrainEngine = (() => {
     return "lb";
   }
   function slopePerDay(points) {
-    return slopeOf(points.map((p) => ({ t: p.t / DAY_MS4, v: p.v })));
+    return slopeOf(points.map((p) => ({ t: p.t / DAY_MS5, v: p.v })));
   }
   function slopeOf(points) {
     const n = points.length;
@@ -2829,7 +3498,7 @@ var TrainEngine = (() => {
   }
   function projectGoal(series, target, now, opts = {}) {
     if (typeof target !== "number" || !Number.isFinite(target) || target <= 0) return null;
-    const points = (series || []).filter((p) => p && typeof p.value === "number" && Number.isFinite(p.value) && p.date).map((p) => ({ t: localMidnight4(p.date), v: p.value })).filter((p) => Number.isFinite(p.t) && (now - p.t) / DAY_MS4 <= STALE_DAYS && p.t <= now).sort((a, b) => a.t - b.t);
+    const points = (series || []).filter((p) => p && typeof p.value === "number" && Number.isFinite(p.value) && p.date).map((p) => ({ t: localMidnight5(p.date), v: p.value })).filter((p) => Number.isFinite(p.t) && (now - p.t) / DAY_MS5 <= STALE_DAYS && p.t <= now).sort((a, b) => a.t - b.t);
     if (points.length < MIN_PROJECTION_POINTS) return null;
     const latest = points[points.length - 1];
     const earliest = points[0];
@@ -2846,7 +3515,7 @@ var TrainEngine = (() => {
         text: `Goal reached \u2014 ${Math.round(latest.v)} ${unit} against a ${Math.round(target)} target.`
       };
     }
-    const spanWeeks = Math.round((latest.t - earliest.t) / DAY_MS4 / 7);
+    const spanWeeks = Math.round((latest.t - earliest.t) / DAY_MS5 / 7);
     if (perWeek2 <= NOISE_PER_WEEK) {
       if (spanWeeks < STATIC_WEEKS) return null;
       return {
@@ -2881,68 +3550,6 @@ var TrainEngine = (() => {
       staticWeeks: null,
       text: `About ${weeks} week${weeks === 1 ? "" : "s"} away at ${perWeek2} ${unit} a week.`
     };
-  }
-
-  // lib/train/plates.ts
-  var DEFAULT_BAR_LB = 45;
-  var DEFAULT_PLATES_LB = [45, 35, 25, 10, 5, 2.5];
-  function defaultPlateConfig() {
-    return { barLb: DEFAULT_BAR_LB, plates: [...DEFAULT_PLATES_LB] };
-  }
-  var tidy = (n) => Math.round(n * 100) / 100;
-  function loadableWeights(config, maxLb = 1e3) {
-    const bar2 = Math.max(0, config.barLb || 0);
-    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => a - b);
-    if (!plates.length) return [tidy(bar2)];
-    const perSide = /* @__PURE__ */ new Set([0]);
-    const smallest = plates[0];
-    const limit = (maxLb - bar2) / 2;
-    let frontier = [0];
-    while (frontier.length) {
-      const next = [];
-      for (const load of frontier) {
-        for (const plate of plates) {
-          const candidate = tidy(load + plate);
-          if (candidate > limit || perSide.has(candidate)) continue;
-          perSide.add(candidate);
-          next.push(candidate);
-        }
-      }
-      frontier = next;
-      if (perSide.size > 4e3) break;
-    }
-    return [...perSide].map((side) => tidy(bar2 + side * 2)).sort((a, b) => a - b);
-  }
-  function snapToLoadable(target, config) {
-    const options = loadableWeights(config, Math.max(target * 2, 1e3));
-    if (!options.length) return tidy(target);
-    const bar2 = Math.max(0, config.barLb || 0);
-    if (target <= bar2) return tidy(bar2);
-    let best = options[0];
-    let bestGap = Math.abs(options[0] - target);
-    for (const option of options) {
-      const gap = Math.abs(option - target);
-      if (gap < bestGap || gap === bestGap && option < best) {
-        best = option;
-        bestGap = gap;
-      }
-    }
-    return tidy(best);
-  }
-  function plateBreakdown(total, config) {
-    const bar2 = Math.max(0, config.barLb || 0);
-    if (tidy(total) === tidy(bar2)) return [];
-    let remaining = tidy((total - bar2) / 2);
-    if (remaining < 0) return null;
-    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => b - a);
-    const used = [];
-    for (const plate of plates) {
-      while (remaining >= plate - 1e-9) {
-        used.push(plate);
-        remaining = tidy(remaining - plate);
-      }
-    }
-    return remaining <= 1e-9 ? used : null;
   }
 
   // lib/train/ramp.ts
@@ -2989,532 +3596,9 @@ var TrainEngine = (() => {
     return out.sort((a, b) => a.kg - b.kg);
   }
 
-  // lib/train/session.ts
-  function loggedSetCount(session) {
-    return (session.ex || []).reduce(
-      (n, ex) => n + (ex.log || []).filter((s) => s != null).length,
-      0
-    );
-  }
-  function workingSetCount(session) {
-    return (session.ex || []).reduce(
-      (n, ex) => n + (ex.log || []).filter((s) => isWorkingSet(s)).length,
-      0
-    );
-  }
-  function sessionState(session, opts) {
-    if (session.off) return "rest";
-    const logged = loggedSetCount(session);
-    if (opts.finished) return "complete";
-    if (logged === 0) return "not_started";
-    return session.date < opts.today ? "abandoned" : "in_progress";
-  }
-  var CONTRIBUTIONS = {
-    complete: { volume: true, plateau: true, records: true, streak: true, progression: true },
-    // the sets happened; the session did not finish
-    abandoned: { volume: true, plateau: true, records: true, streak: false, progression: false },
-    in_progress: { volume: true, plateau: true, records: true, streak: false, progression: false },
-    not_started: { volume: false, plateau: false, records: false, streak: false, progression: false },
-    rest: { volume: false, plateau: false, records: false, streak: false, progression: false }
-  };
-  function contributionOf(state) {
-    return CONTRIBUTIONS[state];
-  }
-  function countsForProgression(entry) {
-    return entry.abandoned !== true;
-  }
-  function sameAsLastTime(history, opts = {}) {
-    const usable = (history || []).filter(
-      (e) => e && !e.off && e.date !== opts.excludeDate && (e.sets || []).some((s) => isWorkingSet(s))
-    );
-    if (!usable.length) return null;
-    const last = usable[usable.length - 1];
-    const sets = (last.sets || []).filter((s) => isWorkingSet(s));
-    if (!sets.length) return null;
-    return sets.map((s) => ({
-      weight: s.w,
-      reps: s.r,
-      seconds: s.s,
-      metres: s.m,
-      kind: s.kind,
-      perSide: s.perSide,
-      assisted: s.assisted
-    }));
-  }
-
-  // lib/train/progression.ts
-  var DEFAULT_SECONDS_STEP = 5;
-  var DEFAULT_METRES_STEP = 10;
-  var LAYOFF_DAYS = 14;
-  var DEFAULT_INCREMENT = {
-    barbell: 5,
-    // 2.5 lb plate pairs
-    dumbbell: 5,
-    // racks jump in 5s, and only in pairs
-    stack: 10,
-    // typical selectorized machine
-    free: 0
-  };
-  var EASY_RPE = 7;
-  var GRIND_RPE = 9;
-  function stepFor(weight, exercise) {
-    if (typeof exercise.incrementLb === "number" && exercise.incrementLb > 0) {
-      return exercise.incrementLb;
-    }
-    const preset = DEFAULT_INCREMENT[exercise.loading || "free"];
-    if (preset > 0) return preset;
-    if (weight >= 135) return 5;
-    if (weight >= 45) return 2.5;
-    return 1;
-  }
-  function tidy2(n) {
-    return Math.round(n * 100) / 100;
-  }
-  function snapWeight(weight, exercise, reference) {
-    if (weight <= 0) return 0;
-    if (exercise.plates && exercise.loading === "barbell") {
-      return snapToLoadable(weight, exercise.plates);
-    }
-    const step = stepFor(reference, exercise);
-    return tidy2(Math.round(weight / step) * step);
-  }
-  function localMidnight5(dateStr) {
-    const [y, m2, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-  }
-  function daysSince(dateStr, now) {
-    const then = localMidnight5(dateStr);
-    const nowDate = new Date(now);
-    const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
-    return Math.round((today - then) / 864e5);
-  }
-  function layoffFactor(days) {
-    if (days >= 84) return 0.7;
-    if (days >= 42) return 0.8;
-    if (days >= 21) return 0.85;
-    return 0.95;
-  }
-  function describeWeight(weight) {
-    return weight > 0 ? `${tidy2(weight)} lb` : "bodyweight";
-  }
-  function realSessions2(history) {
-    return (history || []).filter((entry) => entry && !entry.off);
-  }
-  function rangeFor(exercise) {
-    const r = exercise.repRange;
-    if (Array.isArray(r) && r.length === 2 && r[1] >= r[0]) return [r[0], r[1]];
-    return [exercise.reps, exercise.reps];
-  }
-  function findLayoff(sessions, now) {
-    if (!sessions.length) return null;
-    const last = sessions[sessions.length - 1];
-    const trailing = daysSince(last.date, now);
-    if (trailing >= LAYOFF_DAYS) {
-      return { days: trailing, priorWeight: topWorkingWeight(last), sessionsSince: 0 };
-    }
-    for (let i = sessions.length - 1; i > 0; i--) {
-      const gap = daysSince(sessions[i - 1].date, localMidnight5(sessions[i].date));
-      if (gap >= LAYOFF_DAYS) {
-        return { days: gap, priorWeight: topWorkingWeight(sessions[i - 1]), sessionsSince: sessions.length - i };
-      }
-    }
-    return null;
-  }
-  function rampWeights(prior, days, exercise) {
-    if (prior <= 0) return [0];
-    const dropped = snapWeight(prior * layoffFactor(days), exercise, prior);
-    const mid = snapWeight(dropped + (prior - dropped) / 2, exercise, prior);
-    const target = tidy2(prior);
-    const plan = [];
-    for (const w of [dropped, dropped, mid, target]) {
-      if (plan.length >= 2 && plan[plan.length - 1] === w) continue;
-      plan.push(w);
-    }
-    const done = plan.indexOf(target);
-    return done >= 0 ? plan.slice(0, done + 1) : plan;
-  }
-  function suggestLoad(history, exercise, now) {
-    const sessions = realSessions2(history);
-    const last = sessions.length ? sessions[sessions.length - 1] : null;
-    const [minReps, maxReps] = rangeFor(exercise);
-    const hasRange = maxReps > minReps;
-    const plan = deloadPlan(exercise.deload || null, exercise.trainingAge);
-    if (plan.weight != null && exercise.deload) {
-      const weight = snapWeight(plan.weight, exercise, plan.weight);
-      if (exercise.deload.state === "reapproach") {
-        return {
-          weight,
-          reps: minReps,
-          basis: "deload",
-          reason: `back to ${describeWeight(weight)} \u2014 easing out of the deload`
-        };
-      }
-      if (exercise.deload.kind === "volume") {
-        const cut = Math.round((1 - plan.setsFactor) * 100);
-        return {
-          weight,
-          reps: minReps,
-          basis: "deload",
-          reason: `holding at ${describeWeight(weight)} \u2014 ${cut}% fewer sets while recovery catches up`
-        };
-      }
-      return {
-        weight,
-        reps: minReps,
-        basis: "deload",
-        reason: `holding at ${describeWeight(weight)} \u2014 deload, ${exercise.deload.sessions + 1} of ${DELOAD_HOLD_SESSIONS}`
-      };
-    }
-    if (!last) {
-      const weight = tidy2(exercise.lastKg != null ? exercise.lastKg : exercise.kg || 0);
-      return {
-        weight,
-        reps: minReps,
-        basis: "new",
-        reason: `starting at ${describeWeight(weight)} \u2014 first time logging this`
-      };
-    }
-    const sets = workingSets(last);
-    const ranged = rangeSets(last);
-    const missedLast = (last.sets || []).some((set) => set.fail);
-    const assisted = exercise.assisted === true || (last.sets || []).some((set) => set.assisted);
-    const assistUsed = sets.length ? Math.min(...sets.map((set) => setWeight(last, set))) : 0;
-    const held = assisted ? tidy2(assistUsed) : tidy2(topWorkingWeight(last) || last.kg || 0);
-    const layoff = findLayoff(sessions, now);
-    if (layoff) {
-      const ramp = rampWeights(layoff.priorWeight, layoff.days, exercise);
-      const step2 = layoff.sessionsSince;
-      const alreadyBack = step2 > 0 && held >= layoff.priorWeight;
-      if (step2 < ramp.length && !alreadyBack) {
-        if (step2 > 0 && missedLast) {
-          return {
-            weight: held,
-            reps: minReps,
-            basis: "miss",
-            reason: `holding at ${describeWeight(held)} \u2014 missed the last set`
-          };
-        }
-        const weight = ramp[step2];
-        if (step2 === 0) {
-          return {
-            weight,
-            reps: minReps,
-            basis: "layoff",
-            reason: `back to ${describeWeight(weight)} \u2014 first session after ${layoff.days} days off`
-          };
-        }
-        if (weight === ramp[step2 - 1]) {
-          return {
-            weight,
-            reps: minReps,
-            basis: "layoff",
-            reason: `holding at ${describeWeight(weight)} \u2014 second session back`
-          };
-        }
-        const delta2 = tidy2(weight - ramp[step2 - 1]);
-        return {
-          weight,
-          reps: minReps,
-          basis: "layoff",
-          reason: `+${delta2} lb \u2014 easing back to your ${describeWeight(layoff.priorWeight)} working weight`
-        };
-      }
-    }
-    if (!sets.length) {
-      return {
-        weight: held,
-        reps: minReps,
-        basis: "miss",
-        reason: `holding at ${describeWeight(held)} \u2014 nothing logged last time`
-      };
-    }
-    if (!countsForProgression(last)) {
-      return {
-        weight: held,
-        reps: minReps,
-        basis: "miss",
-        reason: `holding at ${describeWeight(held)} \u2014 last session was left unfinished`
-      };
-    }
-    if (missedLast) {
-      return {
-        weight: held,
-        reps: minReps,
-        basis: "miss",
-        reason: `holding at ${describeWeight(held)} \u2014 missed the last set`
-      };
-    }
-    const lowest = ranged.length ? Math.min(...ranged.map((set) => set.r || 0)) : Math.min(...sets.map((set) => set.r || 0));
-    if (lowest < minReps) {
-      return {
-        weight: held,
-        reps: minReps,
-        basis: "miss",
-        reason: `holding at ${describeWeight(held)} \u2014 short of ${minReps} reps last time`
-      };
-    }
-    const shape = `${ranged.length || sets.length}\xD7${lowest}`;
-    const amrap = amrapSignal(last, lowest);
-    if (amrap && amrap.verdict === "struggling") {
-      return {
-        weight: held,
-        reps: minReps,
-        basis: "amrap",
-        reason: `holding at ${describeWeight(held)} \u2014 ${amrap.reps} reps to failure, under the ${amrap.target} you were chasing`
-      };
-    }
-    if (lowest < maxReps) {
-      return {
-        weight: held,
-        reps: lowest + 1,
-        basis: "clean",
-        reason: `same weight, chase ${lowest + 1} reps \u2014 hit ${shape} last time`
-      };
-    }
-    if (held <= 0) {
-      return {
-        weight: 0,
-        reps: minReps,
-        basis: "clean",
-        reason: `bodyweight \u2014 clean ${shape} last time`
-      };
-    }
-    const step = stepFor(held, exercise);
-    const rpe = workingRpe(last);
-    if (rpe != null && rpe >= GRIND_RPE) {
-      return {
-        weight: held,
-        reps: minReps,
-        basis: "clean",
-        reason: `holding at ${describeWeight(held)} \u2014 clean ${shape} but grinding at RPE ${tidy2(rpe)}`
-      };
-    }
-    const base = amrap && amrap.verdict === "under_loaded" ? amrap.multiplier : rpe != null && rpe <= EASY_RPE ? 2 : 1;
-    const damp = exercise.damping;
-    const multiplier = damp ? Math.min(base, Math.max(1, damp.maxMultiplier)) : base;
-    if (assisted) {
-      const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held));
-      const removed = tidy2(held - eased);
-      return {
-        weight: eased,
-        reps: minReps,
-        basis: "clean",
-        reason: eased === 0 ? `unassisted \u2014 clean ${shape} with only ${held} lb of help last time` : `\u2212${removed} lb assistance \u2014 clean ${shape} last time`
-      };
-    }
-    const next = snapWeight(held + step * multiplier, exercise, held);
-    const delta = tidy2(next - held);
-    if (multiplier > 1) {
-      return {
-        weight: next,
-        reps: minReps,
-        basis: "clean",
-        reason: amrap && amrap.verdict === "under_loaded" ? `+${delta} lb \u2014 ${amrap.reps} reps to failure on a ${amrap.target}-rep target, that was too light` : `+${delta} lb \u2014 ${shape} at RPE ${tidy2(rpe)}, room to move`
-      };
-    }
-    return {
-      weight: next,
-      reps: minReps,
-      basis: "clean",
-      reason: hasRange ? `+${delta} lb, back to ${minReps} reps \u2014 hit ${shape} last time` : `+${delta} lb \u2014 clean ${shape} last time`
-    };
-  }
-  function suggestNonLoad(kind, sessions, exercise) {
-    const real = sessions.filter((entry) => workingSets(entry).length > 0);
-    const read = kind === "reps_only" ? topWorkingReps : kind === "time" ? topWorkingSeconds : topWorkingMetres;
-    const unit = kind === "reps_only" ? " reps" : kind === "time" ? "s" : "m";
-    const step = kind === "reps_only" ? 1 : kind === "time" ? exercise.incrementSeconds || DEFAULT_SECONDS_STEP : exercise.incrementMetres || DEFAULT_METRES_STEP;
-    const put = (value, basis, reason) => ({
-      kind,
-      weight: null,
-      reps: kind === "reps_only" ? value : null,
-      seconds: kind === "time" || kind === "time_distance" ? value : null,
-      metres: kind === "distance" || kind === "time_distance" ? value : null,
-      basis,
-      reason
-    });
-    if (!real.length) {
-      return put(step, "new", `starting at ${step}${unit} \u2014 first time logging this`);
-    }
-    const last = real[real.length - 1];
-    const current = read(last);
-    const sets = workingSets(last).length;
-    if ((last.sets || []).some((set) => set.fail)) {
-      return put(current, "miss", `holding at ${current}${unit} \u2014 missed the last set`);
-    }
-    const previous = real.length > 1 ? read(real[real.length - 2]) : 0;
-    if (previous > 0 && current < previous) {
-      return put(current, "miss", `holding at ${current}${unit} \u2014 down from ${previous}${unit} last time`);
-    }
-    return put(current + step, "clean", `+${step}${unit} \u2014 clean ${sets}\xD7${current}${unit} last time`);
-  }
-  function suggestTarget(history, exercise, now) {
-    const all = realSessions2(history);
-    const declared = exercise.kind;
-    const kind = declared || (all.length ? entryKind(all[all.length - 1]) : DEFAULT_SET_KIND);
-    const sessions = declared ? all.filter((entry) => entryKind(entry) === kind) : all;
-    if (kind !== "reps_weight") return suggestNonLoad(kind, sessions, exercise);
-    const answer = suggestLoad(sessions, exercise, now);
-    return {
-      kind: "reps_weight",
-      weight: answer.weight,
-      reps: answer.reps,
-      seconds: null,
-      metres: null,
-      basis: answer.basis,
-      reason: answer.reason
-    };
-  }
-
-  // lib/train/records.ts
-  var E1RM_MAX_REPS = 10;
-  var ROLLING_PR_DAYS = 365;
-  function epley1RM(weight, reps) {
-    if (!Number.isFinite(weight) || !Number.isFinite(reps)) return null;
-    if (weight <= 0 || reps < 1 || reps > E1RM_MAX_REPS) return null;
-    if (reps === 1) return weight;
-    return weight * (1 + reps / 30);
-  }
-  function eligible(entry, opts) {
-    if (entry.off) return false;
-    if (opts.excludeDate && entry.date === opts.excludeDate) return false;
-    if (opts.sinceDate && entry.date < opts.sinceDate) return false;
-    return true;
-  }
-  function bestE1RM(history, opts = {}) {
-    let best = null;
-    for (const entry of history || []) {
-      if (!eligible(entry, opts)) continue;
-      for (const set of workingSets(entry)) {
-        if (setKind(set) !== "reps_weight" || set.assisted) continue;
-        const weight = setWeight(entry, set);
-        const reps = set.r || 0;
-        const value = epley1RM(weight, reps);
-        if (value == null) continue;
-        if (!best || value > best.value) best = { value, weight, reps, date: entry.date };
-      }
-    }
-    return best;
-  }
-  function bestRepsAtWeight(history, weight, opts = {}) {
-    let best = 0;
-    for (const entry of history || []) {
-      if (!eligible(entry, opts)) continue;
-      for (const set of workingSets(entry)) {
-        if (setWeight(entry, set) === weight) best = Math.max(best, set.r || 0);
-      }
-    }
-    return best;
-  }
-  function bestRepsAnywhere(history, opts = {}) {
-    let best = 0;
-    for (const entry of history || []) {
-      if (!eligible(entry, opts)) continue;
-      best = Math.max(best, topWorkingReps(entry));
-    }
-    return best;
-  }
-  var NO_PR = { kind: null, scope: null, e1rm: null, unit: null };
-  function bestBy(history, pick, opts) {
-    let best = 0;
-    for (const entry of history || []) {
-      if (!eligible(entry, opts)) continue;
-      best = Math.max(best, pick(entry));
-    }
-    return best;
-  }
-  function leastAssistance(history, opts) {
-    let best = null;
-    for (const entry of history || []) {
-      if (!eligible(entry, opts)) continue;
-      for (const set of workingSets(entry)) {
-        if (!set.assisted) continue;
-        const help = setWeight(entry, set);
-        if (best == null || help < best) best = help;
-      }
-    }
-    return best;
-  }
-  function dateKey3(ms) {
-    const d = new Date(ms);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  }
-  function shiftDays2(ms, delta) {
-    const d = new Date(ms);
-    d.setDate(d.getDate() + delta);
-    return dateKey3(d.getTime());
-  }
-  function classifyPR(history, candidate, now) {
-    if (!isWorkingSet(candidate)) return NO_PR;
-    const today = dateKey3(now);
-    const base = { excludeDate: today };
-    const kind = candidate.kind || DEFAULT_SET_KIND;
-    if (kind === "time") {
-      const best = bestBy(history, topWorkingSeconds, base);
-      const value2 = candidate.seconds || 0;
-      if (best > 0 && value2 > best) return { kind: "time", scope: "all-time", e1rm: null, unit: "s" };
-      return NO_PR;
-    }
-    if (kind === "distance" || kind === "time_distance") {
-      const best = bestBy(history, topWorkingMetres, base);
-      const value2 = candidate.metres || 0;
-      if (best > 0 && value2 > best) return { kind: "distance", scope: "all-time", e1rm: null, unit: "m" };
-      return NO_PR;
-    }
-    if (kind === "reps_only") {
-      const best = bestBy(history, topWorkingReps, base);
-      const value2 = candidate.reps || 0;
-      if (best > 0 && value2 > best) return { kind: "reps", scope: "all-time", e1rm: null, unit: "reps" };
-      return NO_PR;
-    }
-    if (candidate.assisted) {
-      const best = leastAssistance(history, base);
-      const value2 = candidate.weight || 0;
-      if (best != null && value2 < best) {
-        return { kind: "assist", scope: "all-time", e1rm: null, unit: "lb" };
-      }
-      return NO_PR;
-    }
-    const weight = candidate.weight || 0;
-    const reps = candidate.reps || 0;
-    const rolling = { excludeDate: today, sinceDate: shiftDays2(now, -ROLLING_PR_DAYS) };
-    const value = epley1RM(weight, reps);
-    const allTime = bestE1RM(history, base);
-    if (value != null && allTime) {
-      if (value > allTime.value) return { kind: "e1rm", scope: "all-time", e1rm: value, unit: "lb" };
-      const recent = bestE1RM(history, rolling);
-      if (recent && value > recent.value) {
-        return { kind: "e1rm", scope: "12-month", e1rm: value, unit: "lb" };
-      }
-    }
-    const heaviest = bestBy(history, topWorkingWeight, base);
-    if (heaviest <= 0) return { ...NO_PR, e1rm: value };
-    if (weight > heaviest) return { kind: "weight", scope: "all-time", e1rm: value, unit: "lb" };
-    const repsHere = bestRepsAtWeight(history, weight, base);
-    if (repsHere > 0 && reps > repsHere) {
-      return { kind: "reps", scope: "all-time", e1rm: value, unit: "reps" };
-    }
-    if (value == null && reps > bestRepsAnywhere(history, base)) {
-      return { kind: "reps", scope: "all-time", e1rm: null, unit: "reps" };
-    }
-    return { ...NO_PR, e1rm: value };
-  }
-  function nearMissCue(history, prefill, incrementLb, now) {
-    const value = epley1RM(prefill.weight, prefill.reps);
-    if (value == null) return null;
-    const best = bestE1RM(history, { excludeDate: dateKey3(now) });
-    if (!best) return null;
-    const deficit = best.value - value;
-    if (deficit <= 0) return null;
-    const window = Math.max(incrementLb, 0);
-    if (deficit > window) return null;
-    return `${Math.round(deficit * 10) / 10} lb under your best`;
-  }
-
   // lib/train/streaks.ts
   var DEFAULT_WEEKLY_TARGET = 4;
-  var DAY_MS5 = 864e5;
+  var DAY_MS6 = 864e5;
   function localMidnight6(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
@@ -3530,7 +3614,7 @@ var TrainEngine = (() => {
     for (const date of finishedDates || []) {
       if (!date || seen.has(date)) continue;
       seen.add(date);
-      const age = Math.round((today - localMidnight6(date)) / DAY_MS5);
+      const age = Math.round((today - localMidnight6(date)) / DAY_MS6);
       if (age < 0) continue;
       const bucket = Math.floor(age / 7);
       if (bucket < weeks) buckets[bucket] += 1;
@@ -4444,7 +4528,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
   }
 
   // lib/train/series.ts
-  var DAY_MS6 = 864e5;
+  var DAY_MS7 = 864e5;
   function dateKey5(ms) {
     const d = new Date(ms);
     const p = (n) => String(n).padStart(2, "0");
@@ -4456,7 +4540,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
   }
   function daysAgo2(date, now) {
     const today = localMidnight7(dateKey5(now));
-    return Math.round((today - localMidnight7(date)) / DAY_MS6);
+    return Math.round((today - localMidnight7(date)) / DAY_MS7);
   }
   function e1rmSeries(entries) {
     const points = [];
@@ -5848,6 +5932,7 @@ function renderCard(e, session){
           ? '<button class="actionPill" data-act="repeat">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">Repeat</span></button>'
           : '')
     +   (edit ? '<button class="actionPill" data-act="tune">'+svg(IC.tune,' fill="none" stroke="currentColor"')+'<span class="pl">Tune</span></button>' : '')
+    +   (edit ? '<button class="actionPill" data-act="whatif">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">What if</span></button>' : '')
     /* Edit mode, like everything else that is not log / rest / swap.
        Generating a ramp reads like a training action, but training mode
        is a promise about what renders between sets and widening it here
@@ -6705,6 +6790,7 @@ function handleAct(act, e, session, btn){
   else if(act==='repeat'){ repeatLastSession(e); }
   else if(act==='tune'){ openTune(e); }
   else if(act==='ramp'){ hasWarmupRamp(e) ? clearWarmupRamp(e) : addWarmupRamp(e); }
+  else if(act==='whatif'){ openSimulate(e); }
   else if(act==='menu'){ openMenu(e, session, btn); }
 }
 
@@ -7150,6 +7236,61 @@ function openTrim(){
         closePop();
       };
       scrim.querySelector('#trimCancel').onclick = () => closePop();
+    });
+}
+
+/**
+ * "What if I trained three days instead of four?"
+ *
+ * Both sides are projections run through the real engine, and the screen
+ * says so. Nothing here is written to history.
+ */
+function simScenarioFor(name, sessionsPerWeek, e){
+  const rx = prescription(e);
+  return {
+    name: name,
+    weeks: 8,
+    sessionsPerWeek: sessionsPerWeek,
+    setsPerSession: e.log.length,
+    exercise: Object.assign({}, progressionInputFor(e, rx), {
+      id: e.id, muscles: musclesOf(e.id),
+    }),
+    deloadEvery: null,
+  };
+}
+function openSimulate(e){
+  let a = 3, b = 4;
+  const draw = scrim => {
+    const diff = TrainEngine.compareScenarios(
+      historyBeforeToday(e),
+      simScenarioFor(a + ' days a week', a, e),
+      simScenarioFor(b + ' days a week', b, e),
+      Date.now());
+    scrim.querySelector('#simA').textContent = a;
+    scrim.querySelector('#simB').textContent = b;
+    const vol = Object.keys(diff.volumeDelta).map(m =>
+      m.replace(/_/g,' ') + ' ' + (diff.volumeDelta[m] >= 0 ? '+' : '') + diff.volumeDelta[m] + ' sets/wk').join(', ');
+    scrim.querySelector('#simBody').innerHTML =
+      '<div class="wrLine">' + escapeHtml(diff.text) + '</div>'
+      + '<div class="wrLine mu">' + escapeHtml(diff.a.name) + ': e1RM ' + diff.a.projectedE1rm + '</div>'
+      + '<div class="wrLine mu">' + escapeHtml(diff.b.name) + ': e1RM ' + diff.b.projectedE1rm + '</div>'
+      + (vol ? '<div class="wrLine mu">' + escapeHtml(vol) + '</div>' : '');
+  };
+  openPop(popHead('What if?', e.name)
+    + '<p class="formGist">Both sides are run through the same engine that picks your weights, over eight weeks, starting from your real history. They are projections from your own numbers — not promises, and nothing here is saved.</p>'
+    + '<div class="settingsRow"><span class="bouncyLabel on">Days a week</span><div class="stepper"><button class="step minus" data-a="-1">\u2212</button><span class="stepVal" id="simA">3</span><button class="step" data-a="1">+</button></div></div>'
+    + '<div class="settingsRow"><span class="bouncyLabel on">Against</span><div class="stepper"><button class="step minus" data-b="-1">\u2212</button><span class="stepVal" id="simB">4</span><button class="step" data-b="1">+</button></div></div>'
+    + '<div id="simBody"></div>'
+    + '<div class="popBtns"><button class="pbtn ghost" id="simClose">Close</button></div>',
+    scrim => {
+      draw(scrim);
+      scrim.querySelectorAll('[data-a]').forEach(btn => btn.onclick = () => {
+        a = Math.min(7, Math.max(1, a + (+btn.dataset.a))); draw(scrim);
+      });
+      scrim.querySelectorAll('[data-b]').forEach(btn => btn.onclick = () => {
+        b = Math.min(7, Math.max(1, b + (+btn.dataset.b))); draw(scrim);
+      });
+      scrim.querySelector('#simClose').onclick = () => closePop();
     });
 }
 
