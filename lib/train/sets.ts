@@ -50,7 +50,6 @@ export interface HistorySet {
    * flag that gets written backwards.
    */
   assisted?: boolean
-  banded?: boolean
   rpe?: number
   fail?: boolean
   /**

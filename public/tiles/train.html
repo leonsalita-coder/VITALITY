@@ -1247,7 +1247,7 @@ function todayEntry(e){
 function prFor(e, idx){
   const s=e.log[idx];
   if(!s) return { kind:null, scope:null, e1rm:null };
-  return TrainEngine.classifyPR(histFor(e).filter(x=>!x.off), { weight:s.kg, reps:s.reps, warmup:s.warmup, fail:s.fail }, Date.now());
+  return TrainEngine.classifyPR(histFor(e).filter(x=>!x.off), prCandidateFor(e, idx), Date.now());
 }
 function isPR(e, idx){ return prFor(e, idx).kind !== null; }
 function isBigPR(e, idx){ return prFor(e, idx).kind === 'e1rm'; }
@@ -1570,7 +1570,7 @@ function deloadExplain(dl){
   return '';
 }
 function plateauFor(e){
-  return TrainEngine.detectPlateau(histFor(e).filter(x=>!x.off), { excluded: STATE.deloadExclusions||[] });
+  return TrainEngine.detectPlateau(histFor(e).filter(x=>!x.off), plateauOptsFor());
 }
 /* ---- recovery cross-reference: Vitals is a whitelisted cross-tile read
    (window.Vitality.read), same recovery formula Vitals itself uses
@@ -1809,27 +1809,59 @@ function renderPillGroup(e, rx, idx){
    `reason` verbatim and never composes progression copy — the wording is
    covered by tests in lib/train/progression.ts, not by DOM code here.
    `now` is passed in because lib/train never reads the clock. */
-function suggestionFor(e, rx){
-  const deload = (STATE.deloadStates && STATE.deloadStates[e.id]) || null;
-  return TrainEngine.suggestTarget(histFor(e), {
+/**
+ * What the tile hands the engine for progression.
+ *
+ * Built as its own named value rather than inline at the call site, so the
+ * boundary can be inspected and asserted directly. Every wiring gap this
+ * project has hit was a field that was undefined here while the tile knew
+ * perfectly well what it should be, and an inline object literal gives a
+ * test nothing to hold on to.
+ */
+function progressionInputFor(e, rx){
+  return {
     kg: rx.kg,
     lastKg: e.lastKg,
     reps: rx.reps,
     repRange: repRangeFor(e) || undefined,
     sets: rx.sets,
     loading: loadingFor(e),
-    incrementLb: e.incrementLb,
+    incrementLb: incrementFor(e),
     kind: kindFor(e),
     assisted: flagFor(e,'assisted'),
-    incrementSeconds: e.incrementSeconds,
-    incrementMetres: e.incrementMetres,
-    deload,
-  }, Date.now());
+    incrementSeconds: incrementFor(e,'incrementSeconds'),
+    incrementMetres: incrementFor(e,'incrementMetres'),
+    deload: (STATE.deloadStates && STATE.deloadStates[e.id]) || null,
+  };
 }
-/* The rep range is a property of the LIFT, not of today's session, so it
-   lives beside the exercise definition and survives the session rolling
-   over at midnight. Absent means linear — the engine treats a missing
-   range as [reps, reps], which is exactly the old behaviour. */
+/** Options every plateau read shares — currently the exclusion windows. */
+function plateauOptsFor(){
+  return { excluded: STATE.deloadExclusions || [] };
+}
+/** The set being offered to PR classification. */
+function prCandidateFor(e, idx){
+  const s=e.log[idx];
+  if(!s) return null;
+  return {
+    kind: s.kind || kindFor(e),
+    weight: s.kg,
+    reps: s.reps,
+    seconds: s.s,
+    metres: s.m,
+    assisted: s.assisted || flagFor(e,'assisted'),
+    warmup: s.warmup,
+    fail: s.fail,
+  };
+}
+/** A numeric override stored on the exercise definition, or undefined. */
+function incrementFor(e, field){
+  const info = STATE.customLib && STATE.customLib[e.id];
+  const v = info && info[field || 'incrementLb'];
+  return typeof v === 'number' && v > 0 ? v : undefined;
+}
+function suggestionFor(e, rx){
+  return TrainEngine.suggestTarget(histFor(e), progressionInputFor(e, rx), Date.now());
+}
 /* Kind, perSide and assisted live with the exercise definition rather than
    the session, so they survive the day rolling over. Absent means
    reps_weight and false — exactly how every existing lift already reads. */
@@ -2640,10 +2672,21 @@ function showApply(res, session, result){
   const used=new Set(session.ex.map(x=>x.id));
   const defs=(res.exercises||[]).map(info=>{
     const id=slugifyAvoiding(info.name||'exercise', used); used.add(id);
+    /* The coach is the SECOND path that creates exercises, and it has to
+       validate exactly like the classifier does — otherwise every lift it
+       generates silently arrives as reps_weight with no rep range, and a
+       generated plank gets told to add five pounds. */
+    const c=TrainEngine.normalizeClassification(info);
     STATE.customLib=STATE.customLib||{};
-    STATE.customLib[id]={ equipment:info.equipment||'', primary:info.primary||[], secondary:info.secondary||[], gist:info.gist||'', steps:info.steps||[], cues:info.cues||[] };
-    const sets=Math.max(1,Math.min(8,Math.round(info.startingSets)||3));
-    return { id, name:info.name||'Exercise', tier:info.tier||2, sets, reps:Math.max(1,Math.round(info.startingReps)||10), kg:Number.isFinite(info.startingKg)?info.startingKg:0, perHand:false, rest:Math.max(30,Math.round(info.restSeconds)||90), lastKg:lastKgFromHistory(id), pinned:false, collapsed:false, deload:false, note:'', log:Array(sets).fill(null) };
+    STATE.customLib[id]={
+      equipment:info.equipment||'', primary:info.primary||[], secondary:info.secondary||[],
+      gist:info.gist||'', steps:info.steps||[], cues:info.cues||[],
+      kind:c.kind,
+      perSide:c.perSide||undefined,
+      assisted:c.assisted||undefined,
+      repRange:c.repRange||undefined,
+    };
+    return { id, name:info.name||'Exercise', tier:c.tier, sets:c.sets, reps:c.reps, kg:c.weight, perHand:c.perSide, rest:c.rest, lastKg:lastKgFromHistory(id), pinned:false, collapsed:false, deload:false, note:'', log:Array(c.sets).fill(null) };
   });
   const warmup=(res.warmup||[]).map(t=>({text:t, done:false}));
   const cooldown=(res.cooldown||[]).map(t=>({text:t, done:false}));
