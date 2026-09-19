@@ -21,21 +21,9 @@ export type ProgressionBasis = 'clean' | 'miss' | 'deload' | 'layoff' | 'new'
 /** How weight can physically be added to this movement. */
 export type LoadingStyle = 'barbell' | 'dumbbell' | 'stack' | 'free'
 
-export interface HistorySet {
-  /** Reps completed. */
-  r?: number
-  fail?: boolean
-}
+import { topWorkingWeight, workingSets, type HistoryEntry, type HistorySet } from './sets'
 
-export interface HistoryEntry {
-  /** Local-time YYYY-MM-DD. */
-  date: string
-  /** Top weight for the session, in pounds. */
-  kg: number
-  sets?: HistorySet[]
-  /** A logged rest day — carries no training information. */
-  off?: boolean
-}
+export type { HistoryEntry, HistorySet }
 
 export interface ProgressionExercise {
   /** Currently prescribed weight, pounds. */
@@ -180,12 +168,12 @@ function findLayoff(sessions: HistoryEntry[], now: number): LayoffState | null {
   const last = sessions[sessions.length - 1]
   const trailing = daysSince(last.date, now)
   if (trailing >= LAYOFF_DAYS) {
-    return { days: trailing, priorWeight: last.kg, sessionsSince: 0 }
+    return { days: trailing, priorWeight: topWorkingWeight(last), sessionsSince: 0 }
   }
   for (let i = sessions.length - 1; i > 0; i--) {
     const gap = daysSince(sessions[i - 1].date, localMidnight(sessions[i].date))
     if (gap >= LAYOFF_DAYS) {
-      return { days: gap, priorWeight: sessions[i - 1].kg, sessionsSince: sessions.length - i }
+      return { days: gap, priorWeight: topWorkingWeight(sessions[i - 1]), sessionsSince: sessions.length - i }
     }
   }
   return null
@@ -255,9 +243,15 @@ export function suggestWeight(
     }
   }
 
-  const sets = last.sets || []
-  const missedLast = sets.some((set) => set.fail)
-  const held = tidy(last.kg)
+  /* Warm-ups are in the record but are not evidence: counting them lets a
+     light ramp-up set read as a failed working session and a heavy warm-up
+     single read as the working weight. A miss is still read off the raw
+     list, because a missed set is information even though it is not work. */
+  const sets = workingSets(last)
+  const missedLast = (last.sets || []).some((set) => set.fail)
+  /* With no working sets to read, fall back to the weight the session
+     recorded — holding there beats dropping to bodyweight. */
+  const held = tidy(topWorkingWeight(last) || last.kg || 0)
 
   const layoff = findLayoff(sessions, now)
   if (layoff) {

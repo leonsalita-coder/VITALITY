@@ -437,3 +437,60 @@ describe('ramp vs. evidence', () => {
     expect(s.weight).toBeLessThan(200)
   })
 })
+
+/* ────────────────────────────────────────────────────────────────────
+   Warm-ups are not evidence. The engine must read only working sets.
+   ──────────────────────────────────────────────────────────────────── */
+describe('warm-ups are excluded from progression', () => {
+  it('reads the working sets and ignores the ramp-up', () => {
+    // 2 warm-ups then 3 clean working sets at 185
+    const session: HistoryEntry = {
+      date: '2026-09-16', kg: 185,
+      sets: [
+        { w: 95, r: 8, warmup: true },
+        { w: 135, r: 5, warmup: true },
+        { w: 185, r: 5 }, { w: 185, r: 5 }, { w: 185, r: 5 },
+      ],
+    }
+    const s = suggestWeight([session], ex({ reps: 5, loading: 'barbell' }), at('2026-09-18'))
+    expect(s.basis).toBe('clean')
+    expect(s.weight).toBe(190)
+    // three working sets, not five
+    expect(s.reason).toBe('+5 lb — clean 3×5 last time')
+  })
+
+  it('does not let a light warm-up read as a failed working session', () => {
+    // a 95lb warm-up double would look like "short of 5 reps" if counted
+    const session: HistoryEntry = {
+      date: '2026-09-16', kg: 185,
+      sets: [{ w: 95, r: 2, warmup: true }, { w: 185, r: 5 }, { w: 185, r: 5 }],
+    }
+    const s = suggestWeight([session], ex({ reps: 5, loading: 'barbell' }), at('2026-09-18'))
+    expect(s.basis).toBe('clean')
+  })
+
+  it('does not let a heavy warm-up single inflate the working weight', () => {
+    const session: HistoryEntry = {
+      date: '2026-09-16', kg: 185,
+      sets: [{ w: 225, r: 1, warmup: true }, { w: 185, r: 5 }, { w: 185, r: 5 }],
+    }
+    const s = suggestWeight([session], ex({ reps: 5, loading: 'barbell' }), at('2026-09-18'))
+    expect(s.weight).toBe(190)
+  })
+
+  it('treats a session of nothing but warm-ups as nothing logged', () => {
+    const session: HistoryEntry = {
+      date: '2026-09-16', kg: 95,
+      sets: [{ w: 95, r: 8, warmup: true }, { w: 95, r: 8, warmup: true }],
+    }
+    const s = suggestWeight([session], ex({ reps: 5 }), at('2026-09-18'))
+    expect(s.basis).toBe('miss')
+  })
+
+  it('still counts sets with no warmup field — existing history', () => {
+    const legacy: HistoryEntry = { date: '2026-09-16', kg: 185, sets: [{ r: 5 }, { r: 5 }, { r: 5 }] }
+    const s = suggestWeight([legacy], ex({ reps: 5, loading: 'barbell' }), at('2026-09-18'))
+    expect(s.basis).toBe('clean')
+    expect(s.weight).toBe(190)
+  })
+})

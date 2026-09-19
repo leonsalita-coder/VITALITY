@@ -98,11 +98,56 @@
   .pillWhy.why-clean { color:var(--signal); }
   .pillWhy.why-layoff, .pillWhy.why-deload { color:var(--gold); }
 
-  /* The rest bar itself is still unstyled from the ground-up rebuild; this
-     is only enough for overtime to read as overtime rather than as a timer
-     that broke. */
-  .restbar .restTime { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  /* warm-up toggle — deliberately quiet. It is a correction, not an action,
+     and it should never compete with "Hit it". */
+  .pillWarm { flex:none; width:22px; height:22px; border-radius:7px;
+    border:1px solid var(--hair-strong); background:transparent; color:var(--muted-2);
+    font-family:var(--mono); font-size:11px; font-weight:700; line-height:1;
+    transition:background var(--d1) var(--ease-out), color var(--d1) var(--ease-out); }
+  .pillWarm.on { background:var(--e4); color:var(--text); }
+  .pill.warmup { opacity:.55; }
+  /* a weight or rep record: a dot, not a takeover */
+  .pillPrDot { display:inline-block; width:5px; height:5px; border-radius:50%;
+    background:var(--gold); margin-right:5px; vertical-align:middle; }
+  /* the near-miss cue, before the set */
+  .pillNear { font-size:10.5px; font-weight:600; color:var(--gold); margin-right:8px;
+    white-space:nowrap; }
+
+  /* ==== REST BAR — an instrument face, not a toast. It sits inside the
+     lift card while the clock runs: a ring that drains, a mono readout,
+     and two coarse nudges either side. Overtime flips the whole bar to
+     gold rather than only the number, because at a glance across a bench
+     the colour is the only thing that actually reads. ============== */
+  .restbar { display:flex; align-items:center; gap:var(--sp3); margin-top:var(--sp3);
+    padding:10px var(--sp3); border-radius:var(--r-md);
+    background:var(--e2); border:1px solid var(--hair);
+    box-shadow:0 10px 24px -18px rgba(0,0,0,.8);
+    animation:restIn var(--d3) var(--ease-out) both; }
+  @keyframes restIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+  .restbar .restMid { flex:1; min-width:0; display:flex; align-items:center; gap:10px; }
+  .restbar .restRing { width:34px; height:34px; flex:none; transform:rotate(-90deg); }
+  .restbar .restRingTrack { fill:none; stroke:var(--hair-strong); stroke-width:3; }
+  .restbar .restRingFill { fill:none; stroke:var(--signal); stroke-width:3; stroke-linecap:round;
+    transition:stroke-dashoffset var(--d1) linear, stroke var(--d2) var(--ease-out); }
+  .restbar .restTime { font-family:var(--mono); font-variant-numeric:tabular-nums;
+    font-size:17px; font-weight:600; letter-spacing:-.01em; color:var(--text); min-width:52px; }
+  .restbar .restLabel { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.01em; }
+  .restbar .restStep { flex:none; padding:7px 9px; border-radius:var(--r-sm);
+    border:1px solid var(--hair-strong); background:transparent; color:var(--muted);
+    font-family:var(--mono); font-size:11px; font-weight:600;
+    transition:background var(--d1) var(--ease-out), color var(--d1) var(--ease-out); }
+  .restbar .restStep:active { background:var(--e4); color:var(--text); transform:scale(.94); }
+  .restbar .restX { flex:none; width:24px; height:24px; border-radius:50%;
+    border:1px solid var(--hair); background:transparent; color:var(--muted-2);
+    font-size:14px; line-height:1; }
+  .restbar .restX:active { color:var(--text); }
+  /* overtime — the rest is over and the number is now counting up */
+  .restbar.over { border-color:rgba(245,166,35,.32); background:linear-gradient(var(--e2),var(--e2)) padding-box; }
+  .restbar.over .restRingFill { stroke:var(--gold); }
   .restbar.over .restTime { color:var(--gold); }
+  .restbar.over .restLabel { color:var(--gold); opacity:.75; }
+  @media (prefers-reduced-motion:reduce) { .restbar { animation:none; } }
 </style>
 </head>
 <body>
@@ -230,10 +275,48 @@ var TrainEngine = (() => {
   // lib/train/index.ts
   var index_exports = {};
   __export(index_exports, {
+    E1RM_MAX_REPS: () => E1RM_MAX_REPS,
     ENGINE_VERSION: () => ENGINE_VERSION,
     LAYOFF_DAYS: () => LAYOFF_DAYS,
-    suggestWeight: () => suggestWeight
+    ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
+    bestE1RM: () => bestE1RM,
+    classifyPR: () => classifyPR,
+    epley1RM: () => epley1RM,
+    isWorkingSet: () => isWorkingSet,
+    nearMissCue: () => nearMissCue,
+    setWeight: () => setWeight,
+    suggestWeight: () => suggestWeight,
+    topWorkingReps: () => topWorkingReps,
+    topWorkingWeight: () => topWorkingWeight,
+    workingSets: () => workingSets,
+    workingVolume: () => workingVolume
   });
+
+  // lib/train/sets.ts
+  function isWorkingSet(set) {
+    return !!set && set.fail !== true && set.warmup !== true;
+  }
+  function workingSets(entry) {
+    return (entry.sets || []).filter(isWorkingSet);
+  }
+  function setWeight(entry, set) {
+    return typeof set.w === "number" ? set.w : entry.kg || 0;
+  }
+  function workingVolume(entry, opts = {}) {
+    const sides = opts.perSide ? 2 : 1;
+    return workingSets(entry).reduce(
+      (sum, set) => sum + setWeight(entry, set) * (set.r || 0) * sides,
+      0
+    );
+  }
+  function topWorkingWeight(entry) {
+    const weights = workingSets(entry).map((set) => setWeight(entry, set));
+    return weights.length ? Math.max(...weights) : 0;
+  }
+  function topWorkingReps(entry) {
+    const reps = workingSets(entry).map((set) => set.r || 0);
+    return reps.length ? Math.max(...reps) : 0;
+  }
 
   // lib/train/progression.ts
   var LAYOFF_DAYS = 14;
@@ -296,12 +379,12 @@ var TrainEngine = (() => {
     const last = sessions[sessions.length - 1];
     const trailing = daysSince(last.date, now);
     if (trailing >= LAYOFF_DAYS) {
-      return { days: trailing, priorWeight: last.kg, sessionsSince: 0 };
+      return { days: trailing, priorWeight: topWorkingWeight(last), sessionsSince: 0 };
     }
     for (let i = sessions.length - 1; i > 0; i--) {
       const gap = daysSince(sessions[i - 1].date, localMidnight(sessions[i].date));
       if (gap >= LAYOFF_DAYS) {
-        return { days: gap, priorWeight: sessions[i - 1].kg, sessionsSince: sessions.length - i };
+        return { days: gap, priorWeight: topWorkingWeight(sessions[i - 1]), sessionsSince: sessions.length - i };
       }
     }
     return null;
@@ -343,9 +426,9 @@ var TrainEngine = (() => {
         reason: `starting at ${describeWeight(weight)} \u2014 first time logging this`
       };
     }
-    const sets = last.sets || [];
-    const missedLast = sets.some((set) => set.fail);
-    const held = tidy(last.kg);
+    const sets = workingSets(last);
+    const missedLast = (last.sets || []).some((set) => set.fail);
+    const held = tidy(topWorkingWeight(last) || last.kg || 0);
     const layoff = findLayoff(sessions, now);
     if (layoff) {
       const ramp = rampWeights(layoff.priorWeight, layoff.days, exercise);
@@ -437,6 +520,108 @@ var TrainEngine = (() => {
       basis: "clean",
       reason: hasRange ? `+${delta} lb, back to ${minReps} reps \u2014 hit ${shape} last time` : `+${delta} lb \u2014 clean ${shape} last time`
     };
+  }
+
+  // lib/train/records.ts
+  var E1RM_MAX_REPS = 10;
+  var ROLLING_PR_DAYS = 365;
+  function epley1RM(weight, reps) {
+    if (!Number.isFinite(weight) || !Number.isFinite(reps)) return null;
+    if (weight <= 0 || reps < 1 || reps > E1RM_MAX_REPS) return null;
+    if (reps === 1) return weight;
+    return weight * (1 + reps / 30);
+  }
+  function eligible(entry, opts) {
+    if (entry.off) return false;
+    if (opts.excludeDate && entry.date === opts.excludeDate) return false;
+    if (opts.sinceDate && entry.date < opts.sinceDate) return false;
+    return true;
+  }
+  function bestE1RM(history, opts = {}) {
+    let best = null;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      for (const set of workingSets(entry)) {
+        const weight = setWeight(entry, set);
+        const reps = set.r || 0;
+        const value = epley1RM(weight, reps);
+        if (value == null) continue;
+        if (!best || value > best.value) best = { value, weight, reps, date: entry.date };
+      }
+    }
+    return best;
+  }
+  function bestWorkingWeight(history, opts = {}) {
+    let best = 0;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      best = Math.max(best, topWorkingWeight(entry));
+    }
+    return best;
+  }
+  function bestRepsAtWeight(history, weight, opts = {}) {
+    let best = 0;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      for (const set of workingSets(entry)) {
+        if (setWeight(entry, set) === weight) best = Math.max(best, set.r || 0);
+      }
+    }
+    return best;
+  }
+  function bestRepsAnywhere(history, opts = {}) {
+    let best = 0;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      best = Math.max(best, topWorkingReps(entry));
+    }
+    return best;
+  }
+  var NO_PR = { kind: null, scope: null, e1rm: null };
+  function dateKey(ms) {
+    const d = new Date(ms);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  function shiftDays(ms, delta) {
+    const d = new Date(ms);
+    d.setDate(d.getDate() + delta);
+    return dateKey(d.getTime());
+  }
+  function classifyPR(history, candidate, now) {
+    if (!isWorkingSet(candidate)) return NO_PR;
+    const today = dateKey(now);
+    const base = { excludeDate: today };
+    const rolling = { excludeDate: today, sinceDate: shiftDays(now, -ROLLING_PR_DAYS) };
+    const value = epley1RM(candidate.weight, candidate.reps);
+    const allTime = bestE1RM(history, base);
+    if (value != null && allTime) {
+      if (value > allTime.value) return { kind: "e1rm", scope: "all-time", e1rm: value };
+      const recent = bestE1RM(history, rolling);
+      if (recent && value > recent.value) return { kind: "e1rm", scope: "12-month", e1rm: value };
+    }
+    const heaviest = bestWorkingWeight(history, base);
+    if (heaviest <= 0) return { ...NO_PR, e1rm: value };
+    if (candidate.weight > heaviest) return { kind: "weight", scope: "all-time", e1rm: value };
+    const repsHere = bestRepsAtWeight(history, candidate.weight, base);
+    if (repsHere > 0 && candidate.reps > repsHere) {
+      return { kind: "reps", scope: "all-time", e1rm: value };
+    }
+    if (value == null && candidate.reps > bestRepsAnywhere(history, base)) {
+      return { kind: "reps", scope: "all-time", e1rm: null };
+    }
+    return { ...NO_PR, e1rm: value };
+  }
+  function nearMissCue(history, prefill, incrementLb, now) {
+    const value = epley1RM(prefill.weight, prefill.reps);
+    if (value == null) return null;
+    const best = bestE1RM(history, { excludeDate: dateKey(now) });
+    if (!best) return null;
+    const deficit = best.value - value;
+    if (deficit <= 0) return null;
+    const window = Math.max(incrementLb, 0);
+    if (deficit > window) return null;
+    return `${Math.round(deficit * 10) / 10} lb under your best`;
   }
 
   // lib/train/index.ts
@@ -537,12 +722,28 @@ function curSession(){
 function sortedEx(session){ return session.ex.map((e,i)=>({e,i})).sort((a,b)=> (b.e.pinned-a.e.pinned)).map(o=>o.e); }
 function prescription(e){ const kg = e.deload ? r1(e.kg*0.9) : e.kg; return { kg, reps:e.reps, sets:e.sets, rest:e.rest }; }
 function classifySet(e, idx){ const s=e.log[idx]; if(!s) return 'empty'; if(s.fail) return 'failed'; return 'done'; }
-function bestKgExclToday(e){ const real=histFor(e).filter(s=>!s.off && s.date!==today); return real.length? Math.max(...real.map(s=>s.kg)) : 0; }
-function bestRepsAt(e, kg){ const real=histFor(e).filter(s=>!s.off && s.kg===kg); let m=0; real.forEach(s=>{ const t=Math.max(...s.sets.filter(x=>!x.fail).map(x=>x.r||0),0); if(t>m)m=t; }); return m; }
-function isPR(e, idx){ const s=e.log[idx]; if(!s||s.fail) return false; const pb=bestKgExclToday(e); if(pb<=0) return false; if(s.kg>pb) return true; if(s.kg===pb && s.reps>bestRepsAt(e,pb)) return true; return false; }
-function exDoneCount(e){ return e.log.filter(s=>s&&!s.fail).length; }
+/* A logged set is working unless it is a miss or a flagged warm-up.
+   Absent warmup reads false, so everything already logged stays working. */
+function logIsWorking(s){ return !!s && !s.fail && s.warmup!==true; }
+function logWorking(e){ return e.log.filter(logIsWorking); }
+/* Today's session as a history entry, so engine readers see one shape. */
+function todayEntry(e){
+  return { date:today, kg:e.kg, sets:e.log.filter(Boolean).map(s=>({ w:s.kg, r:s.reps, fail:s.fail, warmup:s.warmup })) };
+}
+/* Estimated 1RM is the canonical record — it ranks 245×3 above 225×5 the
+   way a lifter already reads their own training, and it does not fire
+   every session the way "heaviest weight" does. classifyPR returns 'e1rm'
+   for the celebration and 'weight'/'reps' for a quiet dot. */
+function prFor(e, idx){
+  const s=e.log[idx];
+  if(!s) return { kind:null, scope:null, e1rm:null };
+  return TrainEngine.classifyPR(histFor(e).filter(x=>!x.off), { weight:s.kg, reps:s.reps, warmup:s.warmup, fail:s.fail }, Date.now());
+}
+function isPR(e, idx){ return prFor(e, idx).kind !== null; }
+function isBigPR(e, idx){ return prFor(e, idx).kind === 'e1rm'; }
+function exDoneCount(e){ return logWorking(e).length; }
 function exComplete(e){ return e.log.length>0 && e.log.every(s=>s&&!s.fail); }
-function exHasPR(e){ return e.log.some((s,i)=>isPR(e,i)); }
+function exHasPR(e){ return e.log.some((s,i)=>isBigPR(e,i)); }
 function exHasMiss(e){ return e.log.some(s=>s&&s.fail); }
 function sessionTotals(session){ if(session.off) return {logged:0,total:0}; let logged=0,total=0; session.ex.forEach(e=>{ total+=e.log.length; logged+=e.log.filter(s=>s).length; }); return {logged,total}; }
 
@@ -656,7 +857,7 @@ function renderHeroExtras(){
 /* ---- rail: a pinned telemetry strip, always visible while scrolling - */
 function sessionVolume(session){
   let total=0;
-  session.ex.forEach(e=>{ e.log.forEach(s=>{ if(s && !s.fail) total += s.kg*(s.reps||0)*(e.perHand?2:1); }); });
+  session.ex.forEach(e=>{ total += TrainEngine.workingVolume(todayEntry(e), { perSide:!!e.perHand }); });
   return Math.round(total);
 }
 function renderRail(){
@@ -840,9 +1041,9 @@ function detectPlateau(e){
   const h=histFor(e).filter(s=>!s.off);
   if(h.length<WINDOW+1) return null;
   const recent=h.slice(-WINDOW);
-  const weights=recent.map(s=>s.kg);
+  const weights=recent.map(s=>TrainEngine.topWorkingWeight(s)||s.kg||0);
   const flatOrDown=weights.every((w,i)=> i===0 || w<=weights[i-1]);
-  const topReps=s=>Math.max(0,...(s.sets||[]).filter(x=>!x.fail).map(x=>x.r||0));
+  const topReps=s=>TrainEngine.topWorkingReps(s);
   const reps=recent.map(topReps);
   const repsFlatOrDown=reps.every((r,i)=> i===0 || r<=reps[i-1]);
   if(flatOrDown && repsFlatOrDown) return { sessions:WINDOW, weight:weights[weights.length-1] };
@@ -1059,8 +1260,13 @@ function renderPill(e, rx, idx){
   /* tint the input only when the suggestion is an actual step up */
   const bumped = !logged && !!suggestion && suggestion.basis==='clean' && suggestion.weight>0;
   const prefillR = s?s.reps:(suggestion?suggestion.reps:rx.reps);
-  const pr = isPR(e, idx);
-  const row=document.createElement('div'); row.className='pill '+(kind==='failed'?'failed':(kind==='done'?'done':''))+(logged?'':' tappable');
+  /* Anticipation beats confetti: if the prefill lands just under the best
+     estimated 1RM, say so before the set rather than celebrating after. */
+  const nearMiss = logged ? null : TrainEngine.nearMissCue(
+    histFor(e).filter(x=>!x.off), { weight:prefillKg, reps:prefillR },
+    (STATE.customLib&&STATE.customLib[e.id]&&STATE.customLib[e.id].incrementLb)||5, Date.now());
+  const pr = prFor(e, idx);
+  const row=document.createElement('div'); row.className='pill '+(kind==='failed'?'failed':(kind==='done'?'done':''))+((s&&s.warmup)?' warmup':'')+(logged?'':' tappable');
   let status='done';
   if(kind==='done'){ const dr=s.reps-rx.reps; if(dr>0) status='done <span class="sub">· +'+dr+'</span>'; else if(dr<0) status='done <span class="sub">· '+s.reps+' reps</span>'; else status='done'; }
   else if(kind==='failed') status='missed';
@@ -1074,11 +1280,15 @@ function renderPill(e, rx, idx){
     + '</span>'
     + '<span class="pillSpacer"></span>'
     + '<div class="pillActions">'
+    /* one tap, on the row, mid-session — a warm-up flag buried in a popup
+       would never get used, and an unflagged warm-up pollutes everything */
+    +   '<button class="pillWarm'+(s&&s.warmup?' on':'')+'" data-act="warmup" aria-pressed="'+(s&&s.warmup?'true':'false')+'" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button>'
     + (logged
-        ? '<span class="pillStatus">'+(pr?'<span class="pillPr">★ </span>':'')+status+'</span>'
+        ? '<span class="pillStatus">'+(pr.kind==='e1rm'?'<span class="pillPr">★ </span>':(pr.kind?'<span class="pillPrDot" title="'+(pr.kind==='weight'?'Heaviest yet':'Most reps at this weight')+'"></span>':''))+status+'</span>'
           + (kind==='done'?'<button class="pillDrop" aria-label="Add drop set">+ Drop</button>':'')
           + '<button class="pillReset" aria-label="Undo set">'+IC_reset()+'</button>'
-        : '<button class="pillHit" aria-label="Log set">Hit it →</button><button class="pillMiss" aria-label="Mark missed">Miss</button>')
+        : (nearMiss?'<span class="pillNear">'+escapeHtml(nearMiss)+'</span>':'')
+          + '<button class="pillHit" aria-label="Log set">Hit it →</button><button class="pillMiss" aria-label="Mark missed">Miss</button>')
     + '</div>';
   const wIn=row.querySelector('.w'), rIn=row.querySelector('.r');
   const commit=()=>{ const kg=parseFloat(wIn.value); const reps=Math.round(parseFloat(rIn.value)); if(!Number.isFinite(kg)||kg<0||!Number.isFinite(reps)||reps<0) return; if(reps===0){ doLog(e, idx, kg, 0, true); } else { doLog(e, idx, kg, reps, false); } };
@@ -1089,6 +1299,13 @@ function renderPill(e, rx, idx){
   const miss=row.querySelector('.pillMiss'); if(miss) miss.addEventListener('click',ev=>{ stop(ev); const kg=parseFloat(wIn.value)|| (e.lastKg!=null?e.lastKg:rx.kg); doLog(e, idx, kg, 0, true); });
   const reset=row.querySelector('.pillReset'); if(reset) reset.addEventListener('click',ev=>{ stop(ev); e.log[idx]=null; stopRest(e.id); render(); });
   const dropBtn=row.querySelector('.pillDrop'); if(dropBtn) dropBtn.addEventListener('click',ev=>{ stop(ev); addDrop(e, idx); });
+  const warmBtn=row.querySelector('[data-act="warmup"]');
+  if(warmBtn) warmBtn.addEventListener('click',ev=>{
+    stop(ev);
+    if(e.log[idx]) e.log[idx].warmup = !e.log[idx].warmup;
+    else e.log[idx] = { kg:parseFloat(wIn.value)||0, reps:Math.round(parseFloat(rIn.value))||0, warmup:true };
+    rollupToday(e); render();
+  });
   return row;
 }
 function addDrop(e, idx){
@@ -1111,7 +1328,6 @@ function IC_reset(){ return '<svg viewBox="0 0 24 24" stroke-width="1.5" stroke-
 function doLog(e, idx, kg, reps, fail){
   const _sess=curSession(); if(!_sess.startedAt) _sess.startedAt=Date.now();
   const wasComplete = exComplete(e);
-  const pbBefore = bestKgExclToday(e);
   e.log[idx] = fail ? {kg, reps:0, fail:true} : {kg, reps};
   rollupToday(e);
   render();
@@ -1119,11 +1335,14 @@ function doLog(e, idx, kg, reps, fail){
   const card=document.querySelector('.ex[data-id="'+e.id+'"]');
   if(!fail && card){ const pills=card.querySelectorAll('.pill'); const rowEl=pills[idx]; if(rowEl){ rowEl.classList.add('shimmer'); setTimeout(()=>rowEl.classList.remove('shimmer'),820); } }
   // progressive-overload celebration: a logged set that beats your prior best, completing the lift
-  if(!fail && pbBefore>0 && (kg>pbBefore || (kg===pbBefore))){
-    const beats = kg>pbBefore || (kg===pbBefore && reps>bestRepsAt(e,pbBefore));
-    if(beats && !wasComplete && exComplete(e) && card){ card.classList.add('celebrate'); setTimeout(()=>card.classList.remove('celebrate'),1650); celebrate(e, kg, reps); }
+  /* Only an estimated-1RM record earns the takeover. Weight and rep PRs
+     get the quiet dot on the row — they fire too often early on for a
+     celebration to keep meaning anything. */
+  if(isBigPR(e, idx) && !wasComplete && exComplete(e) && card){
+    card.classList.add('celebrate'); setTimeout(()=>card.classList.remove('celebrate'),1650);
+    celebrate(e, kg, reps);
   }
-  if(!fail && (!e.group || isLastInGroup(e, curSession()))) startRest(e);
+  if(logIsWorking(e.log[idx]) && (!e.group || isLastInGroup(e, curSession()))) startRest(e);
 }
 /* ---- supersets / circuits: exercises sharing e.group rest together - */
 function isLastInGroup(e, session){
@@ -1145,7 +1364,17 @@ function ungroup(e){ delete e.group; render(); }
 function rollupToday(e){
   const done = e.log.filter(s=>s&&!s.fail);
   let h = histFor(e).filter(x=>x.date!==today);
-  if(done.length){ const top=done.reduce((a,b)=>b.kg>a.kg?b:a); const sets=e.log.filter(s=>s).map(s=>s.fail?{r:s.reps,fail:true}:{r:s.reps}); h.push({date:today, kg:top.kg, sets}); h.sort((a,b)=>a.date.localeCompare(b.date)); e.lastKg=top.kg; }
+  if(done.length){
+    /* Per-set weight and the warm-up flag are written from here on, so
+       volume and e1RM can tell a ramp-up from the work. Older rows have
+       neither and are read with the entry weight and warmup:false. */
+    const sets=e.log.filter(s=>s).map(s=>({ w:s.kg, r:s.reps, fail:s.fail||undefined, warmup:s.warmup||undefined }));
+    const working=logWorking(e);
+    const top=(working.length?working:done).reduce((a,b)=>b.kg>a.kg?b:a);
+    h.push({date:today, kg:top.kg, sets});
+    h.sort((a,b)=>a.date.localeCompare(b.date));
+    e.lastKg=top.kg;
+  }
   STATE.history[e.id]=h;
   STATE.exerciseNames=STATE.exerciseNames||{}; STATE.exerciseNames[e.id]=e.name;
 }
@@ -1222,9 +1451,10 @@ function sweepRest(){
     const remaining=restRemaining(t);
     if(!t.chimed && remaining<=0){
       t.chimed=true;
-      /* Only chime if zero passed just now. Coming back to a tab that
-         elapsed ten minutes ago and beeping then is worse than silence. */
-      if(remaining>-3) restChime();
+      /* Only chime if zero passed just now — a brief glance away should
+         not eat it, but returning to a tab that elapsed ten minutes ago and
+         beeping then is worse than silence. */
+      if(remaining>-5) restChime();
     }
     updateRest(id);
   });
@@ -1671,6 +1901,14 @@ function openTune(e){
     + stepRow('Rest','trest', mmss(draft.rest), 'rest')
     + '<div class="popBtns"><button class="pbtn ghost" id="tcancel">Cancel</button><button class="pbtn save" id="tsave">Save</button></div>',
     scrim=>{
+      /* The invariant, enforced in one place after every change rather
+         than re-derived inside each branch: a top rep is either off, or
+         strictly above the bottom and no higher than 50. */
+      const clampRange=()=>{
+        if(draft.maxReps==null) return;
+        if(draft.reps>=50){ draft.maxReps=null; return; }
+        draft.maxReps=Math.min(50, Math.max(draft.maxReps, draft.reps+1));
+      };
       const sync=()=>{ scrim.querySelector('#tsets .stepVal').textContent=draft.sets; scrim.querySelector('#treps .stepVal').textContent=draft.reps; scrim.querySelector('#tmax .stepVal').textContent=showMax(); scrim.querySelector('#trest .stepVal').textContent=mmss(draft.rest); };
       scrim.querySelector('#tw').oninput=ev=>{ const v=parseFloat(ev.target.value); if(Number.isFinite(v)) draft.kg=v; };
       scrim.querySelectorAll('.step').forEach(b=> b.onclick=()=>{ const f=b.dataset.f, d=+b.dataset.d;
@@ -1680,12 +1918,14 @@ function openTune(e){
           draft.reps=Math.min(50,Math.max(1,draft.reps+d));
           /* the top of the range has to stay above its bottom; push it up
              rather than silently dropping a range they deliberately set */
-          if(draft.maxReps!=null) draft.maxReps = draft.reps>=50 ? null : Math.max(draft.maxReps, draft.reps+1);
         }
         else if(f==='maxReps'){
           if(draft.maxReps==null){ draft.maxReps = d>0 && draft.reps<50 ? draft.reps+1 : null; }
-          else { const next=draft.maxReps+d; draft.maxReps = next<=draft.reps ? null : Math.min(50,next); }
+          /* stepping below the bottom of the range is how you turn it off */
+          else if(d<0 && draft.maxReps<=draft.reps+1){ draft.maxReps=null; }
+          else { draft.maxReps=draft.maxReps+d; }
         }
+        clampRange();
         sync(); });
       scrim.querySelector('#tcancel').onclick=closePop;
       scrim.querySelector('#tsave').onclick=()=>{ e.kg=Number.isFinite(draft.kg)?draft.kg:e.kg; e.reps=draft.reps; e.rest=draft.rest;
@@ -2014,9 +2254,10 @@ function totalPRsAllTime(){
     const h=(STATE.history[id]||[]).filter(s=>!s.off).slice().sort((a,b)=>a.date.localeCompare(b.date));
     let bestKgSoFar=0, bestRepsAtBest=0;
     h.forEach(entry=>{
-      const topR=Math.max(0,...(entry.sets||[]).filter(x=>!x.fail).map(x=>x.r||0));
-      const isPr = entry.kg>bestKgSoFar || (entry.kg===bestKgSoFar && topR>bestRepsAtBest);
-      if(isPr){ if(bestKgSoFar>0) count++; bestKgSoFar=Math.max(bestKgSoFar,entry.kg); bestRepsAtBest=Math.max(bestRepsAtBest,topR); }
+      const topR=TrainEngine.topWorkingReps(entry);
+      const topW=TrainEngine.topWorkingWeight(entry)||entry.kg||0;
+      const isPr = topW>bestKgSoFar || (topW===bestKgSoFar && topR>bestRepsAtBest);
+      if(isPr){ if(bestKgSoFar>0) count++; bestKgSoFar=Math.max(bestKgSoFar,topW); bestRepsAtBest=Math.max(bestRepsAtBest,topR); }
     });
   });
   return count;
@@ -2038,7 +2279,7 @@ function muscleVolumeBreakdown(){
   Object.keys(STATE.history||{}).forEach(id=>{
     const info=STATE.customLib && STATE.customLib[id];
     const muscles=(info && info.primary && info.primary.length) ? info.primary : ['Other'];
-    const vol=(STATE.history[id]||[]).filter(s=>!s.off).reduce((a,s)=>a+(s.kg||0)*((s.sets&&s.sets.length)||0),0);
+    const vol=(STATE.history[id]||[]).filter(s=>!s.off).reduce((a,s)=>a+TrainEngine.workingVolume(s),0);
     muscles.forEach(m=>{ map[m]=(map[m]||0)+vol/muscles.length; });
   });
   return Object.keys(map).map(m=>({m,vol:r1(map[m])})).sort((a,b)=>b.vol-a.vol);
@@ -2155,12 +2396,16 @@ function growBars(root){
   io.observe(root);
 }
 function exportCSV(){
-  const rows=[['date','exercise','weight_'+STATE.unit,'reps_per_set']];
+  /* Warm-ups are exported — they happened — but flagged, and the working
+     totals beside them exclude warm-ups and misses so a spreadsheet does
+     not have to re-derive the distinction. */
+  const rows=[['date','exercise','weight_'+STATE.unit,'reps_per_set','warmup_flags','working_sets','working_volume']];
   Object.keys(STATE.history||{}).forEach(id=>{
     const name=(STATE.exerciseNames&&STATE.exerciseNames[id])||id;
     (STATE.history[id]||[]).forEach(e=>{
       const reps=(e.sets||[]).map(s=>s.fail?'F':s.r).join('|');
-      rows.push([e.date, name, e.kg, reps]);
+      const flags=(e.sets||[]).map(s=>s.warmup?'W':'-').join('|');
+      rows.push([e.date, name, e.kg, reps, flags, TrainEngine.workingSets(e).length, Math.round(TrainEngine.workingVolume(e))]);
     });
   });
   const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
@@ -2275,7 +2520,7 @@ function aggregateVolumeByDate(){
   Object.keys(STATE.history||{}).forEach(id=>{
     (STATE.history[id]||[]).forEach(entry=>{
       if(entry.off) return;
-      const vol=(entry.kg||0)*((entry.sets&&entry.sets.length)||0);
+      const vol=TrainEngine.workingVolume(entry);
       map[entry.date]=(map[entry.date]||0)+vol;
     });
   });

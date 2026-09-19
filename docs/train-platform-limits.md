@@ -33,7 +33,7 @@ The timer is built so that the part which *can* be correct, is:
   a throttled or dropped tick costs smoothness and never accuracy.
 - **Overtime counts up past zero** rather than freezing at `0:00`. How long
   you actually rested is information; a stopped clock discards it.
-- **The chime is suppressed if it is stale.** If zero passed more than ~3
+- **The chime is suppressed if it is stale.** If zero passed more than ~5
   seconds ago — meaning the tab was hidden through it — the tile marks the
   timer chimed and stays silent. A beep ten minutes late is worse than none.
 - **Audio is created inside a user gesture** (logging a set), because that is

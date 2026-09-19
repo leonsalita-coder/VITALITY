@@ -8,3 +8,5 @@
 export const ENGINE_VERSION = '1.0.0'
 
 export * from './progression'
+export * from './sets'
+export * from './records'
