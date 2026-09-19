@@ -353,6 +353,7 @@ var TrainEngine = (() => {
     currentWeekStreak: () => currentWeekStreak,
     defaultPlateConfig: () => defaultPlateConfig,
     defaultRepRange: () => defaultRepRange,
+    deloadCut: () => deloadCut,
     deloadPlan: () => deloadPlan,
     detectPlateau: () => detectPlateau,
     detectSource: () => detectSource,
@@ -391,10 +392,12 @@ var TrainEngine = (() => {
     planSession: () => planSession,
     plateBreakdown: () => plateBreakdown,
     prefillPlan: () => prefillPlan,
+    profileFor: () => profileFor,
     pushSnapshot: () => pushSnapshot,
     ratios: () => ratios,
     recordBodyweight: () => recordBodyweight,
     remapRoutines: () => remapRoutines,
+    repRangeFor: () => repRangeFor,
     resolveExercise: () => resolveExercise,
     reviewWorthSending: () => reviewWorthSending,
     routineForDate: () => routineForDate,
@@ -411,6 +414,7 @@ var TrainEngine = (() => {
     stateLooksEmpty: () => stateLooksEmpty,
     storageReport: () => storageReport,
     streakLabel: () => streakLabel,
+    streakTarget: () => streakTarget,
     suggestTarget: () => suggestTarget,
     templatePlan: () => templatePlan,
     tokenKey: () => tokenKey,
@@ -421,6 +425,7 @@ var TrainEngine = (() => {
     validateSnapshot: () => validateSnapshot,
     volumeRamp: () => volumeRamp,
     weeklyReview: () => weeklyReview,
+    weeklySetBand: () => weeklySetBand,
     weeklySets: () => weeklySets,
     workingRpe: () => workingRpe,
     workingSetCount: () => workingSetCount,
@@ -586,6 +591,66 @@ var TrainEngine = (() => {
     return values.reduce((a, b) => a + b, 0) / values.length;
   }
 
+  // lib/train/targets.ts
+  var PROFILES = {
+    beginner: {
+      ceiling: 14,
+      floor: 5,
+      deloadMeasured: 0.95,
+      deloadInferred: 0.97,
+      repRanges: [[5, 8], [8, 12], [12, 15]]
+    },
+    intermediate: {
+      ceiling: 20,
+      floor: 10,
+      deloadMeasured: 0.9,
+      deloadInferred: 0.95,
+      repRanges: [[4, 6], [6, 10], [10, 15]]
+    },
+    advanced: {
+      ceiling: 25,
+      floor: 12,
+      deloadMeasured: 0.85,
+      deloadInferred: 0.92,
+      repRanges: [[3, 5], [5, 8], [8, 12]]
+    }
+  };
+  var UNKNOWN = PROFILES.intermediate;
+  function profileFor(age) {
+    return age && PROFILES[age] ? PROFILES[age] : UNKNOWN;
+  }
+  var MIN_TRAILING = 4;
+  var DROP_FRACTION = 0.6;
+  function weeklySetBand(ctx = {}) {
+    const profile = profileFor(ctx.trainingAge);
+    const trailing = ctx.trailingSets;
+    if (typeof trailing === "number" && Number.isFinite(trailing) && trailing >= MIN_TRAILING) {
+      return {
+        floor: Math.round(trailing * DROP_FRACTION * 10) / 10,
+        ceiling: profile.ceiling,
+        floorSource: "trailing"
+      };
+    }
+    if (ctx.trainingAge) {
+      return { floor: profile.floor, ceiling: profile.ceiling, floorSource: "age" };
+    }
+    return { floor: null, ceiling: profile.ceiling, floorSource: "none" };
+  }
+  function deloadCut(age, confidence) {
+    const profile = profileFor(age);
+    return confidence === "measured" ? profile.deloadMeasured : profile.deloadInferred;
+  }
+  function repRangeFor(age, tier) {
+    const ranges = profileFor(age).repRanges;
+    if (tier <= 1) return ranges[0];
+    if (tier >= 3) return ranges[2];
+    return ranges[1];
+  }
+  function streakTarget(statedFrequency, fallback = 4) {
+    if (typeof statedFrequency !== "number" || !Number.isFinite(statedFrequency)) return fallback;
+    return Math.min(14, Math.max(1, Math.round(statedFrequency)));
+  }
+
   // lib/train/deload.ts
   var DELOAD_HOLD_SESSIONS = 2;
   var RECOVERY_FLOOR = 55;
@@ -712,10 +777,9 @@ var TrainEngine = (() => {
     }
     return record;
   }
-  var INTENSITY_CUT = { measured: 0.9, inferred: 0.95 };
   var VOLUME_CUT = 2 / 3;
   var REAPPROACH = 0.95;
-  function deloadPlan(record) {
+  function deloadPlan(record, trainingAge) {
     if (!record) return { weight: null, setsFactor: 1 };
     const round5 = (n) => Math.round(n * 100) / 100;
     if (record.state === "reapproach") {
@@ -726,7 +790,7 @@ var TrainEngine = (() => {
       return { weight: round5(record.priorWeight), setsFactor: VOLUME_CUT };
     }
     return {
-      weight: round5(record.priorWeight * INTENSITY_CUT[record.confidence]),
+      weight: round5(record.priorWeight * deloadCut(trainingAge, record.confidence)),
       setsFactor: 1
     };
   }
@@ -945,7 +1009,7 @@ var TrainEngine = (() => {
     const last = sessions.length ? sessions[sessions.length - 1] : null;
     const [minReps, maxReps] = rangeFor(exercise);
     const hasRange = maxReps > minReps;
-    const plan = deloadPlan(exercise.deload || null);
+    const plan = deloadPlan(exercise.deload || null, exercise.trainingAge);
     if (plan.weight != null && exercise.deload) {
       const weight = snapWeight(plan.weight, exercise, plan.weight);
       if (exercise.deload.state === "reapproach") {
@@ -1375,11 +1439,9 @@ var TrainEngine = (() => {
     "distance",
     "time_distance"
   ];
-  function defaultRepRange(tier, kind) {
+  function defaultRepRange(tier, kind, trainingAge) {
     if (kind !== "reps_weight") return null;
-    if (tier <= 1) return [4, 6];
-    if (tier >= 3) return [10, 15];
-    return [6, 10];
+    return repRangeFor(trainingAge, tier);
   }
   function asKind(raw) {
     return typeof raw === "string" && SET_KINDS.includes(raw) ? raw : DEFAULT_SET_KIND;
@@ -1391,11 +1453,11 @@ var TrainEngine = (() => {
     const n = typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
     return Math.min(max, Math.max(min, n));
   }
-  function normalizeClassification(raw) {
+  function normalizeClassification(raw, trainingAge) {
     const info = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
     const kind = asKind(info.defaultSetKind);
     const tier = info.tier === 1 || info.tier === 2 || info.tier === 3 ? info.tier : 2;
-    const repRange = defaultRepRange(tier, kind);
+    const repRange = defaultRepRange(tier, kind, trainingAge);
     return {
       kind,
       perSide: asFlag(info.perSide),
@@ -1792,8 +1854,27 @@ var TrainEngine = (() => {
     }
     return findings.sort((a, b) => a.text.localeCompare(b.text));
   }
-  function weeklySets(history, index, now) {
-    const rows = attribute(history, index).filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0);
+  function trailingAverage(rows, muscle, now) {
+    const mine = rows.filter((r) => r.muscle === muscle);
+    if (!mine.length) return null;
+    const oldest = mine.reduce((max, r) => Math.max(max, daysAgo(r.date, now)), 0);
+    let total = 0;
+    let covered = 0;
+    for (let week = 1; week <= 4; week++) {
+      const from = week * 7;
+      if (from > oldest) break;
+      covered++;
+      total += mine.filter((r) => {
+        const age = daysAgo(r.date, now);
+        return age >= from && age <= from + 6;
+      }).reduce((n, r) => n + r.sets, 0);
+    }
+    if (covered < 2) return null;
+    return total / covered;
+  }
+  function weeklySets(history, index, now, opts = {}) {
+    const all = attribute(history, index);
+    const rows = all.filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0);
     if (!rows.length) return [];
     const totals = /* @__PURE__ */ new Map();
     for (const row of rows) {
@@ -1805,18 +1886,34 @@ var TrainEngine = (() => {
     const findings = [];
     for (const [muscle, t] of totals) {
       const sets = round(t.sets);
-      if (sets > WEEKLY_SET_BAND[1]) {
+      const band = weeklySetBand({
+        trainingAge: opts.trainingAge,
+        trailingSets: trailingAverage(all, muscle, now)
+      });
+      if (sets > band.ceiling) {
         findings.push({
           kind: "weekly_sets",
           muscle,
-          text: `${label(muscle)} took ${sets} hard sets this week, above the ${WEEKLY_SET_BAND[1]}-set band.`,
+          text: `${label(muscle)} took ${sets} hard sets this week, above the ${band.ceiling}-set band.`,
           estimated: t.estimated
         });
-      } else if (sets > 0 && sets < WEEKLY_SET_BAND[0] && totals.size >= 3) {
+        continue;
+      }
+      if (band.floor == null || sets <= 0 || sets >= band.floor) continue;
+      if (band.floorSource === "trailing") {
         findings.push({
           kind: "weekly_sets",
           muscle,
-          text: `${label(muscle)} got ${sets} hard sets this week, under the ${WEEKLY_SET_BAND[0]}-set band.`,
+          text: `${label(muscle)} got ${sets} hard sets this week, well under your recent average of ${round(band.floor / 0.6)}.`,
+          estimated: t.estimated
+        });
+        continue;
+      }
+      if (totals.size >= 3) {
+        findings.push({
+          kind: "weekly_sets",
+          muscle,
+          text: `${label(muscle)} got ${sets} hard sets this week, under the ${band.floor}-set band.`,
           estimated: t.estimated
         });
       }
@@ -1891,10 +1988,10 @@ var TrainEngine = (() => {
     }
     return findings.sort((a, b) => a.text.localeCompare(b.text));
   }
-  function analyse(history, index, now) {
+  function analyse(history, index, now, opts = {}) {
     return [
       ...frequencyGaps(history, index, now),
-      ...weeklySets(history, index, now),
+      ...weeklySets(history, index, now, opts),
       ...ratios(history, index, now),
       ...volumeRamp(history, index, now)
     ];
@@ -2743,7 +2840,7 @@ var TrainEngine = (() => {
         estimated: false
       });
     }
-    for (const finding of analyse(ctx.history, ctx.index, ctx.now)) {
+    for (const finding of analyse(ctx.history, ctx.index, ctx.now, { trainingAge: ctx.trainingAge })) {
       const signal = fromFinding(finding);
       if (signal) signals.push(signal);
     }
@@ -2834,7 +2931,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
     }
     const hardSetsByMuscle = [...perMuscle.entries()].map(([muscle, sets]) => ({ muscle, sets: round3(sets), band: bandOf(sets) })).sort((a, b) => b.sets - a.sets);
     const quiet = [...trainedEver].filter((m2) => !trainedNow.has(m2)).sort();
-    const findings = analyse(ctx.history, index, ctx.now);
+    const findings = analyse(ctx.history, index, ctx.now, { trainingAge: ctx.trainingAge });
     const quiet_week = sessions === 0 && !findings.length && !moved.length;
     const headline = quiet_week ? "No sessions this week and nothing new in the numbers." : `${sessions} of ${ctx.weeklyTarget} sessions` + (moved.length ? `, ${moved.length} lift${moved.length === 1 ? "" : "s"} up` : "") + (findings.length ? `, ${findings.length} thing${findings.length === 1 ? "" : "s"} to note` : "");
     return {
@@ -3412,7 +3509,9 @@ function seedChecklist(list){ return (list||[]).map(text=>({text, done:false}));
    toggle were at war: taking a correctly programmed rest day broke the
    number, which teaches people to fake-log to protect it. Weeks meeting a
    session target are indifferent to which days the sessions land on. */
-function weeklyTarget(){ return STATE.weeklyTarget || TrainEngine.DEFAULT_WEEKLY_TARGET; }
+/* What they said they intend to train, never a constant. Someone who
+   chooses twice a week is succeeding at twice a week. */
+function weeklyTarget(){ return TrainEngine.streakTarget(STATE.weeklyTarget); }
 function currentStreak(){ return TrainEngine.currentWeekStreak(STATE.finishedDates||[], weeklyTarget(), Date.now()); }
 function streakText(){ return TrainEngine.streakLabel(currentStreak(), weeklyTarget()); }
 /* ---- AI-classified exercises (typed by name, or from the coach) -----
@@ -4012,7 +4111,7 @@ function deloadExplain(dl){
   if(!dl) return '';
   if(dl.state==='flagged') return 'Stalled — watching one more session before doing anything.';
   if(dl.state==='deloading'){
-    const plan=TrainEngine.deloadPlan(dl);
+    const plan=TrainEngine.deloadPlan(dl, trainingAge());
     return dl.kind==='volume'
       ? 'Deloading: same weight, fewer sets, while recovery catches up.'
       : 'Deloading: holding '+plan.weight+' '+STATE.unit+' ('+(dl.confidence==='inferred'?'no recovery data, so a gentle cut':'measured')+').';
@@ -4113,6 +4212,7 @@ async function buildInsightContext(session){
     STATE.history || {},
     TrainEngine.indexFrom(STATE.customLib || {}),
     Date.now(),
+    analysisOptsFor(),
   );
   findings.forEach(f=> lines.push('PATTERN: '+f.text+(f.estimated?' (muscle split is estimated)':'')));
 
@@ -4169,7 +4269,7 @@ function advanceDeloads(session, recoveryAvg){
     const next=TrainEngine.nextDeloadState(cur, ctx(e));
     STATE.deloadStates[e.id]=next;
     if(cur && cur.state!==next.state && next.state==='deloading'){
-      const plan=TrainEngine.deloadPlan(next);
+      const plan=TrainEngine.deloadPlan(next, trainingAge());
       if(plan.weight!=null) applied.push({ name:e.name, from:next.priorWeight, to:plan.weight, kind:next.kind });
     }
   });
@@ -4218,7 +4318,7 @@ async function fetchInsight(session){
       deloadsApplied: applied.map(a=>({ name:a.name, from:a.from, to:a.to, kind:a.kind })),
       plateaus: inputs.plateaus,
       streak: currentStreak(),
-      weeklyTarget: weeklyTarget(),
+      ...athleteContext(),
       firsts: inputs.firsts,
     }, fullGoalContext());
 
@@ -4258,7 +4358,7 @@ function weeklyReviewUncached(){
     customLib: STATE.customLib||{},
     exerciseNames: STATE.exerciseNames||{},
     finishedDates: STATE.finishedDates||[],
-    weeklyTarget: weeklyTarget(),
+    ...athleteContext(),
     now: Date.now(),
   });
 }
@@ -4468,6 +4568,20 @@ function statedMinutes(text){
   const n=parseInt(m[1],10);
   return n>=5 && n<=240 ? n : undefined;
 }
+/* Every threshold that belongs to this athlete rather than to the average
+   lifter, in one place — see lib/train/targets.ts. */
+function trainingAge(){ return STATE.trainingAge || null; }
+
+/* The two fields that scale a threshold to THIS athlete, built once and
+   spread everywhere they are needed. Three separate context literals each
+   carrying their own copy is three chances to forget one, and a forgotten
+   copy fails silently — the app simply goes back to being confidently
+   wrong about somebody. A named builder is something a test can hold. */
+function athleteContext(){
+  return { weeklyTarget: weeklyTarget(), trainingAge: trainingAge() };
+}
+function analysisOptsFor(){ return { trainingAge: athleteContext().trainingAge }; }
+
 function progressionInputFor(e, rx){
   return {
     plates: loadingFor(e)==='barbell' ? plateConfig() : undefined,
@@ -4486,6 +4600,7 @@ function progressionInputFor(e, rx){
     incrementSeconds: incrementFor(e,'incrementSeconds'),
     incrementMetres: incrementFor(e,'incrementMetres'),
     deload: (STATE.deloadStates && STATE.deloadStates[e.id]) || null,
+    trainingAge: trainingAge(),
   };
 }
 /** Options every plateau read shares — currently the exclusion windows. */
@@ -5756,7 +5871,7 @@ function openSwap(e){
              data model. normalizeClassification checks the kind against a
              closed list and clamps everything else, so a hallucinated kind
              can never route a lift into the wrong strategy. */
-          const c=TrainEngine.normalizeClassification(info);
+          const c=TrainEngine.normalizeClassification(info, trainingAge());
           const id=slugify(nm);
           /* Same installer the coach path uses — one writer, so a typed
              lift and a generated one cannot end up shaped differently.

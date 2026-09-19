@@ -102,8 +102,17 @@ describe('weekly hard sets', () => {
     const history: History = {
       squat: [sess(1, 2)], bench: [sess(2, 12)], row: [sess(3, 12)], curl: [sess(3, 12)],
     }
-    const found = weeklySets(history, INDEX, NOW)
+    /* Needs a stated training age now: an under-band finding is never
+       fired off a default the athlete never chose — see targets.ts. */
+    const found = weeklySets(history, INDEX, NOW, { trainingAge: 'intermediate' })
     expect(found.some((f) => f.muscle === 'quads' && /under the 10-set band/.test(f.text))).toBe(true)
+  })
+
+  it('says nothing about being under when no training age was ever stated', () => {
+    const history: History = {
+      squat: [sess(1, 2)], bench: [sess(2, 12)], row: [sess(3, 12)], curl: [sess(3, 12)],
+    }
+    expect(weeklySets(history, INDEX, NOW).filter((f) => /under/.test(f.text))).toEqual([])
   })
 
   it('does not call a beginner under-trained on their first week', () => {

@@ -20,6 +20,8 @@
  */
 
 import { entryScore, workingRpe, type HistoryEntry, type SetKind } from './sets'
+import { deloadCut } from './targets'
+import type { TrainingAge } from './onboarding'
 
 /** Sessions to sit at the reduced load before climbing back. */
 export const DELOAD_HOLD_SESSIONS = 2
@@ -288,12 +290,14 @@ export interface DeloadPlan {
   setsFactor: number
 }
 
-const INTENSITY_CUT = { measured: 0.9, inferred: 0.95 }
 const VOLUME_CUT = 2 / 3
 const REAPPROACH = 0.95
 
 /** What the current state actually prescribes. */
-export function deloadPlan(record: DeloadRecord | null): DeloadPlan {
+export function deloadPlan(
+  record: DeloadRecord | null,
+  trainingAge?: TrainingAge | null,
+): DeloadPlan {
   if (!record) return { weight: null, setsFactor: 1 }
   const round = (n: number) => Math.round(n * 100) / 100
 
@@ -308,7 +312,7 @@ export function deloadPlan(record: DeloadRecord | null): DeloadPlan {
     return { weight: round(record.priorWeight), setsFactor: VOLUME_CUT }
   }
   return {
-    weight: round(record.priorWeight * INTENSITY_CUT[record.confidence]),
+    weight: round(record.priorWeight * deloadCut(trainingAge, record.confidence)),
     setsFactor: 1,
   }
 }

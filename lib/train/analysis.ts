@@ -18,12 +18,25 @@
 
 import { distribute, muscleSplitFrom, PULL_MUSCLES, PUSH_MUSCLES, type Muscle, type MuscleSplit } from './muscles'
 import { workingSets, type HistoryEntry } from './sets'
+import { weeklySetBand } from './targets'
+import type { TrainingAge } from './onboarding'
 
 /** Days without training a muscle before that is worth mentioning. */
 export const GAP_DAYS = 14
 
-/** Weekly hard sets per muscle that most people grow on. */
+/**
+ * Weekly hard sets per muscle that most people grow on.
+ *
+ * Retained as the shape of the shipped default only. The live band comes
+ * from `weeklySetBand`, which scales it to the athlete — see targets.ts
+ * for why the floor and the ceiling are deliberately not symmetric.
+ */
 export const WEEKLY_SET_BAND: [number, number] = [10, 20]
+
+/** What the analysis needs to know about the person it is analysing. */
+export interface AnalysisOptions {
+  trainingAge?: TrainingAge | null
+}
 
 /** A ratio outside this in either direction is worth flagging. */
 export const RATIO_BAND: [number, number] = [0.6, 1.7]
@@ -132,9 +145,54 @@ export function frequencyGaps(history: History, index: ExerciseIndex, now: numbe
   return findings.sort((a, b) => a.text.localeCompare(b.text))
 }
 
-/** Hard sets per muscle over the last seven days, against a target band. */
-export function weeklySets(history: History, index: ExerciseIndex, now: number): Finding[] {
-  const rows = attribute(history, index).filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0)
+/**
+ * The athlete's own hard sets per week for one muscle, across the four
+ * weeks BEFORE this one.
+ *
+ * Null until there is enough record to call it a norm — two covered weeks
+ * minimum, and weeks before their first ever session are not counted as
+ * zeroes, because "you did nothing in a week you had not started yet" is
+ * not evidence about anybody.
+ */
+function trailingAverage(rows: Attribution[], muscle: Muscle, now: number): number | null {
+  const mine = rows.filter((r) => r.muscle === muscle)
+  if (!mine.length) return null
+  const oldest = mine.reduce((max, r) => Math.max(max, daysAgo(r.date, now)), 0)
+
+  let total = 0
+  let covered = 0
+  for (let week = 1; week <= 4; week++) {
+    const from = week * 7
+    if (from > oldest) break // this week predates their first session
+    covered++
+    total += mine
+      .filter((r) => {
+        const age = daysAgo(r.date, now)
+        return age >= from && age <= from + 6
+      })
+      .reduce((n, r) => n + r.sets, 0)
+  }
+  if (covered < 2) return null
+  return total / covered
+}
+
+/**
+ * Hard sets per muscle over the last seven days, against a band that
+ * belongs to this athlete.
+ *
+ * The ceiling is absolute and the floor is theirs: see targets.ts. When
+ * there is no floor to speak of, under-volume is simply not reported —
+ * telling a beginner they are under a number they never chose is the app
+ * being confidently wrong about someone who is doing fine.
+ */
+export function weeklySets(
+  history: History,
+  index: ExerciseIndex,
+  now: number,
+  opts: AnalysisOptions = {},
+): Finding[] {
+  const all = attribute(history, index)
+  const rows = all.filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0)
   if (!rows.length) return []
 
   const totals = new Map<Muscle, { sets: number; estimated: boolean }>()
@@ -148,21 +206,38 @@ export function weeklySets(history: History, index: ExerciseIndex, now: number):
   const findings: Finding[] = []
   for (const [muscle, t] of totals) {
     const sets = round(t.sets)
-    if (sets > WEEKLY_SET_BAND[1]) {
+    const band = weeklySetBand({
+      trainingAge: opts.trainingAge,
+      trailingSets: trailingAverage(all, muscle, now),
+    })
+
+    if (sets > band.ceiling) {
       findings.push({
         kind: 'weekly_sets',
         muscle,
-        text: `${label(muscle)} took ${sets} hard sets this week, above the ${WEEKLY_SET_BAND[1]}-set band.`,
+        text: `${label(muscle)} took ${sets} hard sets this week, above the ${band.ceiling}-set band.`,
         estimated: t.estimated,
       })
+      continue
     }
-    // being under the band only means something once they are training
-    // enough for "under" to be a choice rather than a starting point
-    else if (sets > 0 && sets < WEEKLY_SET_BAND[0] && totals.size >= 3) {
+    if (band.floor == null || sets <= 0 || sets >= band.floor) continue
+    if (band.floorSource === 'trailing') {
       findings.push({
         kind: 'weekly_sets',
         muscle,
-        text: `${label(muscle)} got ${sets} hard sets this week, under the ${WEEKLY_SET_BAND[0]}-set band.`,
+        text: `${label(muscle)} got ${sets} hard sets this week, well under your recent average of ${round(band.floor / 0.6)}.`,
+        estimated: t.estimated,
+      })
+      continue
+    }
+    /* An age-profile floor is still somebody else's number, softened by
+       the gate that shipped: it only means something once they train
+       enough for "under" to be a choice rather than a starting point. */
+    if (totals.size >= 3) {
+      findings.push({
+        kind: 'weekly_sets',
+        muscle,
+        text: `${label(muscle)} got ${sets} hard sets this week, under the ${band.floor}-set band.`,
         estimated: t.estimated,
       })
     }
@@ -269,10 +344,15 @@ export function volumeRamp(history: History, index: ExerciseIndex, now: number):
 }
 
 /** Every finding worth making, or an empty list when there is nothing to say. */
-export function analyse(history: History, index: ExerciseIndex, now: number): Finding[] {
+export function analyse(
+  history: History,
+  index: ExerciseIndex,
+  now: number,
+  opts: AnalysisOptions = {},
+): Finding[] {
   return [
     ...frequencyGaps(history, index, now),
-    ...weeklySets(history, index, now),
+    ...weeklySets(history, index, now, opts),
     ...ratios(history, index, now),
     ...volumeRamp(history, index, now),
   ]

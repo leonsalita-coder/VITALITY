@@ -29,6 +29,7 @@ import {
 import { deloadPlan, DELOAD_HOLD_SESSIONS as DELOAD_HOLD, type DeloadRecord } from './deload'
 import { countsForProgression } from './session'
 import { snapToLoadable, type PlateConfig } from './plates'
+import type { TrainingAge } from './onboarding'
 
 export type { HistoryEntry, HistorySet }
 
@@ -55,6 +56,8 @@ export interface ProgressionExercise {
   kind?: SetKind
   /** `weight` is ASSISTANCE, and progress removes it. */
   assisted?: boolean
+  /** Scales how deep a deload cuts. Absent means the shipped 10%. */
+  trainingAge?: TrainingAge | null
   /** Seconds added to a time movement after a clean session. */
   incrementSeconds?: number
   /** Metres added to a distance movement after a clean session. */
@@ -288,7 +291,7 @@ function suggestLoad(
    * the entire point of giving it a duration: progression must not be able
    * to undo it one session later.
    */
-  const plan = deloadPlan(exercise.deload || null)
+  const plan = deloadPlan(exercise.deload || null, exercise.trainingAge)
   if (plan.weight != null && exercise.deload) {
     const weight = snapWeight(plan.weight, exercise, plan.weight)
     if (exercise.deload.state === 'reapproach') {

@@ -20,6 +20,7 @@
  */
 
 import { analyse, type ExerciseIndex, type Finding, type History } from './analysis'
+import type { TrainingAge } from './onboarding'
 
 export type SignalKind =
   | 'deload_applied'
@@ -54,6 +55,8 @@ export interface SignalContext {
   plateaus: Array<{ name: string; sessions: number; weight: number }>
   streak: number
   weeklyTarget: number
+  /** Scales the volume bands. Absent means the shipped numbers. */
+  trainingAge?: TrainingAge | null
   /** Lifts logged for the very first time today. */
   firsts: string[]
 }
@@ -141,7 +144,7 @@ export function collectSignals(ctx: SignalContext): Signal[] {
     })
   }
 
-  for (const finding of analyse(ctx.history, ctx.index, ctx.now)) {
+  for (const finding of analyse(ctx.history, ctx.index, ctx.now, { trainingAge: ctx.trainingAge })) {
     const signal = fromFinding(finding)
     if (signal) signals.push(signal)
   }

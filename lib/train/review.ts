@@ -22,6 +22,7 @@ import {
 } from './analysis'
 import { distribute, type Muscle, type MuscleSplit } from './muscles'
 import { topWorkingWeight, workingSets, type HistoryEntry } from './sets'
+import type { TrainingAge } from './onboarding'
 
 const DAY_MS = 86_400_000
 
@@ -85,6 +86,8 @@ export interface ReviewContext {
   exerciseNames: Record<string, string>
   finishedDates: string[]
   weeklyTarget: number
+  /** Scales the volume bands. Absent means the shipped numbers. */
+  trainingAge?: TrainingAge | null
   now: number
 }
 
@@ -140,7 +143,7 @@ export function weeklyReview(ctx: ReviewContext): WeeklyReview {
     .sort((a, b) => b.sets - a.sets)
 
   const quiet = [...trainedEver].filter((m) => !trainedNow.has(m)).sort()
-  const findings = analyse(ctx.history, index, ctx.now)
+  const findings = analyse(ctx.history, index, ctx.now, { trainingAge: ctx.trainingAge })
 
   /* A week is quiet when nothing happened AND nothing was found. Reporting
      "you did nothing" at length is padding; saying it once is honest. */

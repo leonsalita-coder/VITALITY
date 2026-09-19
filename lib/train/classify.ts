@@ -13,6 +13,8 @@
  */
 
 import { DEFAULT_SET_KIND, type SetKind } from './sets'
+import { repRangeFor } from './targets'
+import type { TrainingAge } from './onboarding'
 
 /** The closed list. Anything outside it is not a set kind, whatever it says. */
 export const SET_KINDS: SetKind[] = [
@@ -47,12 +49,18 @@ export interface ClassifiedExercise {
  * accessories get a wide one because theirs is not. Kinds without a weight
  * to eventually add get no range at all — "climb to the top of the range,
  * then add load" has no second half for a plank.
+ *
+ * The numbers themselves scale with training age: a beginner learning a
+ * squat is better served by sets of six than by heavy triples, and the
+ * shipped 4-6 was an intermediate's range handed to everybody.
  */
-export function defaultRepRange(tier: number, kind: SetKind): [number, number] | null {
+export function defaultRepRange(
+  tier: number,
+  kind: SetKind,
+  trainingAge?: TrainingAge | null,
+): [number, number] | null {
   if (kind !== 'reps_weight') return null
-  if (tier <= 1) return [4, 6]
-  if (tier >= 3) return [10, 15]
-  return [6, 10]
+  return repRangeFor(trainingAge, tier)
 }
 
 function asKind(raw: unknown): SetKind {
@@ -72,7 +80,10 @@ function asNumber(raw: unknown, fallback: number, min: number, max: number): num
 }
 
 /** Turns whatever came back into a definition the engine can safely read. */
-export function normalizeClassification(raw: unknown): ClassifiedExercise {
+export function normalizeClassification(
+  raw: unknown,
+  trainingAge?: TrainingAge | null,
+): ClassifiedExercise {
   const info = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<
     string,
     unknown
@@ -83,7 +94,7 @@ export function normalizeClassification(raw: unknown): ClassifiedExercise {
      accessory", and clamping it to 3 would hand a garbage answer a wide
      accessory rep range on the strength of it. */
   const tier = info.tier === 1 || info.tier === 2 || info.tier === 3 ? info.tier : 2
-  const repRange = defaultRepRange(tier, kind)
+  const repRange = defaultRepRange(tier, kind, trainingAge)
 
   return {
     kind,
