@@ -277,6 +277,8 @@ var TrainEngine = (() => {
   __export(index_exports, {
     CATALOG: () => CATALOG,
     CATALOG_BY_ID: () => CATALOG_BY_ID,
+    DEFAULT_BAR_LB: () => DEFAULT_BAR_LB,
+    DEFAULT_PLATES_LB: () => DEFAULT_PLATES_LB,
     DEFAULT_SET_KIND: () => DEFAULT_SET_KIND,
     DEFAULT_WEEKLY_TARGET: () => DEFAULT_WEEKLY_TARGET,
     DELOAD_HOLD_SESSIONS: () => DELOAD_HOLD_SESSIONS,
@@ -303,7 +305,10 @@ var TrainEngine = (() => {
     bestE1RM: () => bestE1RM,
     catalogExercise: () => catalogExercise,
     classifyPR: () => classifyPR,
+    contributionOf: () => contributionOf,
+    countsForProgression: () => countsForProgression,
     currentWeekStreak: () => currentWeekStreak,
+    defaultPlateConfig: () => defaultPlateConfig,
     defaultRepRange: () => defaultRepRange,
     deloadPlan: () => deloadPlan,
     detectPlateau: () => detectPlateau,
@@ -318,6 +323,8 @@ var TrainEngine = (() => {
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
     limitDeloads: () => limitDeloads,
+    loadableWeights: () => loadableWeights,
+    loggedSetCount: () => loggedSetCount,
     longestWeekStreak: () => longestWeekStreak,
     mapMuscle: () => mapMuscle,
     mergeExercises: () => mergeExercises,
@@ -328,13 +335,17 @@ var TrainEngine = (() => {
     normalizeName: () => normalizeName2,
     normalizeShares: () => normalizeShares,
     planSession: () => planSession,
+    plateBreakdown: () => plateBreakdown,
     ratios: () => ratios,
     resolveExercise: () => resolveExercise,
+    sameAsLastTime: () => sameAsLastTime,
+    sessionState: () => sessionState,
     sessionsPerWeek: () => sessionsPerWeek,
     setKind: () => setKind,
     setWeight: () => setWeight,
     similarity: () => similarity,
     slugFromName: () => slugFromName,
+    snapToLoadable: () => snapToLoadable,
     streakLabel: () => streakLabel,
     suggestTarget: () => suggestTarget,
     templatePlan: () => templatePlan,
@@ -345,6 +356,7 @@ var TrainEngine = (() => {
     volumeRamp: () => volumeRamp,
     weeklySets: () => weeklySets,
     workingRpe: () => workingRpe,
+    workingSetCount: () => workingSetCount,
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
@@ -594,6 +606,121 @@ var TrainEngine = (() => {
     return (candidates || []).slice().sort((a, b) => b.plateauLength - a.plateauLength || b.weight - a.weight).slice(0, max).map((c) => c.id);
   }
 
+  // lib/train/session.ts
+  function loggedSetCount(session) {
+    return (session.ex || []).reduce(
+      (n, ex) => n + (ex.log || []).filter((s) => s != null).length,
+      0
+    );
+  }
+  function workingSetCount(session) {
+    return (session.ex || []).reduce(
+      (n, ex) => n + (ex.log || []).filter((s) => isWorkingSet(s)).length,
+      0
+    );
+  }
+  function sessionState(session, opts) {
+    if (session.off) return "rest";
+    const logged = loggedSetCount(session);
+    if (opts.finished) return "complete";
+    if (logged === 0) return "not_started";
+    return session.date < opts.today ? "abandoned" : "in_progress";
+  }
+  var CONTRIBUTIONS = {
+    complete: { volume: true, plateau: true, records: true, streak: true, progression: true },
+    // the sets happened; the session did not finish
+    abandoned: { volume: true, plateau: true, records: true, streak: false, progression: false },
+    in_progress: { volume: true, plateau: true, records: true, streak: false, progression: false },
+    not_started: { volume: false, plateau: false, records: false, streak: false, progression: false },
+    rest: { volume: false, plateau: false, records: false, streak: false, progression: false }
+  };
+  function contributionOf(state) {
+    return CONTRIBUTIONS[state];
+  }
+  function countsForProgression(entry) {
+    return entry.abandoned !== true;
+  }
+  function sameAsLastTime(history, opts = {}) {
+    const usable = (history || []).filter(
+      (e) => e && !e.off && e.date !== opts.excludeDate && (e.sets || []).some((s) => isWorkingSet(s))
+    );
+    if (!usable.length) return null;
+    const last = usable[usable.length - 1];
+    const sets = (last.sets || []).filter((s) => isWorkingSet(s));
+    if (!sets.length) return null;
+    return sets.map((s) => ({
+      weight: s.w,
+      reps: s.r,
+      seconds: s.s,
+      metres: s.m,
+      kind: s.kind,
+      perSide: s.perSide,
+      assisted: s.assisted
+    }));
+  }
+
+  // lib/train/plates.ts
+  var DEFAULT_BAR_LB = 45;
+  var DEFAULT_PLATES_LB = [45, 35, 25, 10, 5, 2.5];
+  function defaultPlateConfig() {
+    return { barLb: DEFAULT_BAR_LB, plates: [...DEFAULT_PLATES_LB] };
+  }
+  var tidy = (n) => Math.round(n * 100) / 100;
+  function loadableWeights(config, maxLb = 1e3) {
+    const bar2 = Math.max(0, config.barLb || 0);
+    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => a - b);
+    if (!plates.length) return [tidy(bar2)];
+    const perSide = /* @__PURE__ */ new Set([0]);
+    const smallest = plates[0];
+    const limit = (maxLb - bar2) / 2;
+    let frontier = [0];
+    while (frontier.length) {
+      const next = [];
+      for (const load of frontier) {
+        for (const plate of plates) {
+          const candidate = tidy(load + plate);
+          if (candidate > limit || perSide.has(candidate)) continue;
+          perSide.add(candidate);
+          next.push(candidate);
+        }
+      }
+      frontier = next;
+      if (perSide.size > 4e3) break;
+    }
+    return [...perSide].map((side) => tidy(bar2 + side * 2)).sort((a, b) => a - b);
+  }
+  function snapToLoadable(target, config) {
+    const options = loadableWeights(config, Math.max(target * 2, 1e3));
+    if (!options.length) return tidy(target);
+    const bar2 = Math.max(0, config.barLb || 0);
+    if (target <= bar2) return tidy(bar2);
+    let best = options[0];
+    let bestGap = Math.abs(options[0] - target);
+    for (const option of options) {
+      const gap = Math.abs(option - target);
+      if (gap < bestGap || gap === bestGap && option < best) {
+        best = option;
+        bestGap = gap;
+      }
+    }
+    return tidy(best);
+  }
+  function plateBreakdown(total, config) {
+    const bar2 = Math.max(0, config.barLb || 0);
+    if (tidy(total) === tidy(bar2)) return [];
+    let remaining = tidy((total - bar2) / 2);
+    if (remaining < 0) return null;
+    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => b - a);
+    const used = [];
+    for (const plate of plates) {
+      while (remaining >= plate - 1e-9) {
+        used.push(plate);
+        remaining = tidy(remaining - plate);
+      }
+    }
+    return remaining <= 1e-9 ? used : null;
+  }
+
   // lib/train/progression.ts
   var DEFAULT_SECONDS_STEP = 5;
   var DEFAULT_METRES_STEP = 10;
@@ -619,13 +746,16 @@ var TrainEngine = (() => {
     if (weight >= 45) return 2.5;
     return 1;
   }
-  function tidy(n) {
+  function tidy2(n) {
     return Math.round(n * 100) / 100;
   }
   function snapWeight(weight, exercise, reference) {
     if (weight <= 0) return 0;
+    if (exercise.plates && exercise.loading === "barbell") {
+      return snapToLoadable(weight, exercise.plates);
+    }
     const step = stepFor(reference, exercise);
-    return tidy(Math.round(weight / step) * step);
+    return tidy2(Math.round(weight / step) * step);
   }
   function localMidnight(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
@@ -644,7 +774,7 @@ var TrainEngine = (() => {
     return 0.95;
   }
   function describeWeight(weight) {
-    return weight > 0 ? `${tidy(weight)} lb` : "bodyweight";
+    return weight > 0 ? `${tidy2(weight)} lb` : "bodyweight";
   }
   function realSessions(history) {
     return (history || []).filter((entry) => entry && !entry.off);
@@ -673,7 +803,7 @@ var TrainEngine = (() => {
     if (prior <= 0) return [0];
     const dropped = snapWeight(prior * layoffFactor(days), exercise, prior);
     const mid = snapWeight(dropped + (prior - dropped) / 2, exercise, prior);
-    const target = tidy(prior);
+    const target = tidy2(prior);
     const plan = [];
     for (const w of [dropped, dropped, mid, target]) {
       if (plan.length >= 2 && plan[plan.length - 1] === w) continue;
@@ -715,7 +845,7 @@ var TrainEngine = (() => {
       };
     }
     if (!last) {
-      const weight = tidy(exercise.lastKg != null ? exercise.lastKg : exercise.kg || 0);
+      const weight = tidy2(exercise.lastKg != null ? exercise.lastKg : exercise.kg || 0);
       return {
         weight,
         reps: minReps,
@@ -727,7 +857,7 @@ var TrainEngine = (() => {
     const missedLast = (last.sets || []).some((set) => set.fail);
     const assisted = exercise.assisted === true || (last.sets || []).some((set) => set.assisted);
     const assistUsed = sets.length ? Math.min(...sets.map((set) => setWeight(last, set))) : 0;
-    const held = assisted ? tidy(assistUsed) : tidy(topWorkingWeight(last) || last.kg || 0);
+    const held = assisted ? tidy2(assistUsed) : tidy2(topWorkingWeight(last) || last.kg || 0);
     const layoff = findLayoff(sessions, now);
     if (layoff) {
       const ramp = rampWeights(layoff.priorWeight, layoff.days, exercise);
@@ -759,7 +889,7 @@ var TrainEngine = (() => {
             reason: `holding at ${describeWeight(weight)} \u2014 second session back`
           };
         }
-        const delta2 = tidy(weight - ramp[step2 - 1]);
+        const delta2 = tidy2(weight - ramp[step2 - 1]);
         return {
           weight,
           reps: minReps,
@@ -774,6 +904,14 @@ var TrainEngine = (() => {
         reps: minReps,
         basis: "miss",
         reason: `holding at ${describeWeight(held)} \u2014 nothing logged last time`
+      };
+    }
+    if (!countsForProgression(last)) {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "miss",
+        reason: `holding at ${describeWeight(held)} \u2014 last session was left unfinished`
       };
     }
     if (missedLast) {
@@ -817,13 +955,13 @@ var TrainEngine = (() => {
         weight: held,
         reps: minReps,
         basis: "clean",
-        reason: `holding at ${describeWeight(held)} \u2014 clean ${shape} but grinding at RPE ${tidy(rpe)}`
+        reason: `holding at ${describeWeight(held)} \u2014 clean ${shape} but grinding at RPE ${tidy2(rpe)}`
       };
     }
     const multiplier = rpe != null && rpe <= EASY_RPE ? 2 : 1;
     if (assisted) {
       const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held));
-      const removed = tidy(held - eased);
+      const removed = tidy2(held - eased);
       return {
         weight: eased,
         reps: minReps,
@@ -832,13 +970,13 @@ var TrainEngine = (() => {
       };
     }
     const next = snapWeight(held + step * multiplier, exercise, held);
-    const delta = tidy(next - held);
+    const delta = tidy2(next - held);
     if (multiplier > 1) {
       return {
         weight: next,
         reps: minReps,
         basis: "clean",
-        reason: `+${delta} lb \u2014 ${shape} at RPE ${tidy(rpe)}, room to move`
+        reason: `+${delta} lb \u2014 ${shape} at RPE ${tidy2(rpe)}, room to move`
       };
     }
     return {
@@ -2432,8 +2570,27 @@ let STATE = null;
 function saveState(){ if(window.Vitality && typeof window.Vitality.save==='function') window.Vitality.save(STATE); }
 
 /* ---- helpers on state -------------------------------------------- */
+/* Plate math config, editable in Settings. */
+function plateConfig(){
+  return STATE.plateConfig || TrainEngine.defaultPlateConfig();
+}
+/* Where today's session stands, in the engine's vocabulary. */
+function currentSessionState(){
+  return TrainEngine.sessionState(STATE.session || { date:today }, {
+    today, finished: !!STATE.submitted,
+  });
+}
 function curSession(){
   if(!STATE.session || STATE.session.date!==today){
+    /* The day rolled over. If work was logged and finish was never pressed,
+       that session is ABANDONED — real work that was not finished — and its
+       history rows are flagged so progression will not bump off them. The
+       rows themselves are kept; the sets happened. */
+    const prev = STATE.session;
+    if(prev && !prev.off && !STATE.submitted && TrainEngine.loggedSetCount(prev) > 0){
+      markAbandoned(prev.date);
+    }
+    STATE.submitted = false;
     Object.keys(restTimers).forEach(stopRest);
     STATE.session = { date:today, off:false, warmup:[], cooldown:[], ex:[] };
   }
@@ -2580,6 +2737,9 @@ function renderHeroExtras(){
 }
 /* ---- rail: a pinned telemetry strip, always visible while scrolling - */
 function sessionVolume(session){
+  /* Whether today's work counts is the engine's call, not a local `off`
+     check — stating the contribution rules in one place is the point. */
+  if(!TrainEngine.contributionOf(currentSessionState()).volume) return 0;
   let total=0;
   /* .load is the pounds figure this rail has always shown. Other kinds
      keep their own units and are deliberately not folded in. */
@@ -2591,7 +2751,8 @@ function renderRail(){
   const dEl=$('#railDate'); if(dEl) dEl.textContent=fmtDayTitle();
   const streak=currentStreak();
   const sEl=$('#railStreak'); if(sEl){ countTo(sEl, streak); sEl.classList.toggle('lit', streak>0); }
-  const vol=session.off?0:sessionVolume(session);
+  void TrainEngine.workingSetCount(session);
+  const vol=sessionVolume(session);
   const vEl=$('#railVolume'); if(vEl){ countTo(vEl, vol); vEl.classList.toggle('lit', vol>0); }
   const vLbl=$('#railVolumeLbl'); if(vLbl) vLbl.textContent=STATE.unit+' today';
 }
@@ -2988,6 +3149,9 @@ function renderCard(e, session){
     + '<div class="exActions">'
     +   '<button class="actionPill" data-act="swap">'+svg(IC.swap,' fill="none" stroke="currentColor"')+'<span class="pl">Swap</span></button>'
     +   '<button class="actionPill" data-act="history">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">History</span></button>'
+    +   (TrainEngine.sameAsLastTime(histFor(e).filter(x=>!x.off), { excludeDate: today })
+          ? '<button class="actionPill" data-act="repeat">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">Repeat</span></button>'
+          : '')
     +   '<button class="actionPill" data-act="tune">'+svg(IC.tune,' fill="none" stroke="currentColor"')+'<span class="pl">Tune</span></button>'
     + '</div>'
     + '<div class="restSlot"></div>'
@@ -3126,6 +3290,7 @@ function statedMinutes(text){
 }
 function progressionInputFor(e, rx){
   return {
+    plates: loadingFor(e)==='barbell' ? plateConfig() : undefined,
     kg: rx.kg,
     lastKg: e.lastKg,
     reps: rx.reps,
@@ -3233,7 +3398,12 @@ function pillInputsFor(e, kind, pre, bumped){
   if(kind==='distance') return num('met',pre.metres,'Metres')+unit('m');
   if(kind==='time_distance') return num('met',pre.metres,'Metres')+unit('m')+times+num('sec',pre.seconds,'Seconds')+unit('s');
   if(kind==='reps_only') return num('r',pre.reps,'Reps')+unit('reps');
-  return num('w'+(bumped?' bump':''),pre.weight,'Weight','decimal')
+  /* What to actually hang on the bar, so the number is not merely correct
+     but loadable without doing arithmetic at the rack. */
+  const plates = loadingFor(e)==='barbell'
+    ? TrainEngine.plateBreakdown(pre.weight, plateConfig()) : null;
+  const hint = plates ? (plates.length ? ' — '+plates.join(' + ')+' per side' : ' — empty bar') : '';
+  return num('w'+(bumped?' bump':''),pre.weight,'Weight'+hint,'decimal')
     + unit(flagFor(e,'assisted')?'lb help':STATE.unit) + times + num('r',pre.reps,'Reps');
 }
 function renderPill(e, rx, idx){
@@ -3407,6 +3577,51 @@ function linkWithNext(e, session){
   e.group=gid; next.group=gid; render();
 }
 function ungroup(e){ delete e.group; render(); }
+/* Flags every history row for a date as abandoned. Never removes them. */
+function markAbandoned(date){
+  Object.keys(STATE.history||{}).forEach(id=>{
+    (STATE.history[id]||[]).forEach(entry=>{ if(entry.date===date) entry.abandoned=true; });
+  });
+  saveState();
+}
+/**
+ * Recomputes everything cached from history.
+ *
+ * Backdating or editing a past session invalidates finishedDates and each
+ * lift's carried-over weight, and a stale aggregate is worse than none —
+ * it looks authoritative. Anything derived is derived again from the rows.
+ */
+function rederiveFromHistory(){
+  const finished = new Set(STATE.finishedDates||[]);
+  Object.keys(STATE.history||{}).forEach(id=>{
+    const rows=(STATE.history[id]||[]).filter(x=>!x.off);
+    rows.sort((a,b)=>a.date.localeCompare(b.date));
+    STATE.history[id]=rows;
+    const last=rows[rows.length-1];
+    const ex=curSession().ex.find(x=>x.id===id);
+    if(ex && last){ const w=TrainEngine.topWorkingWeight(last); if(w>0) ex.lastKg=w; }
+  });
+  STATE.finishedDates=[...finished].sort();
+  saveState();
+}
+/* One tap to repeat the last session — the fastest path for anyone not
+   chasing progression today. */
+function repeatLastSession(e){
+  const target=TrainEngine.sameAsLastTime(histFor(e).filter(x=>!x.off), { excludeDate: today });
+  if(!target || !target.length) return;
+  while(e.log.length < target.length) e.log.push(null);
+  target.forEach((t,i)=>{
+    e.log[i]={ kind:t.kind||kindFor(e) };
+    if(t.weight!=null) e.log[i].kg=t.weight;
+    if(t.reps!=null) e.log[i].reps=t.reps;
+    if(t.seconds!=null) e.log[i].s=t.seconds;
+    if(t.metres!=null) e.log[i].m=t.metres;
+    if(t.perSide) e.log[i].perSide=true;
+    if(t.assisted) e.log[i].assisted=true;
+  });
+  e.sets=e.log.length;
+  rollupToday(e); render();
+}
 function rollupToday(e){
   const done = e.log.filter(s=>s&&!s.fail);
   let h = histFor(e).filter(x=>x.date!==today);
@@ -3446,6 +3661,7 @@ function handleAct(act, e, session, btn){
   else if(act==='form'){ openForm(e); }
   else if(act==='history'){ openHistory(e); }
   else if(act==='swap'){ openSwap(e); }
+  else if(act==='repeat'){ repeatLastSession(e); }
   else if(act==='tune'){ openTune(e); }
   else if(act==='menu'){ openMenu(e, session, btn); }
 }

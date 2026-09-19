@@ -27,6 +27,8 @@ import {
   type HistoryEntry, type HistorySet, type SetKind,
 } from './sets'
 import { deloadPlan, DELOAD_HOLD_SESSIONS as DELOAD_HOLD, type DeloadRecord } from './deload'
+import { countsForProgression } from './session'
+import { snapToLoadable, type PlateConfig } from './plates'
 
 export type { HistoryEntry, HistorySet }
 
@@ -57,6 +59,12 @@ export interface ProgressionExercise {
   incrementSeconds?: number
   /** Metres added to a distance movement after a clean session. */
   incrementMetres?: number
+  /**
+   * The bar and plates actually available. When present, a barbell
+   * suggestion snaps to a total that can be built rather than to an
+   * arithmetic multiple — 187 lb is a real number and not a real weight.
+   */
+  plates?: PlateConfig
   /**
    * The lift's deload state machine. While deloading or re-approaching it
    * owns the suggestion outright — otherwise a clean session at the reduced
@@ -160,6 +168,10 @@ function tidy(n: number): number {
  */
 function snapWeight(weight: number, exercise: ProgressionExercise, reference: number): number {
   if (weight <= 0) return 0
+  /* Real plate math wins over an arithmetic grid when the rack is known. */
+  if (exercise.plates && exercise.loading === 'barbell') {
+    return snapToLoadable(weight, exercise.plates)
+  }
   const step = stepFor(reference, exercise)
   return tidy(Math.round(weight / step) * step)
 }
@@ -384,6 +396,20 @@ function suggestLoad(
       reps: minReps,
       basis: 'miss',
       reason: `holding at ${describeWeight(held)} — nothing logged last time`,
+    }
+  }
+
+  /**
+   * An unfinished session is not evidence the load was earned. Two clean
+   * sets out of five looks identical to a completed session from here, and
+   * bumping off it is how the next one becomes a miss.
+   */
+  if (!countsForProgression(last)) {
+    return {
+      weight: held,
+      reps: minReps,
+      basis: 'miss',
+      reason: `holding at ${describeWeight(held)} — last session was left unfinished`,
     }
   }
 
