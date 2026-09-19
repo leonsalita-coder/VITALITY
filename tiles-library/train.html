@@ -275,6 +275,8 @@ var TrainEngine = (() => {
   // lib/train/index.ts
   var index_exports = {};
   __export(index_exports, {
+    CATALOG: () => CATALOG,
+    CATALOG_BY_ID: () => CATALOG_BY_ID,
     DEFAULT_SET_KIND: () => DEFAULT_SET_KIND,
     DEFAULT_WEEKLY_TARGET: () => DEFAULT_WEEKLY_TARGET,
     DELOAD_HOLD_SESSIONS: () => DELOAD_HOLD_SESSIONS,
@@ -286,6 +288,7 @@ var TrainEngine = (() => {
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
     MUSCLES: () => MUSCLES,
+    NEAR_THRESHOLD: () => NEAR_THRESHOLD,
     PULL_MUSCLES: () => PULL_MUSCLES,
     PUSH_MUSCLES: () => PUSH_MUSCLES,
     RAMP_LIMIT: () => RAMP_LIMIT,
@@ -298,6 +301,7 @@ var TrainEngine = (() => {
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
     analyse: () => analyse,
     bestE1RM: () => bestE1RM,
+    catalogExercise: () => catalogExercise,
     classifyPR: () => classifyPR,
     currentWeekStreak: () => currentWeekStreak,
     defaultRepRange: () => defaultRepRange,
@@ -316,16 +320,21 @@ var TrainEngine = (() => {
     limitDeloads: () => limitDeloads,
     longestWeekStreak: () => longestWeekStreak,
     mapMuscle: () => mapMuscle,
+    mergeExercises: () => mergeExercises,
     muscleSplitFrom: () => muscleSplitFrom,
     nearMissCue: () => nearMissCue,
     nextDeloadState: () => nextDeloadState,
     normalizeClassification: () => normalizeClassification,
+    normalizeName: () => normalizeName2,
     normalizeShares: () => normalizeShares,
     planSession: () => planSession,
     ratios: () => ratios,
+    resolveExercise: () => resolveExercise,
     sessionsPerWeek: () => sessionsPerWeek,
     setKind: () => setKind,
     setWeight: () => setWeight,
+    similarity: () => similarity,
+    slugFromName: () => slugFromName,
     streakLabel: () => streakLabel,
     suggestTarget: () => suggestTarget,
     templatePlan: () => templatePlan,
@@ -483,8 +492,8 @@ var TrainEngine = (() => {
     return null;
   }
   function addDays(date, days) {
-    const [y, m, d] = date.split("-").map(Number);
-    const dt = new Date(y, (m || 1) - 1, d || 1);
+    const [y, m2, d] = date.split("-").map(Number);
+    const dt = new Date(y, (m2 || 1) - 1, d || 1);
     dt.setDate(dt.getDate() + days);
     const pad = (n) => String(n).padStart(2, "0");
     return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
@@ -619,8 +628,8 @@ var TrainEngine = (() => {
     return tidy(Math.round(weight / step) * step);
   }
   function localMidnight(dateStr) {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m || 1) - 1, d || 1).getTime();
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function daysSince(dateStr, now) {
     const then = localMidnight(dateStr);
@@ -1036,8 +1045,8 @@ var TrainEngine = (() => {
   var DEFAULT_WEEKLY_TARGET = 4;
   var DAY_MS = 864e5;
   function localMidnight2(dateStr) {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m || 1) - 1, d || 1).getTime();
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function startOfDay(ms) {
     const d = new Date(ms);
@@ -1201,7 +1210,7 @@ var TrainEngine = (() => {
         continue;
       }
       const overloaded = exercise.muscles.find(
-        (m) => (perMuscle[m] || 0) + exercise.sets > MAX_SETS_PER_MUSCLE
+        (m2) => (perMuscle[m2] || 0) + exercise.sets > MAX_SETS_PER_MUSCLE
       );
       if (overloaded) {
         violations.push(`${exercise.id}: dropped, ${overloaded} over ${MAX_SETS_PER_MUSCLE} sets`);
@@ -1215,8 +1224,8 @@ var TrainEngine = (() => {
       }
       kept.push(exercise);
       totalSets += exercise.sets;
-      exercise.muscles.forEach((m) => {
-        perMuscle[m] = (perMuscle[m] || 0) + exercise.sets;
+      exercise.muscles.forEach((m2) => {
+        perMuscle[m2] = (perMuscle[m2] || 0) + exercise.sets;
       });
     }
     return exercises.filter((e) => kept.includes(e));
@@ -1231,7 +1240,7 @@ var TrainEngine = (() => {
       return false;
     }
     const hammered = (def.muscles || []).find(
-      (m) => (c.recentMuscleVolume || {})[m] >= RECENT_HEAVY_SETS
+      (m2) => (c.recentMuscleVolume || {})[m2] >= RECENT_HEAVY_SETS
     );
     if (hammered) {
       violations.push(`${def.id}: excluded, ${hammered} worked hard recently`);
@@ -1404,28 +1413,34 @@ var TrainEngine = (() => {
     return list.map((c) => ({ muscle: c.muscle, share: c.share / total }));
   }
   function collect(raw) {
-    const names = Array.isArray(raw) ? raw : [];
+    const entries = Array.isArray(raw) ? raw : [];
     const seen = /* @__PURE__ */ new Map();
     const unmapped = [];
     let exact = true;
-    for (const name of names) {
+    let authored = entries.length > 0;
+    for (const entry of entries) {
+      const isObject = !!entry && typeof entry === "object";
+      const name = isObject ? entry.muscle : entry;
+      const weight = isObject ? entry.share : void 0;
+      if (!isObject || typeof weight !== "number") authored = false;
       const { muscle, exact: hit } = mapMuscle(name);
       if (!muscle) {
         const label2 = String(name || "").trim();
-        if (label2) unmapped.push(label2);
+        if (label2 && label2 !== "[object Object]") unmapped.push(label2);
+        else if (isObject) unmapped.push(JSON.stringify(entry));
         continue;
       }
       if (!hit) exact = false;
-      seen.set(muscle, (seen.get(muscle) || 0) + 1);
+      seen.set(muscle, (seen.get(muscle) || 0) + (typeof weight === "number" ? weight : 1));
     }
-    const list = [...seen.entries()].map(([muscle, count]) => ({ muscle, share: count }));
-    return { list: normalizeShares(list), unmapped, exact };
+    const list = [...seen.entries()].map(([muscle, share]) => ({ muscle, share }));
+    return { list: normalizeShares(list), unmapped, exact, authored };
   }
   function muscleSplitFrom(info) {
     const def = info && typeof info === "object" ? info : {};
     const primary = collect(def.primary);
     const secondary = collect(def.secondary);
-    const authored = Array.isArray(def.primary) && def.primary.some((m) => m && typeof m === "object" && "share" in m);
+    const authored = primary.authored && (!secondary.list.length || secondary.authored);
     return {
       primary: primary.list,
       secondary: secondary.list,
@@ -1457,8 +1472,8 @@ var TrainEngine = (() => {
     return out;
   }
   function localMidnight3(dateStr) {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m || 1) - 1, d || 1).getTime();
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function startOfDay2(ms) {
     const d = new Date(ms);
@@ -1620,6 +1635,694 @@ var TrainEngine = (() => {
     return muscle.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 
+  // lib/train/catalog.ts
+  var m = (muscle, share) => ({ muscle, share });
+  var bar = (o) => ({
+    id: "",
+    name: "",
+    aliases: [],
+    pattern: "squat",
+    equipment: "barbell",
+    unilateral: false,
+    defaultSetKind: "reps_weight",
+    e1rmValid: true,
+    loading: "barbell",
+    incrementLb: 5,
+    primary: [],
+    secondary: [],
+    ...o
+  });
+  var CATALOG = [
+    // ── squat ─────────────────────────────────────────────────────────
+    bar({
+      id: "back_squat",
+      name: "Back Squat",
+      aliases: ["squat", "bb squat", "barbell squat", "high bar squat"],
+      pattern: "squat",
+      primary: [m("quads", 0.55), m("glutes", 0.3), m("lower_back", 0.1), m("hamstrings", 0.05)]
+    }),
+    bar({
+      id: "front_squat",
+      name: "Front Squat",
+      aliases: ["fs", "bb front squat"],
+      pattern: "squat",
+      primary: [m("quads", 0.65), m("glutes", 0.2), m("abs", 0.1), m("upper_back", 0.05)]
+    }),
+    bar({
+      id: "goblet_squat",
+      name: "Goblet Squat",
+      aliases: ["db goblet squat"],
+      pattern: "squat",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("quads", 0.6), m("glutes", 0.3), m("abs", 0.1)]
+    }),
+    bar({
+      id: "leg_press",
+      name: "Leg Press",
+      aliases: ["machine leg press"],
+      pattern: "squat",
+      equipment: "machine",
+      loading: "stack",
+      incrementLb: 10,
+      primary: [m("quads", 0.65), m("glutes", 0.3), m("hamstrings", 0.05)]
+    }),
+    // ── hinge ─────────────────────────────────────────────────────────
+    bar({
+      id: "deadlift",
+      name: "Deadlift",
+      aliases: ["dl", "conventional deadlift", "bb deadlift"],
+      pattern: "hinge",
+      primary: [m("glutes", 0.3), m("hamstrings", 0.25), m("lower_back", 0.2), m("traps", 0.15), m("forearms", 0.1)]
+    }),
+    bar({
+      id: "romanian_deadlift",
+      name: "Romanian Deadlift",
+      aliases: ["rdl", "romanian dl", "stiff leg deadlift", "sldl"],
+      pattern: "hinge",
+      primary: [m("hamstrings", 0.55), m("glutes", 0.3), m("lower_back", 0.15)]
+    }),
+    bar({
+      id: "hip_thrust",
+      name: "Hip Thrust",
+      aliases: ["barbell hip thrust", "glute bridge"],
+      pattern: "hinge",
+      incrementLb: 10,
+      primary: [m("glutes", 0.75), m("hamstrings", 0.25)]
+    }),
+    bar({
+      id: "back_extension",
+      name: "Back Extension",
+      aliases: ["hyperextension", "45 degree back extension"],
+      pattern: "hinge",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "reps_only",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("lower_back", 0.5), m("glutes", 0.3), m("hamstrings", 0.2)]
+    }),
+    bar({
+      id: "kettlebell_swing",
+      name: "Kettlebell Swing",
+      aliases: ["kb swing", "swing"],
+      pattern: "hinge",
+      equipment: "kettlebell",
+      loading: "free",
+      e1rmValid: false,
+      incrementLb: 8,
+      primary: [m("glutes", 0.5), m("hamstrings", 0.3), m("lower_back", 0.2)]
+    }),
+    // ── lunge / unilateral ────────────────────────────────────────────
+    bar({
+      id: "walking_lunge",
+      name: "Walking Lunge",
+      aliases: ["lunge", "lunges", "db lunge"],
+      pattern: "lunge",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      e1rmValid: false,
+      primary: [m("quads", 0.45), m("glutes", 0.4), m("hamstrings", 0.15)]
+    }),
+    bar({
+      id: "bulgarian_split_squat",
+      name: "Bulgarian Split Squat",
+      aliases: ["bss", "rear foot elevated split squat", "rfess", "split squat"],
+      pattern: "lunge",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      e1rmValid: false,
+      primary: [m("quads", 0.45), m("glutes", 0.4), m("hamstrings", 0.15)]
+    }),
+    bar({
+      id: "step_up",
+      name: "Step-Up",
+      aliases: ["box step up", "db step up"],
+      pattern: "lunge",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      e1rmValid: false,
+      primary: [m("quads", 0.45), m("glutes", 0.45), m("calves", 0.1)]
+    }),
+    // ── horizontal push ───────────────────────────────────────────────
+    bar({
+      id: "bench_press",
+      name: "Bench Press",
+      aliases: ["bench", "bb bench", "barbell bench", "flat bench", "bb bench press", "bp"],
+      pattern: "horizontal_push",
+      primary: [m("chest", 0.7), m("triceps", 0.15), m("front_delts", 0.15)]
+    }),
+    bar({
+      id: "incline_bench_press",
+      name: "Incline Bench Press",
+      aliases: ["incline bench", "incline barbell bench", "incline press"],
+      pattern: "horizontal_push",
+      primary: [m("chest", 0.55), m("front_delts", 0.3), m("triceps", 0.15)]
+    }),
+    bar({
+      id: "dumbbell_bench_press",
+      name: "Dumbbell Bench Press",
+      aliases: ["db bench", "db bench press", "dumbbell press", "db press"],
+      pattern: "horizontal_push",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      primary: [m("chest", 0.68), m("triceps", 0.16), m("front_delts", 0.16)]
+    }),
+    bar({
+      id: "push_up",
+      name: "Push-Up",
+      aliases: ["pushup", "push ups", "pressup"],
+      pattern: "horizontal_push",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "reps_only",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("chest", 0.65), m("triceps", 0.2), m("front_delts", 0.15)]
+    }),
+    bar({
+      id: "chest_fly",
+      name: "Chest Fly",
+      aliases: ["fly", "flye", "pec deck", "cable fly", "db fly"],
+      pattern: "isolation",
+      equipment: "cable",
+      loading: "stack",
+      e1rmValid: false,
+      primary: [m("chest", 0.85), m("front_delts", 0.15)]
+    }),
+    // ── vertical push ─────────────────────────────────────────────────
+    bar({
+      id: "overhead_press",
+      name: "Overhead Press",
+      aliases: ["ohp", "military press", "standing press", "shoulder press", "strict press"],
+      pattern: "vertical_push",
+      primary: [m("front_delts", 0.55), m("side_delts", 0.2), m("triceps", 0.2), m("abs", 0.05)]
+    }),
+    bar({
+      id: "dumbbell_shoulder_press",
+      name: "Dumbbell Shoulder Press",
+      aliases: ["db shoulder press", "db ohp", "seated db press"],
+      pattern: "vertical_push",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      primary: [m("front_delts", 0.55), m("side_delts", 0.2), m("triceps", 0.25)]
+    }),
+    bar({
+      id: "lateral_raise",
+      name: "Lateral Raise",
+      aliases: ["side raise", "db lateral raise", "lat raise", "side lateral raise"],
+      pattern: "isolation",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("side_delts", 0.85), m("traps", 0.15)]
+    }),
+    bar({
+      id: "dip",
+      name: "Dip",
+      aliases: ["dips", "parallel bar dip", "chest dip", "tricep dip"],
+      pattern: "vertical_push",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "reps_only",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("chest", 0.45), m("triceps", 0.4), m("front_delts", 0.15)]
+    }),
+    // ── vertical pull ─────────────────────────────────────────────────
+    bar({
+      id: "pull_up",
+      name: "Pull-Up",
+      aliases: ["pullup", "pull ups", "pullups"],
+      pattern: "vertical_pull",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "reps_only",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)]
+    }),
+    bar({
+      id: "chin_up",
+      name: "Chin-Up",
+      aliases: ["chinup", "chin ups", "chinups"],
+      pattern: "vertical_pull",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "reps_only",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("lats", 0.5), m("biceps", 0.35), m("upper_back", 0.15)]
+    }),
+    bar({
+      id: "lat_pulldown",
+      name: "Lat Pulldown",
+      aliases: ["pulldown", "lat pull down", "cable pulldown"],
+      pattern: "vertical_pull",
+      equipment: "machine",
+      loading: "stack",
+      incrementLb: 10,
+      primary: [m("lats", 0.6), m("upper_back", 0.2), m("biceps", 0.2)]
+    }),
+    // ── horizontal pull ───────────────────────────────────────────────
+    bar({
+      id: "barbell_row",
+      name: "Barbell Row",
+      aliases: ["bb row", "bent over row", "pendlay row", "row"],
+      pattern: "horizontal_pull",
+      primary: [m("upper_back", 0.35), m("lats", 0.35), m("rear_delts", 0.15), m("biceps", 0.15)]
+    }),
+    bar({
+      id: "dumbbell_row",
+      name: "Dumbbell Row",
+      aliases: ["db row", "one arm row", "single arm row"],
+      pattern: "horizontal_pull",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      unilateral: true,
+      primary: [m("lats", 0.45), m("upper_back", 0.3), m("biceps", 0.25)]
+    }),
+    bar({
+      id: "seated_cable_row",
+      name: "Seated Cable Row",
+      aliases: ["cable row", "seated row"],
+      pattern: "horizontal_pull",
+      equipment: "cable",
+      loading: "stack",
+      incrementLb: 10,
+      primary: [m("upper_back", 0.45), m("lats", 0.3), m("biceps", 0.25)]
+    }),
+    bar({
+      id: "face_pull",
+      name: "Face Pull",
+      aliases: ["cable face pull", "facepull"],
+      pattern: "horizontal_pull",
+      equipment: "cable",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 5,
+      primary: [m("rear_delts", 0.5), m("upper_back", 0.3), m("traps", 0.2)]
+    }),
+    // ── arms ──────────────────────────────────────────────────────────
+    bar({
+      id: "barbell_curl",
+      name: "Barbell Curl",
+      aliases: ["bb curl", "bicep curl", "ez bar curl", "curl"],
+      pattern: "isolation",
+      e1rmValid: false,
+      primary: [m("biceps", 0.85), m("forearms", 0.15)]
+    }),
+    bar({
+      id: "dumbbell_curl",
+      name: "Dumbbell Curl",
+      aliases: ["db curl", "dumbbell bicep curl"],
+      pattern: "isolation",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("biceps", 0.85), m("forearms", 0.15)]
+    }),
+    bar({
+      id: "hammer_curl",
+      name: "Hammer Curl",
+      aliases: ["db hammer curl", "neutral curl"],
+      pattern: "isolation",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      e1rmValid: false,
+      primary: [m("biceps", 0.6), m("forearms", 0.4)]
+    }),
+    bar({
+      id: "tricep_pushdown",
+      name: "Tricep Pushdown",
+      aliases: ["pushdown", "cable pushdown", "rope pushdown", "tricep extension"],
+      pattern: "isolation",
+      equipment: "cable",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 5,
+      primary: [m("triceps", 1)]
+    }),
+    bar({
+      id: "skullcrusher",
+      name: "Skullcrusher",
+      aliases: ["lying tricep extension", "skull crusher"],
+      pattern: "isolation",
+      e1rmValid: false,
+      primary: [m("triceps", 1)]
+    }),
+    // ── legs, isolation ───────────────────────────────────────────────
+    bar({
+      id: "leg_curl",
+      name: "Leg Curl",
+      aliases: ["hamstring curl", "lying leg curl", "seated leg curl"],
+      pattern: "isolation",
+      equipment: "machine",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("hamstrings", 0.9), m("calves", 0.1)]
+    }),
+    bar({
+      id: "leg_extension",
+      name: "Leg Extension",
+      aliases: ["quad extension", "knee extension"],
+      pattern: "isolation",
+      equipment: "machine",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("quads", 1)]
+    }),
+    bar({
+      id: "calf_raise",
+      name: "Calf Raise",
+      aliases: ["standing calf raise", "seated calf raise", "calf raises"],
+      pattern: "isolation",
+      equipment: "machine",
+      loading: "stack",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("calves", 1)]
+    }),
+    // ── core ──────────────────────────────────────────────────────────
+    bar({
+      id: "plank",
+      name: "Plank",
+      aliases: ["front plank", "planks"],
+      pattern: "core",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "time",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("abs", 0.7), m("obliques", 0.3)]
+    }),
+    bar({
+      id: "side_plank",
+      name: "Side Plank",
+      aliases: ["side planks"],
+      pattern: "core",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "time",
+      unilateral: true,
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("obliques", 0.75), m("abs", 0.25)]
+    }),
+    bar({
+      id: "hanging_leg_raise",
+      name: "Hanging Leg Raise",
+      aliases: ["leg raise", "hanging knee raise", "leg raises"],
+      pattern: "core",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "reps_only",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("abs", 0.7), m("obliques", 0.15), m("forearms", 0.15)]
+    }),
+    bar({
+      id: "cable_woodchop",
+      name: "Cable Woodchop",
+      aliases: ["woodchop", "wood chop", "cable chop"],
+      pattern: "rotation",
+      equipment: "cable",
+      loading: "stack",
+      unilateral: true,
+      e1rmValid: false,
+      incrementLb: 5,
+      primary: [m("obliques", 0.7), m("abs", 0.3)]
+    }),
+    // ── explosiveness: what taekwondo and soccer actually need ────────
+    bar({
+      id: "box_jump",
+      name: "Box Jump",
+      aliases: ["box jumps", "jump box"],
+      pattern: "jump",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "reps_only",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("quads", 0.45), m("glutes", 0.4), m("calves", 0.15)]
+    }),
+    bar({
+      id: "broad_jump",
+      name: "Broad Jump",
+      aliases: ["standing broad jump", "long jump"],
+      pattern: "jump",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "distance",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("glutes", 0.4), m("quads", 0.35), m("hamstrings", 0.25)]
+    }),
+    bar({
+      id: "sprint",
+      name: "Sprint",
+      aliases: ["sprints", "shuttle run", "shuttles", "run"],
+      pattern: "sprint",
+      equipment: "bodyweight",
+      loading: "free",
+      defaultSetKind: "time_distance",
+      e1rmValid: false,
+      incrementLb: 2.5,
+      primary: [m("hamstrings", 0.3), m("quads", 0.25), m("glutes", 0.25), m("calves", 0.2)]
+    }),
+    bar({
+      id: "sled_push",
+      name: "Sled Push",
+      aliases: ["prowler push", "sled"],
+      pattern: "sprint",
+      equipment: "sled",
+      loading: "free",
+      defaultSetKind: "distance",
+      e1rmValid: false,
+      incrementLb: 10,
+      primary: [m("quads", 0.4), m("glutes", 0.3), m("calves", 0.2), m("abs", 0.1)]
+    }),
+    bar({
+      id: "farmer_carry",
+      name: "Farmer's Carry",
+      aliases: ["farmers walk", "farmer walk", "loaded carry", "farmers carry"],
+      pattern: "carry",
+      equipment: "dumbbell",
+      loading: "dumbbell",
+      defaultSetKind: "distance",
+      e1rmValid: false,
+      primary: [m("forearms", 0.35), m("traps", 0.3), m("abs", 0.2), m("obliques", 0.15)]
+    })
+  ];
+  var CATALOG_BY_ID = Object.fromEntries(
+    CATALOG.map((e) => [e.id, e])
+  );
+  function catalogExercise(id) {
+    return CATALOG_BY_ID[id] || null;
+  }
+
+  // lib/train/identity.ts
+  var ABBREVIATIONS = {
+    bb: "barbell",
+    db: "dumbbell",
+    kb: "kettlebell",
+    ohp: "overhead press",
+    rdl: "romanian deadlift",
+    sldl: "stiff leg deadlift",
+    dl: "deadlift",
+    bp: "bench press",
+    bw: "bodyweight",
+    bss: "bulgarian split squat",
+    rfess: "rear foot elevated split squat",
+    ez: "ez bar"
+  };
+  var FILLER = /* @__PURE__ */ new Set(["the", "a", "an", "with", "using", "on", "at", "of", "for", "my", "some"]);
+  function singularize(token) {
+    if (token.length > 3 && token.endsWith("ies")) return `${token.slice(0, -3)}y`;
+    if (token.length > 3 && token.endsWith("es") && !token.endsWith("ses")) return token.slice(0, -2);
+    if (token.length > 2 && token.endsWith("s") && !token.endsWith("ss")) return token.slice(0, -1);
+    return token;
+  }
+  function normalizeName2(raw) {
+    const tokens = String(raw || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+    const expanded = [];
+    for (const token of tokens) {
+      const full = ABBREVIATIONS[token];
+      if (full) expanded.push(...full.split(" "));
+      else expanded.push(singularize(token));
+    }
+    return expanded.filter((t) => !FILLER.has(t)).join(" ");
+  }
+  function levenshtein(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const curr = [i];
+      for (let j = 1; j <= b.length; j++) {
+        curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = curr;
+    }
+    return prev[b.length];
+  }
+  function jaccard(a, b) {
+    const A = new Set(a.split(" ").filter(Boolean));
+    const B = new Set(b.split(" ").filter(Boolean));
+    if (!A.size && !B.size) return 1;
+    let shared = 0;
+    A.forEach((t) => {
+      if (B.has(t)) shared++;
+    });
+    return shared / (A.size + B.size - shared);
+  }
+  function loose(raw) {
+    return String(raw || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+  function editSimilarity(a, b) {
+    if (!a && !b) return 1;
+    return 1 - levenshtein(a, b) / Math.max(a.length, b.length, 1);
+  }
+  function similarity(a, b) {
+    const na = normalizeName2(a);
+    const nb = normalizeName2(b);
+    if (na === nb) return 1;
+    const sortedA = na.split(" ").filter(Boolean).sort().join(" ");
+    const sortedB = nb.split(" ").filter(Boolean).sort().join(" ");
+    const byToken = jaccard(na, nb) * 0.7 + Math.max(0, editSimilarity(sortedA, sortedB)) * 0.3;
+    const byLetter = Math.max(0, editSimilarity(loose(a), loose(b)));
+    return Math.max(byToken, byLetter);
+  }
+  var NEAR_THRESHOLD = 0.55;
+  function catalogCandidate(def, score) {
+    return { id: def.id, name: def.name, score, source: "catalog" };
+  }
+  function resolveExercise(raw, opts = {}) {
+    const normalized = normalizeName2(raw);
+    const users = opts.userExercises || {};
+    const aliases = opts.aliases || {};
+    if (!normalized) return { status: "unknown", candidates: [], normalized };
+    const aliasIndex = {};
+    for (const key of Object.keys(aliases)) aliasIndex[normalizeName2(key)] = aliases[key];
+    const confirmed = aliasIndex[normalized];
+    if (confirmed) {
+      const def = CATALOG.find((e) => e.id === confirmed);
+      if (def) return { status: "exact", match: catalogCandidate(def, 1), candidates: [], normalized };
+      if (users[confirmed]) {
+        return {
+          status: "exact",
+          match: { id: confirmed, name: users[confirmed], score: 1, source: "user" },
+          candidates: [],
+          normalized
+        };
+      }
+    }
+    for (const def of CATALOG) {
+      if ([def.id, def.name, ...def.aliases].some((f) => normalizeName2(f) === normalized)) {
+        return { status: "exact", match: catalogCandidate(def, 1), candidates: [], normalized };
+      }
+    }
+    for (const id of Object.keys(users)) {
+      if (normalizeName2(users[id]) === normalized || normalizeName2(id) === normalized) {
+        return {
+          status: "exact",
+          match: { id, name: users[id], score: 1, source: "user" },
+          candidates: [],
+          normalized
+        };
+      }
+    }
+    const scored = [];
+    for (const def of CATALOG) {
+      const best = [def.name, ...def.aliases].reduce((max, f) => Math.max(max, similarity(normalized, f)), 0);
+      if (best >= NEAR_THRESHOLD) scored.push(catalogCandidate(def, best));
+    }
+    for (const id of Object.keys(users)) {
+      const best = similarity(normalized, users[id]);
+      if (best >= NEAR_THRESHOLD) scored.push({ id, name: users[id], score: best, source: "user" });
+    }
+    scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+    if (scored.length) return { status: "near", candidates: scored.slice(0, 3), normalized };
+    return { status: "unknown", candidates: [], normalized };
+  }
+  function slugFromName(raw, taken) {
+    const base = String(raw).toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "exercise";
+    let id = base;
+    let n = 1;
+    while (taken.has(id)) id = `${base}_${++n}`;
+    return id;
+  }
+  function foldByDate(rows) {
+    const byDate = /* @__PURE__ */ new Map();
+    for (const raw of rows) {
+      const row = raw;
+      const date = String(row.date);
+      const existing = byDate.get(date);
+      if (existing) {
+        existing.sets = [
+          ...existing.sets || [],
+          ...row.sets || []
+        ];
+        if (typeof row.kg === "number" && row.kg > (existing.kg || 0)) existing.kg = row.kg;
+      } else {
+        byDate.set(date, { ...row });
+      }
+    }
+    return [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  }
+  function mergeExercises(state, fromId, intoId) {
+    if (fromId === intoId) throw new Error("cannot merge a lift into itself");
+    const names = state.exerciseNames || {};
+    const intoName = names[intoId] || intoId;
+    const fromName = names[fromId] || fromId;
+    const history = { ...state.history || {} };
+    const moving = history[fromId] || [];
+    history[intoId] = foldByDate([...history[intoId] || [], ...moving]);
+    delete history[fromId];
+    const exerciseNames = { ...names };
+    delete exerciseNames[fromId];
+    const customLib = { ...state.customLib || {} };
+    const losing = customLib[fromId];
+    const winning = customLib[intoId] || {};
+    if (losing) {
+      customLib[intoId] = { ...losing, ...winning };
+      delete customLib[fromId];
+    }
+    const aliases = { ...state.aliases || {} };
+    for (const key of Object.keys(aliases)) {
+      if (aliases[key] === fromId) aliases[key] = intoId;
+    }
+    aliases[normalizeName2(fromName)] = intoId;
+    const deloadStates = { ...state.deloadStates || {} };
+    if (deloadStates[fromId] && !deloadStates[intoId]) deloadStates[intoId] = deloadStates[fromId];
+    delete deloadStates[fromId];
+    const painFlagged = [...state.painFlagged || []];
+    if (painFlagged.includes(fromId)) {
+      if (!painFlagged.includes(intoId)) painFlagged.push(intoId);
+      painFlagged.splice(painFlagged.indexOf(fromId), 1);
+    }
+    const liftGoals = (state.liftGoals || []).map((g) => g && g.id === fromId ? { ...g, id: intoId } : g);
+    const session = state.session ? {
+      ...state.session,
+      ex: (state.session.ex || []).map(
+        (ex) => ex.id === fromId ? { ...ex, id: intoId, name: intoName } : ex
+      )
+    } : state.session;
+    return {
+      state: { ...state, history, exerciseNames, customLib, aliases, deloadStates, painFlagged, liftGoals, session },
+      moved: moving.length,
+      fromName,
+      intoName
+    };
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -1689,7 +2392,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
+    history:{}, customLib:{}, aliases:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -1704,18 +2407,18 @@ function streakText(){ return TrainEngine.streakLabel(currentStreak(), weeklyTar
 /* ---- AI-classified exercises (typed by name, or from the coach) -----
    Cached in STATE.customLib so a name is only ever sent to the model
    once — it's a real paid call on the user's own key. */
-function slugify(name){
-  const base = name.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'exercise';
-  let id = base, n = 1;
-  const taken = id2 => (STATE.customLib && STATE.customLib[id2]) || curSession().ex.some(x=>x.id===id2);
-  while (taken(id)) { id = base + '_' + (++n); }
-  return id;
+/* Ids come from the engine, so the tile has no second implementation of
+   what counts as a distinct lift. */
+function takenIds(){
+  const taken=new Set(Object.keys(STATE.customLib||{}));
+  Object.keys(STATE.exerciseNames||{}).forEach(id=>taken.add(id));
+  curSession().ex.forEach(x=>taken.add(x.id));
+  return taken;
 }
+function slugify(name){ return TrainEngine.slugFromName(name, takenIds()); }
 function slugifyAvoiding(name, usedSet){
-  const base = String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'exercise';
-  let id=base, n=1;
-  while ((STATE.customLib && STATE.customLib[id]) || usedSet.has(id)) { id = base+'_'+(++n); }
-  return id;
+  const taken=takenIds(); (usedSet||new Set()).forEach(id=>taken.add(id));
+  return TrainEngine.slugFromName(name, taken);
 }
 /* ---- global per-exercise history, independent of any one session --- */
 function histFor(e){ STATE.history=STATE.history||{}; return STATE.history[e.id]||(STATE.history[e.id]=[]); }
@@ -2927,6 +3630,51 @@ const SKY_TOGGLE_HTML =
     + '<div class="theme-switch__circle-container"><div class="theme-switch__sun-moon-container"><div class="theme-switch__moon"><div class="theme-switch__spot"></div><div class="theme-switch__spot"></div><div class="theme-switch__spot"></div></div></div></div>'
   + '</div>'
   + '</label>';
+/* Merging is offered rather than done. It rewrites a training record, so
+   it is confirmed explicitly and it is never destructive — the losing id's
+   sessions move onto the winner, they do not vanish. */
+function openMergeTool(){
+  const ids=Object.keys(STATE.exerciseNames||{});
+  if(ids.length<2){
+    openPop(popHead('Nothing to merge','Duplicate lifts')+'<p class="formGist">You need at least two tracked lifts before anything can be combined.</p>');
+    return;
+  }
+  const count=id=>((STATE.history&&STATE.history[id])||[]).filter(x=>!x.off).length;
+  openPop(popHead('Merge duplicate lifts','Pick the one to fold away')
+    + '<p class="formGist">Its sessions move onto the lift you choose next. Nothing is deleted.</p>'
+    + '<div class="swapList">'+ids.map(id=>'<button class="swapItem" data-from="'+id+'"><span class="nm">'+escapeHtml(STATE.exerciseNames[id])+'</span><span class="mu">'+count(id)+' session'+(count(id)===1?'':'s')+'</span></button>').join('')+'</div>',
+    scrim=>{
+      scrim.querySelectorAll('.swapItem[data-from]').forEach(b=> b.onclick=()=>{ closePop(); pickMergeTarget(b.dataset.from); });
+    });
+}
+function pickMergeTarget(fromId){
+  const fromName=STATE.exerciseNames[fromId];
+  const targets=Object.keys(STATE.exerciseNames||{})
+    .filter(id=>id!==fromId)
+    .map(id=>({ id, name:STATE.exerciseNames[id], score:TrainEngine.similarity(fromName, STATE.exerciseNames[id]) }))
+    .sort((a,b)=>b.score-a.score);
+  openPop(popHead('Merge “'+escapeHtml(fromName)+'” into…','Ranked by similarity')
+    + '<div class="swapList">'+targets.map(t=>'<button class="swapItem" data-into="'+t.id+'"><span class="nm">'+escapeHtml(t.name)+'</span><span class="mu">'+Math.round(t.score*100)+'% match</span></button>').join('')+'</div>',
+    scrim=>{
+      scrim.querySelectorAll('.swapItem[data-into]').forEach(b=> b.onclick=()=>{ closePop(); confirmMerge(fromId, b.dataset.into); });
+    });
+}
+function confirmMerge(fromId, intoId){
+  const fromName=STATE.exerciseNames[fromId], intoName=STATE.exerciseNames[intoId];
+  const moving=((STATE.history&&STATE.history[fromId])||[]).filter(x=>!x.off).length;
+  openPop(popHead('Merge these two?', intoName)
+    + '<p class="formGist">'+moving+' session'+(moving===1?'':'s')+' of “'+escapeHtml(fromName)+'” will move onto “'+escapeHtml(intoName)+'”. Same-day sessions combine. Every set and every date is kept, and “'+escapeHtml(fromName)+'” becomes an alias so it cannot fork again.</p>'
+    + '<div class="popBtns"><button class="pbtn ghost" id="mgCancel">Cancel</button><button class="pbtn save" id="mgGo">Merge</button></div>',
+    scrim=>{
+      scrim.querySelector('#mgCancel').onclick=closePop;
+      scrim.querySelector('#mgGo').onclick=()=>{
+        const out=TrainEngine.mergeExercises(STATE, fromId, intoId);
+        Object.assign(STATE, out.state);
+        saveState(); closePop(); render();
+        renderStatsPicker && renderStatsPicker(); drawStatsSection && drawStatsSection();
+      };
+    });
+}
 function openSettings(){
   openPop(popHead('Settings','Appearance')
     + '<div class="secLbl">Theme</div>'
@@ -2935,6 +3683,9 @@ function openSettings(){
     + '<div class="secLbl">Sessions per week</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal" id="wkTarget">'+weeklyTarget()+'</span><button class="step" data-t="1">+</button></div></div>'
     + '<p class="settingsNote">Your streak counts weeks that hit this. Rest days never break it.</p>'
+    + '<div class="secLbl">Duplicate lifts</div>'
+    + '<p class="settingsNote">If the same lift got logged under two names, merge them — every set and date moves onto one, nothing is deleted.</p>'
+    + '<button class="pbtn ghost" id="openMerge" style="width:100%">Merge duplicate lifts</button>'
     + '<div class="secLbl">Ignore a stretch</div>'
     + '<p class="settingsNote">Sick or travelling? Mark those dates and plateau detection will skip them, so a forced break never reads as a stall.</p>'
     + '<div class="searchRow"><input id="exFrom" type="date" aria-label="From" /></div>'
@@ -2956,6 +3707,8 @@ function openSettings(){
           STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
         });
       };
+      const mergeBtn=scrim.querySelector('#openMerge');
+      if(mergeBtn) mergeBtn.onclick=()=>{ closePop(); openMergeTool(); };
       scrim.querySelector('#exAdd').onclick=()=>{
         const from=scrim.querySelector('#exFrom').value, to=scrim.querySelector('#exTo').value;
         if(!from||!to) return;
@@ -3131,8 +3884,59 @@ function openSwap(e){
         };
       }
       const nameIn=scrim.querySelector('#aiName'), goBtn=scrim.querySelector('#aiGo'), status=scrim.querySelector('#aiStatus');
+      /* Resolution comes first, and an exact hit costs nothing: no AI
+         call, no new id, and the lift keeps every session it already has.
+         A near miss asks, because silently creating "BB Bench" beside
+         "Bench Press" is how a lift loses its history. */
+      const installFromCatalog=(cand, normalized)=>{
+        const def = TrainEngine.catalogExercise(cand.id);
+        STATE.aliases = STATE.aliases || {};
+        STATE.aliases[normalized] = cand.id;
+        if(def){
+          installExerciseDef(def.id, def.name, {
+            kind:def.defaultSetKind, perSide:def.unilateral, assisted:false,
+            repRange:TrainEngine.defaultRepRange(2, def.defaultSetKind),
+            equipment:def.equipment, primary:def.primary,
+          });
+          Object.assign(STATE.customLib[def.id], { secondary:def.secondary, catalog:true });
+          commitExercise(sessionExerciseFrom({
+            id:def.id, name:def.name, kind:def.defaultSetKind, sets:3,
+            reps:8, weight:lastKgFromHistory(def.id)||0, rest:90, perSide:def.unilateral,
+          }), e, session, adding);
+        } else {
+          const nm2 = (STATE.exerciseNames||{})[cand.id] || cand.name;
+          commitExercise(sessionExerciseFrom({
+            id:cand.id, name:nm2, kind:kindFor({id:cand.id}), sets:3, reps:8,
+            weight:lastKgFromHistory(cand.id)||0, rest:90, perSide:flagFor({id:cand.id},'perSide'),
+          }), e, session, adding);
+        }
+        saveState();
+      };
+      const askWhich=(res, onNew)=>{
+        closePop();
+        openPop(popHead('Did you mean…','Keeping one history')
+          + '<p class="formGist">Picking the lift you already track keeps its history, its records and its progression. A new one starts from nothing.</p>'
+          + '<div class="swapList">'+res.candidates.map(c=>'<button class="swapItem" data-id="'+c.id+'"><span class="nm">'+escapeHtml(c.name)+'</span><span class="mu">'+Math.round(c.score*100)+'% match</span></button>').join('')+'</div>'
+          + '<button class="pbtn ghost" id="idNew" style="width:100%;margin-top:12px">No — this is a different lift</button>',
+          scrim2=>{
+            scrim2.querySelectorAll('.swapItem[data-id]').forEach(b=> b.onclick=()=>{
+              const cand=res.candidates.find(c=>c.id===b.dataset.id);
+              closePop(); installFromCatalog(cand, res.normalized);
+            });
+            scrim2.querySelector('#idNew').onclick=()=>{ closePop(); onNew(); };
+          });
+      };
       const runClassify=async()=>{
         const nm=nameIn.value.trim(); if(!nm) return;
+        const resolved = TrainEngine.resolveExercise(nm, {
+          userExercises: STATE.exerciseNames || {},
+          aliases: STATE.aliases || {},
+        });
+        if(resolved.status==='exact'){ installFromCatalog(resolved.match, resolved.normalized); return; }
+        if(resolved.status==='near'){ askWhich(resolved, ()=>classifyNew(nm)); return; }
+        return classifyNew(nm);
+      };
+      const classifyNew=async(nm)=>{
         goBtn.disabled=true; status.style.color='var(--muted-strong)'; status.textContent='Looking that up…';
         try{
           const info=await window.Vitality.classify(nm);
@@ -4424,6 +5228,7 @@ function spawnParticles(root){
   STATE.history = STATE.history || {};
   STATE.deloadStates = STATE.deloadStates || {};
   STATE.deloadExclusions = STATE.deloadExclusions || [];
+  STATE.aliases = STATE.aliases || {};
   STATE.painFlagged = STATE.painFlagged || [];
   STATE.weeklyTarget = STATE.weeklyTarget || TrainEngine.DEFAULT_WEEKLY_TARGET;
   migrateDeloadOverrides();

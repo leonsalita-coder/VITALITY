@@ -130,23 +130,43 @@ export function normalizeShares(list: MuscleContribution[]): MuscleContribution[
   return list.map((c) => ({ muscle: c.muscle, share: c.share / total }))
 }
 
-function collect(raw: unknown): { list: MuscleContribution[]; unmapped: string[]; exact: boolean } {
-  const names = Array.isArray(raw) ? raw : []
+/**
+ * Accepts both shapes: a flat list of names from the classifier, and an
+ * authored list of {muscle, share} from the catalog. Without the second,
+ * `estimated: false` could never actually occur and the flag would mean
+ * nothing.
+ */
+function collect(raw: unknown): {
+  list: MuscleContribution[]
+  unmapped: string[]
+  exact: boolean
+  authored: boolean
+} {
+  const entries = Array.isArray(raw) ? raw : []
   const seen = new Map<Muscle, number>()
   const unmapped: string[] = []
   let exact = true
-  for (const name of names) {
+  let authored = entries.length > 0
+
+  for (const entry of entries) {
+    const isObject = !!entry && typeof entry === 'object'
+    const name = isObject ? (entry as Record<string, unknown>).muscle : entry
+    const weight = isObject ? (entry as Record<string, unknown>).share : undefined
+    if (!isObject || typeof weight !== 'number') authored = false
+
     const { muscle, exact: hit } = mapMuscle(name)
     if (!muscle) {
       const label = String(name || '').trim()
-      if (label) unmapped.push(label)
+      if (label && label !== '[object Object]') unmapped.push(label)
+      else if (isObject) unmapped.push(JSON.stringify(entry))
       continue
     }
     if (!hit) exact = false
-    seen.set(muscle, (seen.get(muscle) || 0) + 1)
+    // an authored share, or one count toward an even split
+    seen.set(muscle, (seen.get(muscle) || 0) + (typeof weight === 'number' ? weight : 1))
   }
-  const list = [...seen.entries()].map(([muscle, count]) => ({ muscle, share: count }))
-  return { list: normalizeShares(list), unmapped, exact }
+  const list = [...seen.entries()].map(([muscle, share]) => ({ muscle, share }))
+  return { list: normalizeShares(list), unmapped, exact, authored }
 }
 
 /**
@@ -162,11 +182,10 @@ export function muscleSplitFrom(info: unknown): MuscleSplit {
   const primary = collect(def.primary)
   const secondary = collect(def.secondary)
 
-  /* Authored shares would arrive as objects with a share; a flat list of
-     names is the classifier's shape and can only be split evenly, which is
-     a guess however reasonable. */
-  const authored = Array.isArray(def.primary)
-    && (def.primary as unknown[]).some((m) => m && typeof m === 'object' && 'share' in (m as object))
+  /* Estimated unless somebody actually wrote the shares down AND every
+     name resolved precisely. A flat list of names is the classifier's
+     shape and can only be split evenly, which is a guess however sensible. */
+  const authored = primary.authored && (!secondary.list.length || secondary.authored)
 
   return {
     primary: primary.list,
