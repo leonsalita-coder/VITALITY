@@ -131,6 +131,12 @@ export interface PRCandidate {
   metres?: number
   /** `weight` is assistance; less of it is the record. */
   assisted?: boolean
+  /**
+   * Taken to failure. Carried so a candidate can be built straight from a
+   * logged set; a record stands or falls on the numbers either way, and an
+   * all-out set is exactly where a rep record tends to come from.
+   */
+  amrap?: boolean
   warmup?: boolean
   fail?: boolean
 }

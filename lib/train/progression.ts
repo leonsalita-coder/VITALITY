@@ -16,13 +16,13 @@
  * anywhere in this system and none is introduced here.
  */
 
-export type ProgressionBasis = 'clean' | 'miss' | 'deload' | 'layoff' | 'new'
+export type ProgressionBasis = 'clean' | 'miss' | 'deload' | 'layoff' | 'new' | 'amrap'
 
 /** How weight can physically be added to this movement. */
 export type LoadingStyle = 'barbell' | 'dumbbell' | 'stack' | 'free'
 
 import {
-  DEFAULT_SET_KIND, entryKind, setWeight, topWorkingMetres, topWorkingReps,
+  DEFAULT_SET_KIND, entryKind, rangeSets, setWeight, topWorkingMetres, topWorkingReps,
   topWorkingSeconds, topWorkingWeight, workingRpe, workingSets,
   type HistoryEntry, type HistorySet, type SetKind,
 } from './sets'
@@ -30,6 +30,7 @@ import { deloadPlan, DELOAD_HOLD_SESSIONS as DELOAD_HOLD, type DeloadRecord } fr
 import { countsForProgression } from './session'
 import { snapToLoadable, type PlateConfig } from './plates'
 import type { TrainingAge } from './onboarding'
+import { amrapSignal } from './amrap'
 
 export type { HistoryEntry, HistorySet }
 
@@ -334,6 +335,11 @@ function suggestLoad(
      single read as the working weight. A miss is still read off the raw
      list, because a missed set is information even though it is not work. */
   const sets = workingSets(last)
+  /* The sets double progression is allowed to measure. An AMRAP is a
+     working set, but it is not evidence about the rep range — it
+     overshoots by design and undershoots when the lifter is cooked, and
+     both would be read as statements about the range. */
+  const ranged = rangeSets(last)
   const missedLast = (last.sets || []).some((set) => set.fail)
   /* With no working sets to read, fall back to the weight the session
      recorded — holding there beats dropping to bodyweight. */
@@ -425,7 +431,9 @@ function suggestLoad(
     }
   }
 
-  const lowest = Math.min(...sets.map((set) => set.r || 0))
+  const lowest = ranged.length
+    ? Math.min(...ranged.map((set) => set.r || 0))
+    : Math.min(...sets.map((set) => set.r || 0))
   if (lowest < minReps) {
     return {
       weight: held,
@@ -436,7 +444,22 @@ function suggestLoad(
   }
 
   // sets × reps, matching how the card and the linear wording read
-  const shape = `${sets.length}×${lowest}`
+  const shape = `${(ranged.length || sets.length)}×${lowest}`
+
+  /* Measured output beats inferred state, so the AMRAP is read before
+     RPE and overrides it. A lifter who went to failure and got five past
+     the target has told us something RPE can only guess at. */
+  const amrap = amrapSignal(last, lowest)
+  if (amrap && amrap.verdict === 'struggling') {
+    /* All out and still short. Adding weight to this is how a bad week
+       becomes a bad month; hold, and let the next session answer. */
+    return {
+      weight: held,
+      reps: minReps,
+      basis: 'amrap',
+      reason: `holding at ${describeWeight(held)} — ${amrap.reps} reps to failure, under the ${amrap.target} you were chasing`,
+    }
+  }
 
   // still room inside the range: another rep before another plate
   if (lowest < maxReps) {
@@ -470,7 +493,10 @@ function suggestLoad(
     }
   }
 
-  const multiplier = rpe != null && rpe <= EASY_RPE ? 2 : 1
+  /* AMRAP first: it measured the load, where RPE estimated the lifter. */
+  const multiplier = amrap && amrap.verdict === 'under_loaded'
+    ? amrap.multiplier
+    : rpe != null && rpe <= EASY_RPE ? 2 : 1
   if (assisted) {
     // less assistance is the improvement; it can reach zero but not pass it
     const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held))
@@ -492,7 +518,9 @@ function suggestLoad(
       weight: next,
       reps: minReps,
       basis: 'clean',
-      reason: `+${delta} lb — ${shape} at RPE ${tidy(rpe as number)}, room to move`,
+      reason: amrap && amrap.verdict === 'under_loaded'
+        ? `+${delta} lb — ${amrap.reps} reps to failure on a ${amrap.target}-rep target, that was too light`
+        : `+${delta} lb — ${shape} at RPE ${tidy(rpe as number)}, room to move`,
     }
   }
   return {

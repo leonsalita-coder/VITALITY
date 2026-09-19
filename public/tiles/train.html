@@ -300,6 +300,8 @@ var TrainEngine = (() => {
   // lib/train/index.ts
   var index_exports = {};
   __export(index_exports, {
+    AMRAP_MAX_MULTIPLIER: () => AMRAP_MAX_MULTIPLIER,
+    AMRAP_OVER: () => AMRAP_OVER,
     CATALOG: () => CATALOG,
     CATALOG_BY_ID: () => CATALOG_BY_ID,
     DEFAULT_BAR_LB: () => DEFAULT_BAR_LB,
@@ -338,6 +340,9 @@ var TrainEngine = (() => {
     SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
     SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
+    amrapOf: () => amrapOf,
+    amrapSignal: () => amrapSignal,
+    amrapTrend: () => amrapTrend,
     analyse: () => analyse,
     anythingAnswered: () => anythingAnswered,
     applyOnboarding: () => applyOnboarding,
@@ -376,6 +381,7 @@ var TrainEngine = (() => {
     importCsv: () => importCsv,
     importJson: () => importJson,
     indexFrom: () => indexFrom,
+    isAmrapSet: () => isAmrapSet,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
     limitDeloads: () => limitDeloads,
@@ -403,6 +409,7 @@ var TrainEngine = (() => {
     prefillPlan: () => prefillPlan,
     profileFor: () => profileFor,
     pushSnapshot: () => pushSnapshot,
+    rangeSets: () => rangeSets,
     ratios: () => ratios,
     recentOtherLoad: () => recentOtherLoad,
     recordBodyweight: () => recordBodyweight,
@@ -491,6 +498,16 @@ var TrainEngine = (() => {
   }
   function workingSets(entry) {
     return (entry.sets || []).filter(isWorkingSet);
+  }
+  function isAmrapSet(set) {
+    return !!set && set.amrap === true && isWorkingSet(set);
+  }
+  function amrapOf(entry) {
+    const flagged = (entry.sets || []).filter(isAmrapSet);
+    return flagged.length ? flagged[flagged.length - 1] : null;
+  }
+  function rangeSets(entry) {
+    return workingSets(entry).filter((set) => !isAmrapSet(set));
   }
   function setWeight(entry, set) {
     return typeof set.w === "number" ? set.w : entry.kg || 0;
@@ -602,6 +619,38 @@ var TrainEngine = (() => {
     return values.reduce((a, b) => a + b, 0) / values.length;
   }
 
+  // lib/train/amrap.ts
+  var AMRAP_OVER = 3;
+  var AMRAP_MAX_MULTIPLIER = 4;
+  function amrapSignal(entry, target) {
+    if (!entry) return null;
+    const set = amrapOf(entry);
+    if (!set || typeof set.r !== "number" || !Number.isFinite(set.r)) return null;
+    if (!Number.isFinite(target) || target <= 0) return null;
+    const reps = set.r;
+    const surplus = reps - target;
+    if (surplus < 0) {
+      return { reps, target, surplus, verdict: "struggling", multiplier: 1 };
+    }
+    if (surplus < AMRAP_OVER) {
+      return { reps, target, surplus, verdict: "on_target", multiplier: 1 };
+    }
+    const multiplier = Math.min(AMRAP_MAX_MULTIPLIER, 1 + Math.floor(surplus / AMRAP_OVER));
+    return { reps, target, surplus, verdict: "under_loaded", multiplier };
+  }
+  function amrapTrend(history) {
+    const reps = [];
+    for (const entry of history || []) {
+      if (!entry || entry.off) continue;
+      const set = amrapOf(entry);
+      if (set && typeof set.r === "number" && Number.isFinite(set.r)) reps.push(set.r);
+    }
+    if (reps.length < 2) return null;
+    const from = reps[0];
+    const to = reps[reps.length - 1];
+    return { from, to, sessions: reps.length, falling: to < from };
+  }
+
   // lib/train/targets.ts
   var PROFILES = {
     beginner: {
@@ -674,11 +723,17 @@ var TrainEngine = (() => {
   var RPE_RISE = 1;
   function readCause(window) {
     const values = window.map(workingRpe).filter((v) => v != null);
-    if (values.length < 2) return { cause: "unknown", rpe: values.length ? values[0] : null };
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const mean = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+    const trend = amrapTrend(window);
+    if (trend && trend.falling) return { cause: "fatigue", rpe: mean, amrapFalling: true };
+    if (values.length < 2) {
+      return { cause: "unknown", rpe: values.length ? values[0] : null, amrapFalling: false };
+    }
     const rising = values[values.length - 1] - values[0] >= RPE_RISE;
-    if (rising || mean >= HIGH_RPE) return { cause: "fatigue", rpe: mean };
-    return { cause: "programming", rpe: mean };
+    if (rising || mean >= HIGH_RPE) {
+      return { cause: "fatigue", rpe: mean, amrapFalling: false };
+    }
+    return { cause: "programming", rpe: mean, amrapFalling: false };
   }
   function detectPlateau(history, opts = {}) {
     const usable = (history || []).filter(
@@ -694,7 +749,7 @@ var TrainEngine = (() => {
     const primary = scores.map((s) => s.primary);
     const secondary = scores.map((s) => s.secondary);
     if (flat(primary) && flat(secondary)) {
-      const { cause, rpe } = readCause(recent);
+      const { cause, rpe, amrapFalling } = readCause(recent);
       const last = scores[scores.length - 1];
       return {
         sessions: PLATEAU_WINDOW,
@@ -702,7 +757,8 @@ var TrainEngine = (() => {
         weight: Math.abs(last.primary),
         kind: last.kind,
         cause,
-        rpe
+        rpe,
+        amrapFalling
       };
     }
     return null;
@@ -1057,6 +1113,7 @@ var TrainEngine = (() => {
       };
     }
     const sets = workingSets(last);
+    const ranged = rangeSets(last);
     const missedLast = (last.sets || []).some((set) => set.fail);
     const assisted = exercise.assisted === true || (last.sets || []).some((set) => set.assisted);
     const assistUsed = sets.length ? Math.min(...sets.map((set) => setWeight(last, set))) : 0;
@@ -1125,7 +1182,7 @@ var TrainEngine = (() => {
         reason: `holding at ${describeWeight(held)} \u2014 missed the last set`
       };
     }
-    const lowest = Math.min(...sets.map((set) => set.r || 0));
+    const lowest = ranged.length ? Math.min(...ranged.map((set) => set.r || 0)) : Math.min(...sets.map((set) => set.r || 0));
     if (lowest < minReps) {
       return {
         weight: held,
@@ -1134,7 +1191,16 @@ var TrainEngine = (() => {
         reason: `holding at ${describeWeight(held)} \u2014 short of ${minReps} reps last time`
       };
     }
-    const shape = `${sets.length}\xD7${lowest}`;
+    const shape = `${ranged.length || sets.length}\xD7${lowest}`;
+    const amrap = amrapSignal(last, lowest);
+    if (amrap && amrap.verdict === "struggling") {
+      return {
+        weight: held,
+        reps: minReps,
+        basis: "amrap",
+        reason: `holding at ${describeWeight(held)} \u2014 ${amrap.reps} reps to failure, under the ${amrap.target} you were chasing`
+      };
+    }
     if (lowest < maxReps) {
       return {
         weight: held,
@@ -1161,7 +1227,7 @@ var TrainEngine = (() => {
         reason: `holding at ${describeWeight(held)} \u2014 clean ${shape} but grinding at RPE ${tidy2(rpe)}`
       };
     }
-    const multiplier = rpe != null && rpe <= EASY_RPE ? 2 : 1;
+    const multiplier = amrap && amrap.verdict === "under_loaded" ? amrap.multiplier : rpe != null && rpe <= EASY_RPE ? 2 : 1;
     if (assisted) {
       const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held));
       const removed = tidy2(held - eased);
@@ -1179,7 +1245,7 @@ var TrainEngine = (() => {
         weight: next,
         reps: minReps,
         basis: "clean",
-        reason: `+${delta} lb \u2014 ${shape} at RPE ${tidy2(rpe)}, room to move`
+        reason: amrap && amrap.verdict === "under_loaded" ? `+${delta} lb \u2014 ${amrap.reps} reps to failure on a ${amrap.target}-rep target, that was too light` : `+${delta} lb \u2014 ${shape} at RPE ${tidy2(rpe)}, room to move`
       };
     }
     return {
@@ -4924,6 +4990,12 @@ function renderPill(e, rx, idx){
     /* one tap, on the row, mid-session — a warm-up flag buried in a popup
        would never get used, and an unflagged warm-up pollutes everything */
     +   '<button class="pillWarm'+(s&&s.warmup?' on':'')+'" data-act="warmup" aria-pressed="'+(s&&s.warmup?'true':'false')+'" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button>'
+    /* AMRAP, on the last set only — it is the set taken to failure, and
+       offering it on set one would invite flagging a set nobody took to
+       failure, which is worse than not offering it. Never required. */
+    +   (idx === e.log.length - 1 && (setK === 'reps_weight' || setK === 'reps_only' || setK === 'bodyweight' || setK === 'weighted_bodyweight')
+          ? '<button class="pillWarm'+(((s&&s.amrap)||(!s&&amrapArmed[e.id+':'+idx]))?' on':'')+'" data-act="amrap" aria-pressed="'+(((s&&s.amrap)||(!s&&amrapArmed[e.id+':'+idx]))?'true':'false')+'" title="AMRAP — taken to failure. Counts for volume and records, never for the rep range.">A</button>'
+          : '')
     /* RPE is optional forever: the set is already logged by the time this
        is reachable, so skipping it costs nothing and blocks nothing. */
     +   (logged && !s.warmup ? '<button class="pillWarm'+(s&&typeof s.rpe==='number'?' on':'')+'" data-act="rpe" title="How hard was that set? Optional.">'+(s&&typeof s.rpe==='number'?s.rpe:'RPE')+'</button>' : '')
@@ -4937,6 +5009,7 @@ function renderPill(e, rx, idx){
   const readNum=el=>el?parseFloat(el.value):NaN;
   const commit=()=>{
     const values={ kind:setK, perSide:flagFor(e,'perSide')||undefined, assisted:flagFor(e,'assisted')||undefined };
+    if(amrapArmed[e.id+':'+idx]) values.amrap=true;
     if(setK==='time' || setK==='time_distance'){
       const sec=readNum(row.querySelector('.sec'));
       if(!Number.isFinite(sec)||sec<0) return;
@@ -4975,6 +5048,15 @@ function renderPill(e, rx, idx){
   const dropBtn=row.querySelector('.pillDrop'); if(dropBtn) dropBtn.addEventListener('click',ev=>{ stop(ev); addDrop(e, idx); });
   const rpeBtn=row.querySelector('[data-act="rpe"]');
   if(rpeBtn) rpeBtn.addEventListener('click',ev=>{ stop(ev); openRpe(e, idx); });
+  /* Flagged BEFORE the set is logged, so commit() carries it — the same
+     shape as the warm-up flag, and the same one tap on the row. */
+  const amrapBtn=row.querySelector('[data-act="amrap"]');
+  if(amrapBtn) amrapBtn.addEventListener('click',ev=>{
+    stop(ev);
+    if(e.log[idx]) e.log[idx].amrap = !e.log[idx].amrap;
+    else { amrapArmed[e.id+':'+idx] = !amrapArmed[e.id+':'+idx]; }
+    rollupToday(e); render();
+  });
   const warmBtn=row.querySelector('[data-act="warmup"]');
   if(warmBtn) warmBtn.addEventListener('click',ev=>{
     stop(ev);
@@ -5024,11 +5106,17 @@ function renderDropRow(e, idx, di){
 }
 function IC_reset(){ return '<svg viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="currentColor"><path d="M3.5 6.5 A6 6 0 1 0 6 3.2"/><polyline points="2.4 2.4 3.7 6.6 8 5.2"/></svg>'; }
 
+/* Rows armed as AMRAP but not yet logged. Session-scoped and deliberately
+   not persisted: an armed-but-unlogged flag is an intention, not a record,
+   and reloading into "you said this set was to failure" about a set that
+   never happened would be the app remembering something that did not. */
+const amrapArmed = {};
+
 function doLog(e, idx, values, fail){
   const _sess=curSession(); if(!_sess.startedAt) _sess.startedAt=Date.now();
   const wasComplete = exComplete(e);
   const entry={};
-  ['kind','kg','reps','s','m','perSide','assisted'].forEach(k=>{ if(values[k]!==undefined) entry[k]=values[k]; });
+  ['kind','kg','reps','s','m','perSide','assisted','amrap'].forEach(k=>{ if(values[k]!==undefined) entry[k]=values[k]; });
   if(fail){ entry.reps=0; entry.fail=true; }
   e.log[idx]=entry;
   rollupToday(e);
@@ -5135,6 +5223,7 @@ function rollupFor(e, date){
       if(s.m!=null) row.m=s.m;
       if(s.perSide) row.perSide=true;
       if(s.assisted) row.assisted=true;
+      if(s.amrap) row.amrap=true;
       if(s.rpe!=null) row.rpe=s.rpe;
       return row;
     });

@@ -1,3 +1,4 @@
+export * from './amrap'
 /**
  * Train engine — pure, DOM-free training logic.
  *

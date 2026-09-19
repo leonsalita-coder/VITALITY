@@ -22,6 +22,7 @@
 import { entryScore, workingRpe, type HistoryEntry, type SetKind } from './sets'
 import { deloadCut } from './targets'
 import type { TrainingAge } from './onboarding'
+import { amrapTrend } from './amrap'
 
 /** Sessions to sit at the reduced load before climbing back. */
 export const DELOAD_HOLD_SESSIONS = 2
@@ -105,19 +106,43 @@ export interface Plateau {
   cause: PlateauCause
   /** Mean RPE across the window, or null when it was never logged. */
   rpe: number | null
+  /**
+   * The all-out set has been going down across the window.
+   *
+   * A clearer stall signal than flat working sets, because flat working
+   * sets are what a lifter produces when they are FOLLOWING the
+   * programme — the number that moves is the one nobody was pacing.
+   * False when nothing was flagged, so a lifter who never uses AMRAP
+   * reads exactly as before.
+   */
+  amrapFalling: boolean
 }
 
 /** A rise of this much across the window reads as accumulating fatigue. */
 const RPE_RISE = 1
 
-function readCause(window: HistoryEntry[]): { cause: PlateauCause; rpe: number | null } {
+function readCause(
+  window: HistoryEntry[],
+): { cause: PlateauCause; rpe: number | null; amrapFalling: boolean } {
   const values = window.map(workingRpe).filter((v): v is number => v != null)
+  const mean = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
+
+  /* Output first. A falling all-out set at a constant load is a lifter
+     getting weaker under a weight that looks perfectly stable in the log,
+     and it is measured rather than self-reported — so it outranks the RPE
+     read below rather than being averaged with it. */
+  const trend = amrapTrend(window)
+  if (trend && trend.falling) return { cause: 'fatigue', rpe: mean, amrapFalling: true }
+
   // a trend needs at least two points; one lonely RPE proves nothing
-  if (values.length < 2) return { cause: 'unknown', rpe: values.length ? values[0] : null }
-  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  if (values.length < 2) {
+    return { cause: 'unknown', rpe: values.length ? values[0] : null, amrapFalling: false }
+  }
   const rising = values[values.length - 1] - values[0] >= RPE_RISE
-  if (rising || mean >= HIGH_RPE) return { cause: 'fatigue', rpe: mean }
-  return { cause: 'programming', rpe: mean }
+  if (rising || (mean as number) >= HIGH_RPE) {
+    return { cause: 'fatigue', rpe: mean, amrapFalling: false }
+  }
+  return { cause: 'programming', rpe: mean, amrapFalling: false }
 }
 
 /**
@@ -155,7 +180,7 @@ export function detectPlateau(
   const primary = scores.map((s) => s.primary)
   const secondary = scores.map((s) => s.secondary)
   if (flat(primary) && flat(secondary)) {
-    const { cause, rpe } = readCause(recent)
+    const { cause, rpe, amrapFalling } = readCause(recent)
     const last = scores[scores.length - 1]
     return {
       sessions: PLATEAU_WINDOW,
@@ -164,6 +189,7 @@ export function detectPlateau(
       kind: last.kind,
       cause,
       rpe,
+      amrapFalling,
     }
   }
   return null

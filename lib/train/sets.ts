@@ -48,6 +48,15 @@ export interface HistorySet {
   s?: number
   /** Metres covered — distance and time_distance. */
   m?: number
+  /**
+   * Taken to technical failure rather than to a rep target.
+   *
+   * Optional forever. An AMRAP set is a working set — it happened and it
+   * counts toward volume and records — but it is deliberately NOT a
+   * measurement of the rep range, so double progression excludes it. See
+   * rangeSets() below.
+   */
+  amrap?: boolean
   /** Absent means reps_weight. */
   kind?: SetKind
   /**
@@ -148,6 +157,36 @@ export function isWorkingSet(set: HistorySet | null | undefined): boolean {
 /** The sets that count as training. The stored list is left intact. */
 export function workingSets(entry: HistoryEntry): HistorySet[] {
   return (entry.sets || []).filter(isWorkingSet)
+}
+
+/** A set taken to failure rather than to a target. */
+export function isAmrapSet(set: HistorySet | null | undefined): boolean {
+  return !!set && set.amrap === true && isWorkingSet(set)
+}
+
+/**
+ * The AMRAP set in this session, or null.
+ *
+ * Last one wins if somebody flagged two — the final set is the one taken
+ * to failure, and a mid-session flag is more likely a mistake than a
+ * second all-out effort.
+ */
+export function amrapOf(entry: HistoryEntry): HistorySet | null {
+  const flagged = (entry.sets || []).filter(isAmrapSet)
+  return flagged.length ? flagged[flagged.length - 1] : null
+}
+
+/**
+ * The working sets double progression is allowed to measure.
+ *
+ * An AMRAP is excluded in BOTH directions, which is the whole point. Its
+ * reps overshoot the range by design, so counting them would read the
+ * range as finished and add weight nobody earned; and when it comes in low
+ * it would read as a missed range on sets that were actually completed.
+ * It is a signal about the load, not evidence about the range.
+ */
+export function rangeSets(entry: HistoryEntry): HistorySet[] {
+  return workingSets(entry).filter((set) => !isAmrapSet(set))
 }
 
 /**
