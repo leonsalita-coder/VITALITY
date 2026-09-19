@@ -275,6 +275,7 @@ var TrainEngine = (() => {
   // lib/train/index.ts
   var index_exports = {};
   __export(index_exports, {
+    DEFAULT_SET_KIND: () => DEFAULT_SET_KIND,
     DEFAULT_WEEKLY_TARGET: () => DEFAULT_WEEKLY_TARGET,
     DELOAD_HOLD_SESSIONS: () => DELOAD_HOLD_SESSIONS,
     E1RM_MAX_REPS: () => E1RM_MAX_REPS,
@@ -288,6 +289,9 @@ var TrainEngine = (() => {
     currentWeekStreak: () => currentWeekStreak,
     deloadPlan: () => deloadPlan,
     detectPlateau: () => detectPlateau,
+    emptyVolume: () => emptyVolume,
+    entryKind: () => entryKind,
+    entryScore: () => entryScore,
     epley1RM: () => epley1RM,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
@@ -296,10 +300,13 @@ var TrainEngine = (() => {
     nearMissCue: () => nearMissCue,
     nextDeloadState: () => nextDeloadState,
     sessionsPerWeek: () => sessionsPerWeek,
+    setKind: () => setKind,
     setWeight: () => setWeight,
     streakLabel: () => streakLabel,
-    suggestWeight: () => suggestWeight,
+    suggestTarget: () => suggestTarget,
+    topWorkingMetres: () => topWorkingMetres,
     topWorkingReps: () => topWorkingReps,
+    topWorkingSeconds: () => topWorkingSeconds,
     topWorkingWeight: () => topWorkingWeight,
     workingRpe: () => workingRpe,
     workingSets: () => workingSets,
@@ -307,6 +314,20 @@ var TrainEngine = (() => {
   });
 
   // lib/train/sets.ts
+  var DEFAULT_SET_KIND = "reps_weight";
+  function emptyVolume() {
+    return { load: 0, reps: 0, seconds: 0, metres: 0 };
+  }
+  function setKind(set) {
+    return set.kind || DEFAULT_SET_KIND;
+  }
+  function entryKind(entry) {
+    const first = workingSets(entry)[0];
+    return first ? setKind(first) : DEFAULT_SET_KIND;
+  }
+  function isPerSide(set, opts) {
+    return set.perSide !== void 0 ? set.perSide === true : opts.perSide === true;
+  }
   function isWorkingSet(set) {
     return !!set && set.fail !== true && set.warmup !== true;
   }
@@ -317,11 +338,66 @@ var TrainEngine = (() => {
     return typeof set.w === "number" ? set.w : entry.kg || 0;
   }
   function workingVolume(entry, opts = {}) {
-    const sides = opts.perSide ? 2 : 1;
-    return workingSets(entry).reduce(
-      (sum, set) => sum + setWeight(entry, set) * (set.r || 0) * sides,
-      0
-    );
+    const totals = emptyVolume();
+    for (const set of workingSets(entry)) {
+      const sides = isPerSide(set, opts) ? 2 : 1;
+      const reps = (set.r || 0) * sides;
+      switch (setKind(set)) {
+        case "reps_weight":
+          if (set.assisted) totals.reps += reps;
+          else totals.load += setWeight(entry, set) * reps;
+          break;
+        case "reps_only":
+          totals.reps += reps;
+          break;
+        case "time":
+          totals.seconds += (set.s || 0) * sides;
+          break;
+        case "distance":
+          totals.metres += (set.m || 0) * sides;
+          break;
+        case "time_distance":
+          totals.seconds += (set.s || 0) * sides;
+          totals.metres += (set.m || 0) * sides;
+          break;
+      }
+    }
+    return totals;
+  }
+  function topWorkingSeconds(entry) {
+    const values = workingSets(entry).filter((set) => setKind(set) === "time" || setKind(set) === "time_distance").map((set) => set.s || 0);
+    return values.length ? Math.max(...values) : 0;
+  }
+  function topWorkingMetres(entry) {
+    const values = workingSets(entry).filter((set) => setKind(set) === "distance" || setKind(set) === "time_distance").map((set) => set.m || 0);
+    return values.length ? Math.max(...values) : 0;
+  }
+  function entryScore(entry) {
+    const kind = entryKind(entry);
+    const sets = workingSets(entry);
+    const best = (pick) => sets.length ? Math.max(...sets.map(pick)) : 0;
+    switch (kind) {
+      case "reps_only":
+        return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) };
+      case "time":
+        return { kind, primary: best((s) => s.s || 0), secondary: 0 };
+      case "distance":
+        return { kind, primary: best((s) => s.m || 0), secondary: 0 };
+      case "time_distance": {
+        const metres = best((s) => s.m || 0);
+        const seconds = sets.length ? Math.min(...sets.map((s) => s.s || Infinity)) : 0;
+        return { kind, primary: metres, secondary: Number.isFinite(seconds) ? -seconds : 0 };
+      }
+      default: {
+        const assisted = sets.some((s) => s.assisted);
+        if (assisted) {
+          const least = sets.length ? Math.min(...sets.map((s) => setWeight(entry, s))) : 0;
+          return { kind, primary: -least, secondary: best((s) => s.r || 0) };
+        }
+        const weight = sets.length ? best((s) => setWeight(entry, s)) : entry.kg || 0;
+        return { kind, primary: weight, secondary: best((s) => s.r || 0) };
+      }
+    }
   }
   function topWorkingWeight(entry) {
     const weights = workingSets(entry).map((set) => setWeight(entry, set));
@@ -361,12 +437,21 @@ var TrainEngine = (() => {
     );
     if (usable.length < PLATEAU_WINDOW + 1) return null;
     const recent = usable.slice(-PLATEAU_WINDOW);
-    const weights = recent.map((e) => topWorkingWeight(e) || e.kg || 0);
-    const reps = recent.map((e) => topWorkingReps(e));
+    const scores = recent.map(entryScore);
     const flat = (arr) => arr.every((v, i) => i === 0 || v <= arr[i - 1]);
-    if (flat(weights) && flat(reps)) {
+    const primary = scores.map((s) => s.primary);
+    const secondary = scores.map((s) => s.secondary);
+    if (flat(primary) && flat(secondary)) {
       const { cause, rpe } = readCause(recent);
-      return { sessions: PLATEAU_WINDOW, weight: weights[weights.length - 1], cause, rpe };
+      const last = scores[scores.length - 1];
+      return {
+        sessions: PLATEAU_WINDOW,
+        // reported in the kind's own unit; assisted scores are negated
+        weight: Math.abs(last.primary),
+        kind: last.kind,
+        cause,
+        rpe
+      };
     }
     return null;
   }
@@ -474,6 +559,8 @@ var TrainEngine = (() => {
   }
 
   // lib/train/progression.ts
+  var DEFAULT_SECONDS_STEP = 5;
+  var DEFAULT_METRES_STEP = 10;
   var LAYOFF_DAYS = 14;
   var DEFAULT_INCREMENT = {
     barbell: 5,
@@ -559,7 +646,7 @@ var TrainEngine = (() => {
     const done = plan.indexOf(target);
     return done >= 0 ? plan.slice(0, done + 1) : plan;
   }
-  function suggestWeight(history, exercise, now) {
+  function suggestLoad(history, exercise, now) {
     const sessions = realSessions(history);
     const last = sessions.length ? sessions[sessions.length - 1] : null;
     const [minReps, maxReps] = rangeFor(exercise);
@@ -602,7 +689,9 @@ var TrainEngine = (() => {
     }
     const sets = workingSets(last);
     const missedLast = (last.sets || []).some((set) => set.fail);
-    const held = tidy(topWorkingWeight(last) || last.kg || 0);
+    const assisted = exercise.assisted === true || (last.sets || []).some((set) => set.assisted);
+    const assistUsed = sets.length ? Math.min(...sets.map((set) => setWeight(last, set))) : 0;
+    const held = assisted ? tidy(assistUsed) : tidy(topWorkingWeight(last) || last.kg || 0);
     const layoff = findLayoff(sessions, now);
     if (layoff) {
       const ramp = rampWeights(layoff.priorWeight, layoff.days, exercise);
@@ -696,6 +785,16 @@ var TrainEngine = (() => {
       };
     }
     const multiplier = rpe != null && rpe <= EASY_RPE ? 2 : 1;
+    if (assisted) {
+      const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held));
+      const removed = tidy(held - eased);
+      return {
+        weight: eased,
+        reps: minReps,
+        basis: "clean",
+        reason: eased === 0 ? `unassisted \u2014 clean ${shape} with only ${held} lb of help last time` : `\u2212${removed} lb assistance \u2014 clean ${shape} last time`
+      };
+    }
     const next = snapWeight(held + step * multiplier, exercise, held);
     const delta = tidy(next - held);
     if (multiplier > 1) {
@@ -711,6 +810,51 @@ var TrainEngine = (() => {
       reps: minReps,
       basis: "clean",
       reason: hasRange ? `+${delta} lb, back to ${minReps} reps \u2014 hit ${shape} last time` : `+${delta} lb \u2014 clean ${shape} last time`
+    };
+  }
+  function suggestNonLoad(kind, sessions, exercise) {
+    const real = sessions.filter((entry) => workingSets(entry).length > 0);
+    const read = kind === "reps_only" ? topWorkingReps : kind === "time" ? topWorkingSeconds : topWorkingMetres;
+    const unit = kind === "reps_only" ? " reps" : kind === "time" ? "s" : "m";
+    const step = kind === "reps_only" ? 1 : kind === "time" ? exercise.incrementSeconds || DEFAULT_SECONDS_STEP : exercise.incrementMetres || DEFAULT_METRES_STEP;
+    const put = (value, basis, reason) => ({
+      kind,
+      weight: null,
+      reps: kind === "reps_only" ? value : null,
+      seconds: kind === "time" || kind === "time_distance" ? value : null,
+      metres: kind === "distance" || kind === "time_distance" ? value : null,
+      basis,
+      reason
+    });
+    if (!real.length) {
+      return put(step, "new", `starting at ${step}${unit} \u2014 first time logging this`);
+    }
+    const last = real[real.length - 1];
+    const current = read(last);
+    const sets = workingSets(last).length;
+    if ((last.sets || []).some((set) => set.fail)) {
+      return put(current, "miss", `holding at ${current}${unit} \u2014 missed the last set`);
+    }
+    const previous = real.length > 1 ? read(real[real.length - 2]) : 0;
+    if (previous > 0 && current < previous) {
+      return put(current, "miss", `holding at ${current}${unit} \u2014 down from ${previous}${unit} last time`);
+    }
+    return put(current + step, "clean", `+${step}${unit} \u2014 clean ${sets}\xD7${current}${unit} last time`);
+  }
+  function suggestTarget(history, exercise, now) {
+    const sessions = realSessions(history);
+    const last = sessions.length ? sessions[sessions.length - 1] : null;
+    const kind = last ? entryKind(last) : exercise.kind || DEFAULT_SET_KIND;
+    if (kind !== "reps_weight") return suggestNonLoad(kind, sessions, exercise);
+    const answer = suggestLoad(history, exercise, now);
+    return {
+      kind: "reps_weight",
+      weight: answer.weight,
+      reps: answer.reps,
+      seconds: null,
+      metres: null,
+      basis: answer.basis,
+      reason: answer.reason
     };
   }
 
@@ -734,20 +878,13 @@ var TrainEngine = (() => {
     for (const entry of history || []) {
       if (!eligible(entry, opts)) continue;
       for (const set of workingSets(entry)) {
+        if (setKind(set) !== "reps_weight" || set.assisted) continue;
         const weight = setWeight(entry, set);
         const reps = set.r || 0;
         const value = epley1RM(weight, reps);
         if (value == null) continue;
         if (!best || value > best.value) best = { value, weight, reps, date: entry.date };
       }
-    }
-    return best;
-  }
-  function bestWorkingWeight(history, opts = {}) {
-    let best = 0;
-    for (const entry of history || []) {
-      if (!eligible(entry, opts)) continue;
-      best = Math.max(best, topWorkingWeight(entry));
     }
     return best;
   }
@@ -769,7 +906,27 @@ var TrainEngine = (() => {
     }
     return best;
   }
-  var NO_PR = { kind: null, scope: null, e1rm: null };
+  var NO_PR = { kind: null, scope: null, e1rm: null, unit: null };
+  function bestBy(history, pick, opts) {
+    let best = 0;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      best = Math.max(best, pick(entry));
+    }
+    return best;
+  }
+  function leastAssistance(history, opts) {
+    let best = null;
+    for (const entry of history || []) {
+      if (!eligible(entry, opts)) continue;
+      for (const set of workingSets(entry)) {
+        if (!set.assisted) continue;
+        const help = setWeight(entry, set);
+        if (best == null || help < best) best = help;
+      }
+    }
+    return best;
+  }
   function dateKey(ms) {
     const d = new Date(ms);
     const pad = (n) => String(n).padStart(2, "0");
@@ -784,23 +941,54 @@ var TrainEngine = (() => {
     if (!isWorkingSet(candidate)) return NO_PR;
     const today = dateKey(now);
     const base = { excludeDate: today };
+    const kind = candidate.kind || DEFAULT_SET_KIND;
+    if (kind === "time") {
+      const best = bestBy(history, topWorkingSeconds, base);
+      const value2 = candidate.seconds || 0;
+      if (best > 0 && value2 > best) return { kind: "time", scope: "all-time", e1rm: null, unit: "s" };
+      return NO_PR;
+    }
+    if (kind === "distance" || kind === "time_distance") {
+      const best = bestBy(history, topWorkingMetres, base);
+      const value2 = candidate.metres || 0;
+      if (best > 0 && value2 > best) return { kind: "distance", scope: "all-time", e1rm: null, unit: "m" };
+      return NO_PR;
+    }
+    if (kind === "reps_only") {
+      const best = bestBy(history, topWorkingReps, base);
+      const value2 = candidate.reps || 0;
+      if (best > 0 && value2 > best) return { kind: "reps", scope: "all-time", e1rm: null, unit: "reps" };
+      return NO_PR;
+    }
+    if (candidate.assisted) {
+      const best = leastAssistance(history, base);
+      const value2 = candidate.weight || 0;
+      if (best != null && value2 < best) {
+        return { kind: "assist", scope: "all-time", e1rm: null, unit: "lb" };
+      }
+      return NO_PR;
+    }
+    const weight = candidate.weight || 0;
+    const reps = candidate.reps || 0;
     const rolling = { excludeDate: today, sinceDate: shiftDays(now, -ROLLING_PR_DAYS) };
-    const value = epley1RM(candidate.weight, candidate.reps);
+    const value = epley1RM(weight, reps);
     const allTime = bestE1RM(history, base);
     if (value != null && allTime) {
-      if (value > allTime.value) return { kind: "e1rm", scope: "all-time", e1rm: value };
+      if (value > allTime.value) return { kind: "e1rm", scope: "all-time", e1rm: value, unit: "lb" };
       const recent = bestE1RM(history, rolling);
-      if (recent && value > recent.value) return { kind: "e1rm", scope: "12-month", e1rm: value };
+      if (recent && value > recent.value) {
+        return { kind: "e1rm", scope: "12-month", e1rm: value, unit: "lb" };
+      }
     }
-    const heaviest = bestWorkingWeight(history, base);
+    const heaviest = bestBy(history, topWorkingWeight, base);
     if (heaviest <= 0) return { ...NO_PR, e1rm: value };
-    if (candidate.weight > heaviest) return { kind: "weight", scope: "all-time", e1rm: value };
-    const repsHere = bestRepsAtWeight(history, candidate.weight, base);
-    if (repsHere > 0 && candidate.reps > repsHere) {
-      return { kind: "reps", scope: "all-time", e1rm: value };
+    if (weight > heaviest) return { kind: "weight", scope: "all-time", e1rm: value, unit: "lb" };
+    const repsHere = bestRepsAtWeight(history, weight, base);
+    if (repsHere > 0 && reps > repsHere) {
+      return { kind: "reps", scope: "all-time", e1rm: value, unit: "reps" };
     }
-    if (value == null && candidate.reps > bestRepsAnywhere(history, base)) {
-      return { kind: "reps", scope: "all-time", e1rm: null };
+    if (value == null && reps > bestRepsAnywhere(history, base)) {
+      return { kind: "reps", scope: "all-time", e1rm: null, unit: "reps" };
     }
     return { ...NO_PR, e1rm: value };
   }
@@ -1129,7 +1317,9 @@ function renderHeroExtras(){
 /* ---- rail: a pinned telemetry strip, always visible while scrolling - */
 function sessionVolume(session){
   let total=0;
-  session.ex.forEach(e=>{ total += TrainEngine.workingVolume(todayEntry(e), { perSide:!!e.perHand }); });
+  /* .load is the pounds figure this rail has always shown. Other kinds
+     keep their own units and are deliberately not folded in. */
+  session.ex.forEach(e=>{ total += TrainEngine.workingVolume(todayEntry(e), { perSide:!!e.perHand }).load; });
   return Math.round(total);
 }
 function renderRail(){
@@ -1570,7 +1760,7 @@ function renderPillGroup(e, rx, idx){
    `now` is passed in because lib/train never reads the clock. */
 function suggestionFor(e, rx){
   const deload = (STATE.deloadStates && STATE.deloadStates[e.id]) || null;
-  return TrainEngine.suggestWeight(histFor(e), {
+  return TrainEngine.suggestTarget(histFor(e), {
     kg: rx.kg,
     lastKg: e.lastKg,
     reps: rx.reps,
@@ -1578,6 +1768,10 @@ function suggestionFor(e, rx){
     sets: rx.sets,
     loading: loadingFor(e),
     incrementLb: e.incrementLb,
+    kind: e.kind,
+    assisted: e.assisted,
+    incrementSeconds: e.incrementSeconds,
+    incrementMetres: e.incrementMetres,
     deload,
   }, Date.now());
 }
@@ -1611,10 +1805,12 @@ function loadingFor(e){
 function renderPill(e, rx, idx){
   const kind=classifySet(e, idx); const s=e.log[idx]; const logged=kind!=='empty';
   const suggestion = logged ? null : suggestionFor(e, rx);
-  const prefillKg = s?s.kg:(suggestion?suggestion.weight:rx.kg);
+  /* suggestion.weight is null for any kind not measured in pounds, in
+     which case the prescribed value stands in. */
+  const prefillKg = s?s.kg:((suggestion && suggestion.weight!=null)?suggestion.weight:rx.kg);
   /* tint the input only when the suggestion is an actual step up */
   const bumped = !logged && !!suggestion && suggestion.basis==='clean' && suggestion.weight>0;
-  const prefillR = s?s.reps:(suggestion?suggestion.reps:rx.reps);
+  const prefillR = s?s.reps:((suggestion && suggestion.reps!=null)?suggestion.reps:rx.reps);
   /* Anticipation beats confetti: if the prefill lands just under the best
      estimated 1RM, say so before the set rather than celebrating after. */
   const nearMiss = logged ? null : TrainEngine.nearMissCue(
@@ -2678,7 +2874,7 @@ function muscleVolumeBreakdown(){
   Object.keys(STATE.history||{}).forEach(id=>{
     const info=STATE.customLib && STATE.customLib[id];
     const muscles=(info && info.primary && info.primary.length) ? info.primary : ['Other'];
-    const vol=(STATE.history[id]||[]).filter(s=>!s.off).reduce((a,s)=>a+TrainEngine.workingVolume(s),0);
+    const vol=(STATE.history[id]||[]).filter(s=>!s.off).reduce((a,s)=>a+TrainEngine.workingVolume(s).load,0);
     muscles.forEach(m=>{ map[m]=(map[m]||0)+vol/muscles.length; });
   });
   return Object.keys(map).map(m=>({m,vol:r1(map[m])})).sort((a,b)=>b.vol-a.vol);
@@ -2804,7 +3000,7 @@ function exportCSV(){
     (STATE.history[id]||[]).forEach(e=>{
       const reps=(e.sets||[]).map(s=>s.fail?'F':s.r).join('|');
       const flags=(e.sets||[]).map(s=>s.warmup?'W':'-').join('|');
-      rows.push([e.date, name, e.kg, reps, flags, TrainEngine.workingSets(e).length, Math.round(TrainEngine.workingVolume(e))]);
+      rows.push([e.date, name, e.kg, reps, flags, TrainEngine.workingSets(e).length, Math.round(TrainEngine.workingVolume(e).load)]);
     });
   });
   const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
@@ -2919,7 +3115,7 @@ function aggregateVolumeByDate(){
   Object.keys(STATE.history||{}).forEach(id=>{
     (STATE.history[id]||[]).forEach(entry=>{
       if(entry.off) return;
-      const vol=TrainEngine.workingVolume(entry);
+      const vol=TrainEngine.workingVolume(entry).load;
       map[entry.date]=(map[entry.date]||0)+vol;
     });
   });

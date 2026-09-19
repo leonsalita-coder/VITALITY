@@ -21,7 +21,11 @@ export type ProgressionBasis = 'clean' | 'miss' | 'deload' | 'layoff' | 'new'
 /** How weight can physically be added to this movement. */
 export type LoadingStyle = 'barbell' | 'dumbbell' | 'stack' | 'free'
 
-import { topWorkingWeight, workingRpe, workingSets, type HistoryEntry, type HistorySet } from './sets'
+import {
+  DEFAULT_SET_KIND, entryKind, setWeight, topWorkingMetres, topWorkingReps,
+  topWorkingSeconds, topWorkingWeight, workingRpe, workingSets,
+  type HistoryEntry, type HistorySet, type SetKind,
+} from './sets'
 import { deloadPlan, DELOAD_HOLD_SESSIONS as DELOAD_HOLD, type DeloadRecord } from './deload'
 
 export type { HistoryEntry, HistorySet }
@@ -45,6 +49,14 @@ export interface ProgressionExercise {
   incrementLb?: number
   /** Defaults to 'free', which keeps the legacy weight-scaled step. */
   loading?: LoadingStyle
+  /** How this movement is measured. Absent means reps_weight. */
+  kind?: SetKind
+  /** `weight` is ASSISTANCE, and progress removes it. */
+  assisted?: boolean
+  /** Seconds added to a time movement after a clean session. */
+  incrementSeconds?: number
+  /** Metres added to a distance movement after a clean session. */
+  incrementMetres?: number
   /**
    * The lift's deload state machine. While deloading or re-approaching it
    * owns the suggestion outright — otherwise a clean session at the reduced
@@ -53,14 +65,35 @@ export interface ProgressionExercise {
   deload?: DeloadRecord | null
 }
 
-export interface Suggestion {
+/** The answer for a reps_weight movement, before it is generalised. */
+interface LoadSuggestion {
   weight: number
-  /** Target reps for the coming session — bottom of the range, or one more. */
   reps: number
+  reason: string
+  basis: ProgressionBasis
+}
+
+/**
+ * A target in whatever unit the movement is actually measured in.
+ *
+ * Fields that do not apply come back NULL rather than zero: null says "this
+ * kind has no weight", zero would say "bodyweight", and those are different
+ * answers.
+ */
+export interface Suggestion {
+  kind: SetKind
+  weight: number | null
+  reps: number | null
+  seconds: number | null
+  metres: number | null
   /** Rendered verbatim by the tile. */
   reason: string
   basis: ProgressionBasis
 }
+
+/** Default steps for the kinds that are not measured in pounds. */
+const DEFAULT_SECONDS_STEP = 5
+const DEFAULT_METRES_STEP = 10
 
 /**
  * Days away before a lift is treated as needing a ramp back rather than a
@@ -228,11 +261,11 @@ function rampWeights(prior: number, days: number, exercise: ProgressionExercise)
  *   miss    — hold, and say what happened
  *   clean   — earned a step: another rep, or more weight
  */
-export function suggestWeight(
+function suggestLoad(
   history: HistoryEntry[],
   exercise: ProgressionExercise,
   now: number,
-): Suggestion {
+): LoadSuggestion {
   const sessions = realSessions(history)
   const last = sessions.length ? sessions[sessions.length - 1] : null
   const [minReps, maxReps] = rangeFor(exercise)
@@ -289,7 +322,12 @@ export function suggestWeight(
   const missedLast = (last.sets || []).some((set) => set.fail)
   /* With no working sets to read, fall back to the weight the session
      recorded — holding there beats dropping to bodyweight. */
-  const held = tidy(topWorkingWeight(last) || last.kg || 0)
+  /* For an assisted movement the best set is the one that needed the LEAST
+     help, and progress means less of it still. Reading the max here would
+     treat the hardest set as the working weight and then add to it. */
+  const assisted = exercise.assisted === true || (last.sets || []).some((set) => set.assisted)
+  const assistUsed = sets.length ? Math.min(...sets.map((set) => setWeight(last, set))) : 0
+  const held = assisted ? tidy(assistUsed) : tidy(topWorkingWeight(last) || last.kg || 0)
 
   const layoff = findLayoff(sessions, now)
   if (layoff) {
@@ -404,6 +442,19 @@ export function suggestWeight(
   }
 
   const multiplier = rpe != null && rpe <= EASY_RPE ? 2 : 1
+  if (assisted) {
+    // less assistance is the improvement; it can reach zero but not pass it
+    const eased = Math.max(0, snapWeight(Math.max(0, held - step * multiplier), exercise, held))
+    const removed = tidy(held - eased)
+    return {
+      weight: eased,
+      reps: minReps,
+      basis: 'clean',
+      reason: eased === 0
+        ? `unassisted — clean ${shape} with only ${held} lb of help last time`
+        : `−${removed} lb assistance — clean ${shape} last time`,
+    }
+  }
   const next = snapWeight(held + step * multiplier, exercise, held)
   const delta = tidy(next - held)
 
@@ -422,5 +473,84 @@ export function suggestWeight(
     reason: hasRange
       ? `+${delta} lb, back to ${minReps} reps — hit ${shape} last time`
       : `+${delta} lb — clean ${shape} last time`,
+  }
+}
+
+/**
+ * Progression for the kinds that are not measured in pounds.
+ *
+ * A plank gains seconds, a carry gains metres, bodyweight work gains reps.
+ * Suggesting a weight for any of them would be meaningless.
+ */
+function suggestNonLoad(
+  kind: SetKind,
+  sessions: HistoryEntry[],
+  exercise: ProgressionExercise,
+): Suggestion {
+  const real = sessions.filter((entry) => workingSets(entry).length > 0)
+  const read =
+    kind === 'reps_only' ? topWorkingReps : kind === 'time' ? topWorkingSeconds : topWorkingMetres
+  const unit = kind === 'reps_only' ? ' reps' : kind === 'time' ? 's' : 'm'
+  const step =
+    kind === 'reps_only'
+      ? 1
+      : kind === 'time'
+        ? exercise.incrementSeconds || DEFAULT_SECONDS_STEP
+        : exercise.incrementMetres || DEFAULT_METRES_STEP
+
+  const put = (value: number, basis: ProgressionBasis, reason: string): Suggestion => ({
+    kind,
+    weight: null,
+    reps: kind === 'reps_only' ? value : null,
+    seconds: kind === 'time' || kind === 'time_distance' ? value : null,
+    metres: kind === 'distance' || kind === 'time_distance' ? value : null,
+    basis,
+    reason,
+  })
+
+  if (!real.length) {
+    return put(step, 'new', `starting at ${step}${unit} — first time logging this`)
+  }
+  const last = real[real.length - 1]
+  const current = read(last)
+  const sets = workingSets(last).length
+
+  if ((last.sets || []).some((set) => set.fail)) {
+    return put(current, 'miss', `holding at ${current}${unit} — missed the last set`)
+  }
+  const previous = real.length > 1 ? read(real[real.length - 2]) : 0
+  if (previous > 0 && current < previous) {
+    return put(current, 'miss', `holding at ${current}${unit} — down from ${previous}${unit} last time`)
+  }
+  return put(current + step, 'clean', `+${step}${unit} — clean ${sets}×${current}${unit} last time`)
+}
+
+/**
+ * The target for the next session, in whatever unit this movement uses.
+ *
+ * History decides the kind, because what was actually logged is better
+ * evidence than what the definition claims; both fall back to reps_weight,
+ * so every existing lift behaves exactly as it did.
+ */
+export function suggestTarget(
+  history: HistoryEntry[],
+  exercise: ProgressionExercise,
+  now: number,
+): Suggestion {
+  const sessions = realSessions(history)
+  const last = sessions.length ? sessions[sessions.length - 1] : null
+  const kind: SetKind = last ? entryKind(last) : exercise.kind || DEFAULT_SET_KIND
+
+  if (kind !== 'reps_weight') return suggestNonLoad(kind, sessions, exercise)
+
+  const answer = suggestLoad(history, exercise, now)
+  return {
+    kind: 'reps_weight',
+    weight: answer.weight,
+    reps: answer.reps,
+    seconds: null,
+    metres: null,
+    basis: answer.basis,
+    reason: answer.reason,
   }
 }

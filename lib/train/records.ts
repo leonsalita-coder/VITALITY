@@ -13,12 +13,17 @@
  */
 
 import {
+  DEFAULT_SET_KIND,
   isWorkingSet,
+  setKind,
   setWeight,
+  topWorkingMetres,
   topWorkingReps,
+  topWorkingSeconds,
   topWorkingWeight,
   workingSets,
   type HistoryEntry,
+  type SetKind,
 } from './sets'
 
 /**
@@ -73,6 +78,8 @@ export function bestE1RM(history: HistoryEntry[], opts: BestOptions = {}): E1RMR
   for (const entry of history || []) {
     if (!eligible(entry, opts)) continue
     for (const set of workingSets(entry)) {
+      // e1RM is a reps_weight idea; assistance is not load
+      if (setKind(set) !== 'reps_weight' || set.assisted) continue
       const weight = setWeight(entry, set)
       const reps = set.r || 0
       const value = epley1RM(weight, reps)
@@ -116,21 +123,60 @@ function bestRepsAnywhere(history: HistoryEntry[], opts: BestOptions = {}): numb
 }
 
 export interface PRCandidate {
-  weight: number
-  reps: number
+  /** Absent means reps_weight, like everywhere else. */
+  kind?: SetKind
+  weight?: number
+  reps?: number
+  seconds?: number
+  metres?: number
+  /** `weight` is assistance; less of it is the record. */
+  assisted?: boolean
   warmup?: boolean
   fail?: boolean
 }
 
 export interface PRResult {
-  /** e1rm earns the celebration; weight and reps get a quiet dot. */
-  kind: 'e1rm' | 'weight' | 'reps' | null
+  /**
+   * e1rm earns the celebration; everything else is a quiet dot. 'assist'
+   * is a reps_weight record running the other way — less help than ever.
+   */
+  kind: 'e1rm' | 'weight' | 'reps' | 'time' | 'distance' | 'assist' | null
   scope: 'all-time' | '12-month' | null
-  /** The candidate's estimated 1RM, when one could be computed. */
+  /** The candidate's estimated 1RM, when the kind supports one. */
   e1rm: number | null
+  /** Which unit the record is in, so it can be reported honestly. */
+  unit: 'lb' | 's' | 'm' | 'reps' | null
 }
 
-const NO_PR: PRResult = { kind: null, scope: null, e1rm: null }
+const NO_PR: PRResult = { kind: null, scope: null, e1rm: null, unit: null }
+
+/** Best value across history for one per-entry accessor. */
+function bestBy(
+  history: HistoryEntry[],
+  pick: (entry: HistoryEntry) => number,
+  opts: BestOptions,
+): number {
+  let best = 0
+  for (const entry of history || []) {
+    if (!eligible(entry, opts)) continue
+    best = Math.max(best, pick(entry))
+  }
+  return best
+}
+
+/** Least assistance ever used — the record for an assisted movement. */
+function leastAssistance(history: HistoryEntry[], opts: BestOptions): number | null {
+  let best: number | null = null
+  for (const entry of history || []) {
+    if (!eligible(entry, opts)) continue
+    for (const set of workingSets(entry)) {
+      if (!set.assisted) continue
+      const help = setWeight(entry, set)
+      if (best == null || help < best) best = help
+    }
+  }
+  return best
+}
 
 function dateKey(ms: number): string {
   const d = new Date(ms)
@@ -160,32 +206,67 @@ export function classifyPR(
 
   const today = dateKey(now)
   const base: BestOptions = { excludeDate: today }
-  const rolling: BestOptions = { excludeDate: today, sinceDate: shiftDays(now, -ROLLING_PR_DAYS) }
+  const kind = candidate.kind || DEFAULT_SET_KIND
 
-  const value = epley1RM(candidate.weight, candidate.reps)
+  /* Kinds with no load have no estimated 1RM — only their own unit. */
+  if (kind === 'time') {
+    const best = bestBy(history, topWorkingSeconds, base)
+    const value = candidate.seconds || 0
+    if (best > 0 && value > best) return { kind: 'time', scope: 'all-time', e1rm: null, unit: 's' }
+    return NO_PR
+  }
+  if (kind === 'distance' || kind === 'time_distance') {
+    const best = bestBy(history, topWorkingMetres, base)
+    const value = candidate.metres || 0
+    if (best > 0 && value > best) return { kind: 'distance', scope: 'all-time', e1rm: null, unit: 'm' }
+    return NO_PR
+  }
+  if (kind === 'reps_only') {
+    const best = bestBy(history, topWorkingReps, base)
+    const value = candidate.reps || 0
+    if (best > 0 && value > best) return { kind: 'reps', scope: 'all-time', e1rm: null, unit: 'reps' }
+    return NO_PR
+  }
+
+  /* Assisted work: the record is the least help ever needed. */
+  if (candidate.assisted) {
+    const best = leastAssistance(history, base)
+    const value = candidate.weight || 0
+    if (best != null && value < best) {
+      return { kind: 'assist', scope: 'all-time', e1rm: null, unit: 'lb' }
+    }
+    return NO_PR
+  }
+
+  const weight = candidate.weight || 0
+  const reps = candidate.reps || 0
+  const rolling: BestOptions = { excludeDate: today, sinceDate: shiftDays(now, -ROLLING_PR_DAYS) }
+  const value = epley1RM(weight, reps)
   const allTime = bestE1RM(history, base)
 
   if (value != null && allTime) {
-    if (value > allTime.value) return { kind: 'e1rm', scope: 'all-time', e1rm: value }
+    if (value > allTime.value) return { kind: 'e1rm', scope: 'all-time', e1rm: value, unit: 'lb' }
     const recent = bestE1RM(history, rolling)
     // a record can be gone from the last twelve months even when the
     // all-time number is out of reach — that one is still worth marking
-    if (recent && value > recent.value) return { kind: 'e1rm', scope: '12-month', e1rm: value }
+    if (recent && value > recent.value) {
+      return { kind: 'e1rm', scope: '12-month', e1rm: value, unit: 'lb' }
+    }
   }
 
-  const heaviest = bestWorkingWeight(history, base)
+  const heaviest = bestBy(history, topWorkingWeight, base)
   if (heaviest <= 0) return { ...NO_PR, e1rm: value }
 
-  if (candidate.weight > heaviest) return { kind: 'weight', scope: 'all-time', e1rm: value }
+  if (weight > heaviest) return { kind: 'weight', scope: 'all-time', e1rm: value, unit: 'lb' }
 
-  const repsHere = bestRepsAtWeight(history, candidate.weight, base)
-  if (repsHere > 0 && candidate.reps > repsHere) {
-    return { kind: 'reps', scope: 'all-time', e1rm: value }
+  const repsHere = bestRepsAtWeight(history, weight, base)
+  if (repsHere > 0 && reps > repsHere) {
+    return { kind: 'reps', scope: 'all-time', e1rm: value, unit: 'reps' }
   }
   // lifts worked above the rep cap never produce an e1RM, so their only
   // available record is raw reps
-  if (value == null && candidate.reps > bestRepsAnywhere(history, base)) {
-    return { kind: 'reps', scope: 'all-time', e1rm: null }
+  if (value == null && reps > bestRepsAnywhere(history, base)) {
+    return { kind: 'reps', scope: 'all-time', e1rm: null, unit: 'reps' }
   }
 
   return { ...NO_PR, e1rm: value }

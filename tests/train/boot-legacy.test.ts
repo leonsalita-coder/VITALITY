@@ -126,7 +126,7 @@ describe('historical numbers do not shift', () => {
 
   it('computes the same volume it always did', () => {
     const entry = state.history.bench[0]
-    expect(win.TrainEngine.workingVolume(entry)).toBe(185 * 15)
+    expect(win.TrainEngine.workingVolume(entry).load).toBe(185 * 15)
   })
 
   it('falls back to the entry weight where no per-set weight exists', () => {
@@ -146,7 +146,7 @@ describe('degrading with no recovery data and no RPE', () => {
   })
 
   it('still produces a suggestion', () => {
-    const s = win.TrainEngine.suggestWeight(
+    const s = win.TrainEngine.suggestTarget(
       state.history.bench,
       { reps: 5, loading: 'barbell' },
       Date.parse('2026-09-12T12:00:00'),

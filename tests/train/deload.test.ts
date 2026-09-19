@@ -329,3 +329,66 @@ describe('RPE drives the deload diagnosis', () => {
     expect(r.kind).toBe('intensity')
   })
 })
+
+/* ────────────────────────────────────────────────────────────────────
+   Flat is flat in whatever unit the kind measures.
+   ──────────────────────────────────────────────────────────────────── */
+const kindSessions = (kind: string, values: number[], field: string): HistoryEntry[] =>
+  ['2026-08-20', '2026-08-27', '2026-09-03', '2026-09-10'].map((date, i) => ({
+    date, kg: 0,
+    sets: [{ [field]: values[i], kind } as never, { [field]: values[i], kind } as never],
+  }))
+
+describe('plateau detection across kinds', () => {
+  it('sees a plank stuck at the same hold', () => {
+    expect(detectPlateau(kindSessions('time', [60, 60, 60, 60], 's'))).not.toBeNull()
+  })
+
+  it('does not call a plank that is still gaining seconds', () => {
+    expect(detectPlateau(kindSessions('time', [45, 50, 55, 60], 's'))).toBeNull()
+  })
+
+  it('sees a carry stuck at the same distance', () => {
+    expect(detectPlateau(kindSessions('distance', [40, 40, 40, 40], 'm'))).not.toBeNull()
+  })
+
+  it('does not call a carry that is still gaining metres', () => {
+    expect(detectPlateau(kindSessions('distance', [30, 35, 40, 45], 'm'))).toBeNull()
+  })
+
+  it('sees bodyweight reps stuck', () => {
+    expect(detectPlateau(kindSessions('reps_only', [12, 12, 12, 12], 'r'))).not.toBeNull()
+  })
+
+  it('does not call bodyweight reps that are still climbing', () => {
+    expect(detectPlateau(kindSessions('reps_only', [8, 10, 11, 12], 'r'))).toBeNull()
+  })
+
+  it('reports the plateau value in the kind’s own unit', () => {
+    const p = detectPlateau(kindSessions('time', [60, 60, 60, 60], 's'))!
+    expect(p.weight).toBe(60) // seconds, for a time lift
+    expect(p.kind).toBe('time')
+  })
+})
+
+describe('assisted work plateaus in the right direction', () => {
+  const assistedAt = (values: number[]): HistoryEntry[] =>
+    ['2026-08-20', '2026-08-27', '2026-09-03', '2026-09-10'].map((date, i) => ({
+      date, kg: values[i],
+      sets: [{ w: values[i], r: 8, assisted: true }, { w: values[i], r: 8, assisted: true }],
+    }))
+
+  it('is a plateau when the assistance never comes down', () => {
+    expect(detectPlateau(assistedAt([40, 40, 40, 40]))).not.toBeNull()
+  })
+
+  it('is PROGRESS when the assistance is dropping, not a plateau', () => {
+    // 40 -> 20 lb of help is the lifter getting stronger. Read naively as
+    // "weight going down", this is the case that reads as a stall.
+    expect(detectPlateau(assistedAt([40, 35, 25, 20]))).toBeNull()
+  })
+
+  it('is a plateau when the assistance is going UP', () => {
+    expect(detectPlateau(assistedAt([20, 25, 35, 40]))).not.toBeNull()
+  })
+})

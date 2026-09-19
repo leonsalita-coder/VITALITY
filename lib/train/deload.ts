@@ -19,7 +19,7 @@
  * UNITS: pounds.
  */
 
-import { topWorkingReps, topWorkingWeight, workingRpe, type HistoryEntry } from './sets'
+import { entryScore, workingRpe, type HistoryEntry, type SetKind } from './sets'
 
 /** Sessions to sit at the reduced load before climbing back. */
 export const DELOAD_HOLD_SESSIONS = 2
@@ -96,7 +96,10 @@ export type PlateauCause = 'fatigue' | 'programming' | 'unknown'
 
 export interface Plateau {
   sessions: number
+  /** The stalled value, in the unit this kind measures — lb, seconds,
+   *  metres, reps, or pounds of assistance. */
   weight: number
+  kind: SetKind
   cause: PlateauCause
   /** Mean RPE across the window, or null when it was never logged. */
   rpe: number | null
@@ -129,12 +132,27 @@ export function detectPlateau(
   )
   if (usable.length < PLATEAU_WINDOW + 1) return null
   const recent = usable.slice(-PLATEAU_WINDOW)
-  const weights = recent.map((e) => topWorkingWeight(e) || e.kg || 0)
-  const reps = recent.map((e) => topWorkingReps(e))
+  /**
+   * entryScore normalises every kind so higher is always better, including
+   * assisted work where LESS assistance is the improvement. Comparing raw
+   * weights here instead would read a lifter dropping from 40 lb of help to
+   * 20 as a decline, and deload them for getting stronger.
+   */
+  const scores = recent.map(entryScore)
   const flat = (arr: number[]) => arr.every((v, i) => i === 0 || v <= arr[i - 1])
-  if (flat(weights) && flat(reps)) {
+  const primary = scores.map((s) => s.primary)
+  const secondary = scores.map((s) => s.secondary)
+  if (flat(primary) && flat(secondary)) {
     const { cause, rpe } = readCause(recent)
-    return { sessions: PLATEAU_WINDOW, weight: weights[weights.length - 1], cause, rpe }
+    const last = scores[scores.length - 1]
+    return {
+      sessions: PLATEAU_WINDOW,
+      // reported in the kind's own unit; assisted scores are negated
+      weight: Math.abs(last.primary),
+      kind: last.kind,
+      cause,
+      rpe,
+    }
   }
   return null
 }

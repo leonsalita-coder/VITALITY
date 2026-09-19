@@ -85,7 +85,7 @@ describe('setWeight', () => {
 describe('workingVolume', () => {
   it('counts only the working sets', () => {
     // 185x5 + 185x5 + 185x4 = 2590, with the two warm-ups excluded
-    expect(workingVolume(mixed)).toBe(2590)
+    expect(workingVolume(mixed).load).toBe(2590)
   })
 
   it('would have been inflated by the warm-ups', () => {
@@ -93,12 +93,12 @@ describe('workingVolume', () => {
       (sum, s) => sum + setWeight(mixed, s) * (s.r || 0),
       0,
     )
-    expect(everything).toBeGreaterThan(workingVolume(mixed))
+    expect(everything).toBeGreaterThan(workingVolume(mixed).load)
   })
 
   it('doubles a per-side lift', () => {
     const entry: HistoryEntry = { date: '2026-09-16', kg: 40, sets: [{ w: 40, r: 10 }] }
-    expect(workingVolume(entry, { perSide: true })).toBe(800)
+    expect(workingVolume(entry, { perSide: true }).load).toBe(800)
   })
 
   it('is zero for a session of nothing but warm-ups', () => {
@@ -106,7 +106,7 @@ describe('workingVolume', () => {
       date: '2026-09-16', kg: 95,
       sets: [{ w: 95, r: 8, warmup: true }, { w: 95, r: 8, warmup: true }],
     }
-    expect(workingVolume(warmOnly)).toBe(0)
+    expect(workingVolume(warmOnly).load).toBe(0)
   })
 })
 

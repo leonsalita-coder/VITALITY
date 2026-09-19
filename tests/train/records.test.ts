@@ -182,3 +182,86 @@ describe('nearMissCue', () => {
     expect(nearMissCue(history, { weight: 135, reps: 20 }, 5, today)).toBeNull()
   })
 })
+
+/* ────────────────────────────────────────────────────────────────────
+   e1RM is a reps_weight idea. Every other kind has its own unit, and a
+   PR has to say which unit it is in.
+   ──────────────────────────────────────────────────────────────────── */
+const kindEntry = (date: string, kind: string, field: string, value: number): HistoryEntry => ({
+  date, kg: 0, sets: [{ [field]: value, kind } as never],
+})
+
+describe('per-kind records', () => {
+  const today = at('2026-09-18')
+
+  it('a longer plank is a time PR, in seconds', () => {
+    const history = [kindEntry('2026-06-10', 'time', 's', 60)]
+    const pr = classifyPR(history, { kind: 'time', seconds: 75 }, today)
+    expect(pr.kind).toBe('time')
+    expect(pr.unit).toBe('s')
+  })
+
+  it('a shorter plank is not a PR', () => {
+    const history = [kindEntry('2026-06-10', 'time', 's', 60)]
+    expect(classifyPR(history, { kind: 'time', seconds: 45 }, today).kind).toBeNull()
+  })
+
+  it('a longer carry is a distance PR, in metres', () => {
+    const history = [kindEntry('2026-06-10', 'distance', 'm', 40)]
+    const pr = classifyPR(history, { kind: 'distance', metres: 60 }, today)
+    expect(pr.kind).toBe('distance')
+    expect(pr.unit).toBe('m')
+  })
+
+  it('more bodyweight reps is a rep PR', () => {
+    const history = [kindEntry('2026-06-10', 'reps_only', 'r', 12)]
+    const pr = classifyPR(history, { kind: 'reps_only', reps: 15 }, today)
+    expect(pr.kind).toBe('reps')
+    expect(pr.unit).toBe('reps')
+  })
+
+  it('never computes e1RM for a kind that has no load', () => {
+    const history = [kindEntry('2026-06-10', 'time', 's', 60)]
+    expect(classifyPR(history, { kind: 'time', seconds: 75 }, today).e1rm).toBeNull()
+  })
+
+  it('still labels a reps_weight record in pounds', () => {
+    const history = [session('2026-06-10', 225, [5])]
+    const pr = classifyPR(history, { weight: 245, reps: 3 }, today)
+    expect(pr.kind).toBe('e1rm')
+    expect(pr.unit).toBe('lb')
+  })
+
+  it('does not celebrate the first ever session of any kind', () => {
+    expect(classifyPR([], { kind: 'time', seconds: 60 }, today).kind).toBeNull()
+  })
+
+  it('never lets a warm-up take a PR in any kind', () => {
+    const history = [kindEntry('2026-06-10', 'time', 's', 60)]
+    expect(classifyPR(history, { kind: 'time', seconds: 300, warmup: true }, today).kind).toBeNull()
+  })
+})
+
+describe('assisted records run the other way', () => {
+  const today = at('2026-09-18')
+  const assisted = (date: string, help: number): HistoryEntry => ({
+    date, kg: help, sets: [{ w: help, r: 8, assisted: true }],
+  })
+
+  it('LESS assistance is the record', () => {
+    const history = [assisted('2026-06-10', 40)]
+    const pr = classifyPR(history, { weight: 25, reps: 8, assisted: true }, today)
+    expect(pr.kind).toBe('assist')
+    expect(pr.unit).toBe('lb')
+  })
+
+  it('more assistance is not a record', () => {
+    const history = [assisted('2026-06-10', 40)]
+    expect(classifyPR(history, { weight: 55, reps: 8, assisted: true }, today).kind).toBeNull()
+  })
+
+  it('reaching zero assistance is a record', () => {
+    const history = [assisted('2026-06-10', 20)]
+    expect(classifyPR(history, { weight: 0, reps: 8, assisted: true }, today).kind).toBe('assist')
+  })
+})
