@@ -336,8 +336,8 @@ export function suggestWeight(
     }
   }
 
-  // reps × sets, the way a lifter reads a finished session back
-  const shape = `${lowest}×${sets.length}`
+  // sets × reps, matching how the card and the linear wording read
+  const shape = `${sets.length}×${lowest}`
 
   // still room inside the range: another rep before another plate
   if (lowest < maxReps) {
@@ -355,7 +355,7 @@ export function suggestWeight(
       weight: 0,
       reps: minReps,
       basis: 'clean',
-      reason: `bodyweight — clean ${sets.length}×${lowest} last time`,
+      reason: `bodyweight — clean ${shape} last time`,
     }
   }
   const step = stepFor(held, exercise)
@@ -367,6 +367,6 @@ export function suggestWeight(
     basis: 'clean',
     reason: hasRange
       ? `+${delta} lb, back to ${minReps} reps — hit ${shape} last time`
-      : `+${delta} lb — clean ${sets.length}×${lowest} last time`,
+      : `+${delta} lb — clean ${shape} last time`,
   }
 }

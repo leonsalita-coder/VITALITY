@@ -325,19 +325,19 @@ describe('double progression', () => {
     expect(a.basis).toBe('clean')
     expect(a.weight).toBe(135)
     expect(a.reps).toBe(9)
-    expect(a.reason).toBe('same weight, chase 9 reps — hit 8×3 last time')
+    expect(a.reason).toBe('same weight, chase 9 reps — hit 3×8 last time')
 
     history.push(clean('2026-09-12', 135, 9, 3))
     const b = suggestWeight(history, threeByEightToTen(), at('2026-09-14'))
     expect(b.weight).toBe(135)
     expect(b.reps).toBe(10)
-    expect(b.reason).toBe('same weight, chase 10 reps — hit 9×3 last time')
+    expect(b.reason).toBe('same weight, chase 10 reps — hit 3×9 last time')
 
     history.push(clean('2026-09-14', 135, 10, 3))
     const c = suggestWeight(history, threeByEightToTen(), at('2026-09-16'))
     expect(c.weight).toBe(140)
     expect(c.reps).toBe(8)
-    expect(c.reason).toBe('+5 lb, back to 8 reps — hit 10×3 last time')
+    expect(c.reason).toBe('+5 lb, back to 8 reps — hit 3×10 last time')
 
     history.push(clean('2026-09-16', 140, 8, 3))
     const d = suggestWeight(history, threeByEightToTen(), at('2026-09-18'))

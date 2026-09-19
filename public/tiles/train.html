@@ -97,6 +97,12 @@
   .pillWhy { margin:5px 0 0 34px; font-size:11px; line-height:1.35; font-family:var(--sans); color:var(--muted); letter-spacing:.005em; }
   .pillWhy.why-clean { color:var(--signal); }
   .pillWhy.why-layoff, .pillWhy.why-deload { color:var(--gold); }
+
+  /* The rest bar itself is still unstyled from the ground-up rebuild; this
+     is only enough for overtime to read as overtime rather than as a timer
+     that broke. */
+  .restbar .restTime { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .restbar.over .restTime { color:var(--gold); }
 </style>
 </head>
 <body>
@@ -405,7 +411,7 @@ var TrainEngine = (() => {
         reason: `holding at ${describeWeight(held)} \u2014 short of ${minReps} reps last time`
       };
     }
-    const shape = `${lowest}\xD7${sets.length}`;
+    const shape = `${sets.length}\xD7${lowest}`;
     if (lowest < maxReps) {
       return {
         weight: held,
@@ -419,7 +425,7 @@ var TrainEngine = (() => {
         weight: 0,
         reps: minReps,
         basis: "clean",
-        reason: `bodyweight \u2014 clean ${sets.length}\xD7${lowest} last time`
+        reason: `bodyweight \u2014 clean ${shape} last time`
       };
     }
     const step = stepFor(held, exercise);
@@ -429,7 +435,7 @@ var TrainEngine = (() => {
       weight: next,
       reps: minReps,
       basis: "clean",
-      reason: hasRange ? `+${delta} lb, back to ${minReps} reps \u2014 hit ${shape} last time` : `+${delta} lb \u2014 clean ${sets.length}\xD7${lowest} last time`
+      reason: hasRange ? `+${delta} lb, back to ${minReps} reps \u2014 hit ${shape} last time` : `+${delta} lb \u2014 clean ${shape} last time`
     };
   }
 
@@ -943,7 +949,8 @@ function renderCard(e, session){
   const rx=prescription(e);
   const card=document.createElement('div'); card.className='ex'+(e.collapsed?' collapsed':''); card.dataset.id=e.id;
   const tier = TIER_LABEL[e.tier]||('tier '+e.tier);
-  const metaBits = [tier, rx.sets+' × '+rx.reps];
+  const range = repRangeFor(e);
+  const metaBits = [tier, rx.sets+' × '+(range ? range[0]+'-'+range[1] : rx.reps)];
   if(e.lastKg!=null) metaBits.push('last '+e.lastKg+' '+STATE.unit);
   const meta = metaBits.map(b=>'<span>'+b+'</span>').join('<span class="metaSep">·</span>') + (e.deload?'<span class="deloadTag">deload</span>':'') + (e.group?'<span class="groupTag">superset '+e.group+'</span>':'');
   card.innerHTML =
@@ -1011,12 +1018,27 @@ function suggestionFor(e, rx){
     kg: rx.kg,
     lastKg: e.lastKg,
     reps: rx.reps,
-    repRange: e.repRange,
+    repRange: repRangeFor(e) || undefined,
     sets: rx.sets,
     loading: loadingFor(e),
     incrementLb: e.incrementLb,
     deloadOverride: ov || null,
   }, Date.now());
+}
+/* The rep range is a property of the LIFT, not of today's session, so it
+   lives beside the exercise definition and survives the session rolling
+   over at midnight. Absent means linear — the engine treats a missing
+   range as [reps, reps], which is exactly the old behaviour. */
+function repRangeFor(e){
+  const info = STATE.customLib && STATE.customLib[e.id];
+  const r = info && info.repRange;
+  if(Array.isArray(r) && r.length===2 && r[1]>r[0]) return [r[0], r[1]];
+  return null;
+}
+function setRepRange(e, range){
+  STATE.customLib = STATE.customLib || {};
+  const info = STATE.customLib[e.id] || (STATE.customLib[e.id] = {});
+  if(range) info.repRange = range; else delete info.repRange;
 }
 /* What this lift can actually be loaded with, read off the equipment the
    classifier already recorded. Anything unrecognised stays 'free', which
@@ -1144,22 +1166,130 @@ function handleAct(act, e, session, btn){
    ================================================================= */
 const restTimers={};
 const REST_RING_C = Math.round(2*Math.PI*15*1000)/1000;
-function startRest(e){ stopRest(e.id); const rx=prescription(e); restTimers[e.id]={remaining:rx.rest, total:Math.max(1,rx.rest), handle:null}; tickRest(e); const card=document.querySelector('.ex[data-id="'+e.id+'"]'); if(card) mountRestBar(card, e); }
-function tickRest(e){ const t=restTimers[e.id]; if(!t) return; t.handle=setInterval(()=>{ t.remaining-=1; updateRest(e.id); },1000); }
-function stopRest(id){ const t=restTimers[id]; if(t&&t.handle) clearInterval(t.handle); delete restTimers[id]; }
+let restTicker=null;
+let restAudio=null;
+
+/* ── WHAT THIS ENVIRONMENT CANNOT DO ──────────────────────────────────
+   A tile is a sandboxed srcDoc iframe on an opaque origin with no
+   network. That rules out, permanently and by design:
+
+     • Notification API — needs a permission prompt on a real origin;
+       an opaque-origin frame can never be granted it.
+     • Wake Lock API — gated by Permissions Policy, unavailable here, so
+       the screen will sleep mid-rest and there is nothing to do about it.
+     • Live Activity / Dynamic Island / Android ongoing notification —
+       no web API exists for any of them at all.
+     • Guaranteed execution while backgrounded — a hidden tab has its
+       timers throttled to >=1s and a locked phone suspends them
+       entirely. Audio is suspended with it.
+
+   So the timer is CORRECT when you come back (time is derived from a
+   timestamp, never accumulated) but it cannot reliably make a sound at
+   the exact instant zero passes while the phone is face-down and locked.
+   That is a native-app capability, and it is deliberately not faked
+   here. See docs/train-platform-limits.md.
+   ──────────────────────────────────────────────────────────────────── */
+
+function startRest(e){
+  stopRest(e.id);
+  const rx=prescription(e);
+  /* per-exercise rest, which the data already carries */
+  const total=Math.max(1, rx.rest);
+  restTimers[e.id]={ startedAt:Date.now(), total, adjust:0, chimed:false };
+  ensureRestAudio();
+  const card=document.querySelector('.ex[data-id="'+e.id+'"]');
+  if(card) mountRestBar(card, e);
+  startRestTicker();
+}
+/* Derived on every read, never decremented. A countdown that subtracts one
+   per tick comes back wrong by exactly however long the phone was asleep —
+   which is most of the rest period. */
+function restRemaining(t){
+  return t.total + t.adjust - Math.round((Date.now()-t.startedAt)/1000);
+}
+function stopRest(id){
+  delete restTimers[id];
+  if(!Object.keys(restTimers).length) stopRestTicker();
+}
+function startRestTicker(){ if(!restTicker) restTicker=setInterval(sweepRest, 250); }
+function stopRestTicker(){ if(restTicker){ clearInterval(restTicker); restTicker=null; } }
+/* One ticker drives every running bar. Its only job is repainting — the
+   numbers come from the clock, so a throttled or skipped tick costs
+   smoothness and never accuracy. */
+function sweepRest(){
+  Object.keys(restTimers).forEach(id=>{
+    const t=restTimers[id];
+    const remaining=restRemaining(t);
+    if(!t.chimed && remaining<=0){
+      t.chimed=true;
+      /* Only chime if zero passed just now. Coming back to a tab that
+         elapsed ten minutes ago and beeping then is worse than silence. */
+      if(remaining>-3) restChime();
+    }
+    updateRest(id);
+  });
+}
+/* Returning to the tab is the one moment we know the clock jumped, so
+   recompute and repaint immediately rather than waiting for a tick. */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible') sweepRest();
+});
+
+/* The AudioContext has to be created inside a user gesture. Logging a set
+   is that gesture, and it is the only one that reliably precedes a rest. */
+function ensureRestAudio(){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    if(!restAudio) restAudio=new AC();
+    if(restAudio.state==='suspended') restAudio.resume();
+  }catch(err){ restAudio=null; }
+}
+function restChime(){
+  try{
+    if(restAudio && restAudio.state==='running'){
+      const t0=restAudio.currentTime;
+      [0, 0.18].forEach((offset,i)=>{
+        const osc=restAudio.createOscillator(), gain=restAudio.createGain();
+        osc.type='sine'; osc.frequency.value = i ? 880 : 660;
+        gain.gain.setValueAtTime(0.0001, t0+offset);
+        gain.gain.exponentialRampToValueAtTime(0.22, t0+offset+0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0+offset+0.16);
+        osc.connect(gain); gain.connect(restAudio.destination);
+        osc.start(t0+offset); osc.stop(t0+offset+0.2);
+      });
+    }
+  }catch(err){ /* audio blocked — the vibration below is the fallback */ }
+  /* the phone is usually face-down on a bench; vibration is unavailable in
+     a sandboxed frame on some browsers, hence the guard */
+  try{ if(navigator.vibrate) navigator.vibrate([120,60,120]); }catch(err){}
+}
+/* Overtime counts UP rather than stopping: how long you actually rested is
+   information, and a timer frozen at 0:00 throws it away. */
+function restLabelFor(remaining){
+  return remaining<=0 ? '+'+mmss(Math.abs(remaining)) : mmss(remaining);
+}
 function paintRest(bar, t){
-  const over=t.remaining<=0;
+  const remaining=restRemaining(t);
+  const over=remaining<=0;
   bar.classList.toggle('over',over);
-  bar.querySelector('.restTime').textContent = over?'go →':mmss(Math.max(0,t.remaining));
+  bar.querySelector('.restTime').textContent = restLabelFor(remaining);
   const ring=bar.querySelector('.restRingFill');
-  if(ring){ const pct=Math.max(0,Math.min(1, t.remaining/(t.total||1))); ring.style.strokeDashoffset=String(REST_RING_C*(1-pct)); }
+  if(ring){ const pct=Math.max(0,Math.min(1, remaining/(t.total+t.adjust||1))); ring.style.strokeDashoffset=String(REST_RING_C*(1-pct)); }
 }
 function mountRestBar(card, e){ const slot=card.querySelector('.restSlot'); const t=restTimers[e.id]; if(!t||!slot){ if(slot)slot.innerHTML=''; return; }
-  const over=t.remaining<=0;
-  slot.innerHTML='<div class="restbar'+(over?' over':'')+'"><button class="restStep" data-d="-15">−15</button><div class="restMid"><svg class="restRing" viewBox="0 0 36 36" aria-hidden="true"><circle class="restRingTrack" cx="18" cy="18" r="15"/><circle class="restRingFill" cx="18" cy="18" r="15" style="stroke-dasharray:'+REST_RING_C+'"/></svg><div class="restTime">'+(over?'go →':mmss(Math.max(0,t.remaining)))+'</div><div class="restLabel">'+(e.group?('Superset '+e.group):e.name)+'</div></div><button class="restStep" data-d="15">+15</button><button class="restX" aria-label="Dismiss">×</button></div>';
+  const remaining=restRemaining(t);
+  const over=remaining<=0;
+  slot.innerHTML='<div class="restbar'+(over?' over':'')+'"><button class="restStep" data-d="-15">−15</button><div class="restMid"><svg class="restRing" viewBox="0 0 36 36" aria-hidden="true"><circle class="restRingTrack" cx="18" cy="18" r="15"/><circle class="restRingFill" cx="18" cy="18" r="15" style="stroke-dasharray:'+REST_RING_C+'"/></svg><div class="restTime">'+restLabelFor(remaining)+'</div><div class="restLabel">'+(e.group?('Superset '+e.group):e.name)+'</div></div><button class="restStep" data-d="15">+15</button><button class="restX" aria-label="Dismiss">×</button></div>';
   paintRest(slot.querySelector('.restbar'), t);
-  slot.querySelector('[data-d="-15"]').onclick=()=>{ t.remaining-=15; updateRest(e.id); };
-  slot.querySelector('[data-d="15"]').onclick=()=>{ t.remaining+=15; updateRest(e.id); };
+  const nudge=d=>{
+    t.adjust+=d;
+    /* pushing the finish back past now re-arms the chime */
+    if(restRemaining(t)>0) t.chimed=false;
+    updateRest(e.id);
+  };
+  slot.querySelector('[data-d="-15"]').onclick=()=>nudge(-15);
+  slot.querySelector('[data-d="15"]').onclick=()=>nudge(15);
   slot.querySelector('.restX').onclick=()=>{ stopRest(e.id); slot.innerHTML=''; };
 }
 function updateRest(id){ const card=document.querySelector('.ex[data-id="'+id+'"]'); const t=restTimers[id]; if(!card||!t) return; const bar=card.querySelector('.restbar'); if(!bar) return; paintRest(bar, t); }
@@ -1527,25 +1657,39 @@ function showApply(res, session, result){
 
 /* ---- tune popup --------------------------------------------------- */
 function openTune(e){
-  const draft={ kg:e.kg, reps:e.reps, sets:e.sets, rest:e.rest };
+  const existing=repRangeFor(e);
+  const draft={ kg:e.kg, reps:e.reps, sets:e.sets, rest:e.rest, maxReps: existing?existing[1]:null };
   const loggedCount=e.log.filter(s=>s).length;
+  const showMax=()=> draft.maxReps==null ? 'off' : String(draft.maxReps);
   openPop(popHead('Tune', e.name)
     + '<div style="margin-top:18px"></div>'
     + fieldRow('Weight','<input class="wInput" id="tw" type="number" inputmode="decimal" step="0.5" value="'+draft.kg+'"><span class="wUnit">'+STATE.unit+(e.perHand?'/ea':'')+'</span>', 'weight')
-    + stepRow('Sets','tsets', draft.sets)
-    + stepRow('Reps','treps', draft.reps)
-    + stepRow('Rest','trest', mmss(draft.rest))
+    + stepRow('Sets','tsets', draft.sets, 'sets')
+    + stepRow('Reps','treps', draft.reps, 'reps')
+    + stepRow('Top reps','tmax', draft.maxReps==null?'off':draft.maxReps, 'maxReps')
+    + '<p class="settingsNote">Off means every clean session adds weight. Set a top rep and you chase reps first, then add weight and drop back to '+draft.reps+'.</p>'
+    + stepRow('Rest','trest', mmss(draft.rest), 'rest')
     + '<div class="popBtns"><button class="pbtn ghost" id="tcancel">Cancel</button><button class="pbtn save" id="tsave">Save</button></div>',
     scrim=>{
-      const sync=()=>{ scrim.querySelector('#tsets .stepVal').textContent=draft.sets; scrim.querySelector('#treps .stepVal').textContent=draft.reps; scrim.querySelector('#trest .stepVal').textContent=mmss(draft.rest); };
+      const sync=()=>{ scrim.querySelector('#tsets .stepVal').textContent=draft.sets; scrim.querySelector('#treps .stepVal').textContent=draft.reps; scrim.querySelector('#tmax .stepVal').textContent=showMax(); scrim.querySelector('#trest .stepVal').textContent=mmss(draft.rest); };
       scrim.querySelector('#tw').oninput=ev=>{ const v=parseFloat(ev.target.value); if(Number.isFinite(v)) draft.kg=v; };
       scrim.querySelectorAll('.step').forEach(b=> b.onclick=()=>{ const f=b.dataset.f, d=+b.dataset.d;
         if(f==='rest'){ draft.rest=Math.max(0,draft.rest+d*15); }
         else if(f==='sets'){ draft.sets=Math.min(8,Math.max(Math.max(1,loggedCount),draft.sets+d)); }
-        else if(f==='reps'){ draft.reps=Math.min(50,Math.max(1,draft.reps+d)); }
+        else if(f==='reps'){
+          draft.reps=Math.min(50,Math.max(1,draft.reps+d));
+          /* the top of the range has to stay above its bottom; push it up
+             rather than silently dropping a range they deliberately set */
+          if(draft.maxReps!=null) draft.maxReps = draft.reps>=50 ? null : Math.max(draft.maxReps, draft.reps+1);
+        }
+        else if(f==='maxReps'){
+          if(draft.maxReps==null){ draft.maxReps = d>0 && draft.reps<50 ? draft.reps+1 : null; }
+          else { const next=draft.maxReps+d; draft.maxReps = next<=draft.reps ? null : Math.min(50,next); }
+        }
         sync(); });
       scrim.querySelector('#tcancel').onclick=closePop;
       scrim.querySelector('#tsave').onclick=()=>{ e.kg=Number.isFinite(draft.kg)?draft.kg:e.kg; e.reps=draft.reps; e.rest=draft.rest;
+        setRepRange(e, (draft.maxReps!=null && draft.maxReps>draft.reps) ? [draft.reps, draft.maxReps] : null);
         // grow / shrink the set list, keeping logged sets
         if(draft.sets>e.log.length){ while(e.log.length<draft.sets) e.log.push(null); }
         else if(draft.sets<e.log.length){ e.log=e.log.slice(0,Math.max(loggedCount,draft.sets)); }
@@ -1553,7 +1697,7 @@ function openTune(e){
     });
 }
 function fieldRow(label, ctl, icon){ const ic={weight:'<path d="M7 9v6M17 9v6M4 12h3M17 12h3M9 9h6v6H9z"/>'}[icon]||''; return '<div class="field"><span class="lbl">'+svg(ic,' fill="none" stroke="currentColor"')+label+'</span><div class="stepper">'+ctl+'</div></div>'; }
-function stepRow(label, id, val){ const f=id==='tsets'?'sets':(id==='treps'?'reps':'rest'); return '<div class="field" id="'+id+'"><span class="lbl">'+label+'</span><div class="stepper"><button class="step minus" data-f="'+f+'" data-d="-1">−</button><span class="stepVal">'+val+'</span><button class="step" data-f="'+f+'" data-d="1">+</button></div></div>'; }
+function stepRow(label, id, val, field){ return '<div class="field" id="'+id+'"><span class="lbl">'+label+'</span><div class="stepper"><button class="step minus" data-f="'+field+'" data-d="-1">−</button><span class="stepVal">'+val+'</span><button class="step" data-f="'+field+'" data-d="1">+</button></div></div>'; }
 
 /* ---- overflow menu (remove / deload / note) ---------------------- */
 function openMenu(e, session, btn){
