@@ -1,3 +1,4 @@
+export * from './fitting'
 export * from './simulate'
 export * from './predictions'
 export * from './staleness'
