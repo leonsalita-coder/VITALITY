@@ -26,6 +26,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
 const linesOf = (text, anchor) => {
   const out = []
@@ -95,5 +96,7 @@ function main() {
   }
 }
 
-main()
+/* Same guard as the audit tool: importing this must not run it. */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()
+
 export { countOf, linesOf }

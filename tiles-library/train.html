@@ -5238,6 +5238,11 @@ function progressionInputFor(e, rx){
     /* With no history, the weight they told us at setup IS the basis —
        stored as a starting weight rather than a fabricated session, which
        would have counted toward volume, streaks and records. */
+    /* Plain e.lastKg is correct here, and a "before today" variant was
+       tried and removed as dead: suggestTarget reads lastKg ONLY on the
+       `new` branch, which is reached only when the prior history is
+       empty — and then the variant returns null and falls through to
+       this anyway. With prior history, lastKg is never consulted. */
     lastKg: e.lastKg != null ? e.lastKg : TrainEngine.startingWeightFor(STATE, e.id),
     reps: rx.reps,
     repRange: repRangeFor(e) || undefined,
@@ -5277,8 +5282,59 @@ function incrementFor(e, field){
   const v = info && info[field || 'incrementLb'];
   return typeof v === 'number' && v > 0 ? v : undefined;
 }
+/**
+ * History as of session start.
+ *
+ * Today's entry is NOT input to progression. Progression happens between
+ * sessions: what you lift today is decided by what you lifted last time,
+ * and feeding today's half-finished session back in means the second set
+ * is prescribed off the first. That shipped, and it wrote 315, 320, 325
+ * into history for three clean sets of 315.
+ */
+/* The session's own date, WITHOUT calling curSession() — that rebuilds
+   the session as a side effect when the day has rolled over, and a helper
+   used inside a render should not silently restructure state. */
+function sessionDate(){ return (STATE.session && STATE.session.date) || today; }
+function historyBeforeToday(e){
+  return histFor(e).filter(s => s && s.date !== sessionDate());
+}
+/**
+ * One suggestion per exercise per session.
+ *
+ * Keyed on everything that may LEGITIMATELY change it — the session, the
+ * prescription, the rep range, the increment, the kind, the deload state,
+ * and the prior history — and on nothing that happens while training. So
+ * changing the rep range in Tune updates it immediately, and logging a
+ * set cannot, without anybody having to remember to invalidate a cache.
+ */
+const SUGGESTIONS = {};
+function clearSuggestions(){ for(const k in SUGGESTIONS) delete SUGGESTIONS[k]; }
+function suggestionKey(e, rx){
+  const dl = (STATE.deloadStates && STATE.deloadStates[e.id]) || null;
+  /* The PRIOR HISTORY IN FULL, not a summary of it. Keying on the last
+     session's date and weight alone collided three sessions that differed
+     only in their AMRAP reps, and handed all three the first one's
+     answer — progression reads reps, RPE, misses and the all-out set, so
+     anything less than the content is a key that silently merges
+     different questions. Stringifying is far cheaper than suggestTarget,
+     which walks the same history anyway. */
+  return [
+    sessionDate(), e.id,
+    rx.kg, rx.reps, rx.sets,
+    JSON.stringify(repRangeFor(e) || null), incrementFor(e), kindFor(e),
+    flagFor(e, 'assisted') ? 1 : 0, flagFor(e, 'perSide') ? 1 : 0,
+    trainingAge() || '',
+    dl ? [dl.state, dl.priorWeight, dl.kind, dl.confidence].join(':') : '',
+    JSON.stringify(historyBeforeToday(e)),
+  ].join('|');
+}
 function suggestionFor(e, rx){
-  return TrainEngine.suggestTarget(histFor(e), progressionInputFor(e, rx), Date.now());
+  const key = suggestionKey(e, rx);
+  if(!(key in SUGGESTIONS)){
+    SUGGESTIONS[key] = TrainEngine.suggestTarget(
+      historyBeforeToday(e), progressionInputFor(e, rx), Date.now());
+  }
+  return SUGGESTIONS[key];
 }
 /* Kind, perSide and assisted live with the exercise definition rather than
    the session, so they survive the day rolling over. Absent means

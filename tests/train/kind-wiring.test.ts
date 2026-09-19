@@ -128,7 +128,12 @@ describe('each kind logs into its own field and progresses in its own unit', () 
       ${logExpr}
       rollupToday(ex);
       var hist = STATE.history['${id}'];
-      var suggestion = suggestionFor(ex, prescription(ex));
+      /* The NEXT session's suggestion, read with tomorrow's clock.
+         A mid-session suggestion deliberately does not move — progression
+         happens between sessions, and reading suggestionFor() here would
+         be asserting the climb that used to log 315, 320, 325. */
+      var suggestion = TrainEngine.suggestTarget(
+        hist, progressionInputFor(ex, prescription(ex)), Date.now() + 86400000);
       return { stored: hist[0].sets, kind: TrainEngine.entryKind(hist[0]), suggestion: suggestion };
     })()`
 
