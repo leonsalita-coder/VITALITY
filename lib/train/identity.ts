@@ -75,6 +75,17 @@ function jaccard(a: string, b: string): number {
   return shared / (A.size + B.size - shared)
 }
 
+/**
+ * The same name written in a different order is the same name.
+ *
+ * "Squat, Back" and "Back Squat" are one lift, and an import that compared
+ * strings would fork them. Sorting the tokens keeps this an EXACT match —
+ * the same words, every one of them — rather than widening into fuzz.
+ */
+export function tokenKey(raw: unknown): string {
+  return normalizeName(raw).split(' ').filter(Boolean).sort().join(' ')
+}
+
 /** Lowercase letters and digits only — for comparing what was typed. */
 function loose(raw: string): string {
   return String(raw || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -169,15 +180,16 @@ export function resolveExercise(raw: string, opts: ResolveOptions = {}): Resolve
   }
 
   // 2. an exact hit on a catalog id, name or alias
+  const key = tokenKey(raw)
   for (const def of CATALOG) {
-    if ([def.id, def.name, ...def.aliases].some((f) => normalizeName(f) === normalized)) {
+    if ([def.id, def.name, ...def.aliases].some((f) => tokenKey(f) === key)) {
       return { status: 'exact', match: catalogCandidate(def, 1), candidates: [], normalized }
     }
   }
 
   // 3. an exact hit on one of their own lifts
   for (const id of Object.keys(users)) {
-    if (normalizeName(users[id]) === normalized || normalizeName(id) === normalized) {
+    if (tokenKey(users[id]) === key || tokenKey(id) === key) {
       return {
         status: 'exact',
         match: { id, name: users[id], score: 1, source: 'user' },

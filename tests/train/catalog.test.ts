@@ -18,7 +18,9 @@ describe('catalog integrity', () => {
 
   it('has no alias colliding with another lift’s id, name or alias', () => {
     const owner = new Map<string, string>()
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    // compared the way resolution compares them, so a collision that only
+    // appears under token-set matching cannot hide
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').sort().join(' ')
     for (const e of CATALOG) {
       for (const form of [e.id, e.name, ...e.aliases]) {
         const key = norm(form)

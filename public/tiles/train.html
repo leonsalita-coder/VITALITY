@@ -303,6 +303,7 @@ var TrainEngine = (() => {
     GAP_DAYS: () => GAP_DAYS,
     HIGH_RPE: () => HIGH_RPE,
     LAYOFF_DAYS: () => LAYOFF_DAYS,
+    LB_PER_KG: () => LB_PER_KG,
     LOAD_SPIKE: () => LOAD_SPIKE,
     LOW_RECOVERY: () => LOW_RECOVERY,
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
@@ -337,6 +338,7 @@ var TrainEngine = (() => {
     defaultRepRange: () => defaultRepRange,
     deloadPlan: () => deloadPlan,
     detectPlateau: () => detectPlateau,
+    detectSource: () => detectSource,
     distribute: () => distribute,
     emptyVolume: () => emptyVolume,
     entryKind: () => entryKind,
@@ -345,6 +347,7 @@ var TrainEngine = (() => {
     estimateMinutes: () => estimateMinutes,
     frequencyGaps: () => frequencyGaps,
     hasLoggedWork: () => hasLoggedWork,
+    importCsv: () => importCsv,
     indexFrom: () => indexFrom,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
@@ -360,6 +363,7 @@ var TrainEngine = (() => {
     normalizeClassification: () => normalizeClassification,
     normalizeName: () => normalizeName2,
     normalizeShares: () => normalizeShares,
+    parseCsv: () => parseCsv,
     planSession: () => planSession,
     plateBreakdown: () => plateBreakdown,
     prefillPlan: () => prefillPlan,
@@ -379,6 +383,7 @@ var TrainEngine = (() => {
     streakLabel: () => streakLabel,
     suggestTarget: () => suggestTarget,
     templatePlan: () => templatePlan,
+    tokenKey: () => tokenKey,
     topWorkingMetres: () => topWorkingMetres,
     topWorkingReps: () => topWorkingReps,
     topWorkingSeconds: () => topWorkingSeconds,
@@ -620,16 +625,16 @@ var TrainEngine = (() => {
   var REAPPROACH = 0.95;
   function deloadPlan(record) {
     if (!record) return { weight: null, setsFactor: 1 };
-    const round4 = (n) => Math.round(n * 100) / 100;
+    const round5 = (n) => Math.round(n * 100) / 100;
     if (record.state === "reapproach") {
-      return { weight: round4(record.priorWeight * REAPPROACH), setsFactor: 1 };
+      return { weight: round5(record.priorWeight * REAPPROACH), setsFactor: 1 };
     }
     if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
     if (record.kind === "volume") {
-      return { weight: round4(record.priorWeight), setsFactor: VOLUME_CUT };
+      return { weight: round5(record.priorWeight), setsFactor: VOLUME_CUT };
     }
     return {
-      weight: round4(record.priorWeight * INTENSITY_CUT[record.confidence]),
+      weight: round5(record.priorWeight * INTENSITY_CUT[record.confidence]),
       setsFactor: 1
     };
   }
@@ -2352,6 +2357,9 @@ var TrainEngine = (() => {
     });
     return shared / (A.size + B.size - shared);
   }
+  function tokenKey(raw) {
+    return normalizeName2(raw).split(" ").filter(Boolean).sort().join(" ");
+  }
   function loose(raw) {
     return String(raw || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   }
@@ -2379,7 +2387,7 @@ var TrainEngine = (() => {
     const aliases = opts.aliases || {};
     if (!normalized) return { status: "unknown", candidates: [], normalized };
     const aliasIndex = {};
-    for (const key of Object.keys(aliases)) aliasIndex[normalizeName2(key)] = aliases[key];
+    for (const key2 of Object.keys(aliases)) aliasIndex[normalizeName2(key2)] = aliases[key2];
     const confirmed = aliasIndex[normalized];
     if (confirmed) {
       const def = CATALOG.find((e) => e.id === confirmed);
@@ -2393,13 +2401,14 @@ var TrainEngine = (() => {
         };
       }
     }
+    const key = tokenKey(raw);
     for (const def of CATALOG) {
-      if ([def.id, def.name, ...def.aliases].some((f) => normalizeName2(f) === normalized)) {
+      if ([def.id, def.name, ...def.aliases].some((f) => tokenKey(f) === key)) {
         return { status: "exact", match: catalogCandidate(def, 1), candidates: [], normalized };
       }
     }
     for (const id of Object.keys(users)) {
-      if (normalizeName2(users[id]) === normalized || normalizeName2(id) === normalized) {
+      if (tokenKey(users[id]) === key || tokenKey(id) === key) {
         return {
           status: "exact",
           match: { id, name: users[id], score: 1, source: "user" },
@@ -2776,6 +2785,183 @@ Say that back in one short sentence, in the second person, keeping the number ex
       }
       return { ...routine, exercises };
     });
+  }
+
+  // lib/train/import.ts
+  var LB_PER_KG = 2.2046226218;
+  function parseCsv(text) {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let quoted = false;
+    const src = String(text || "").replace(/\r\n?/g, "\n");
+    for (let i = 0; i < src.length; i++) {
+      const c = src[i];
+      if (quoted) {
+        if (c === '"') {
+          if (src[i + 1] === '"') {
+            field += '"';
+            i++;
+          } else quoted = false;
+        } else field += c;
+      } else if (c === '"') quoted = true;
+      else if (c === ",") {
+        row.push(field);
+        field = "";
+      } else if (c === "\n") {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = "";
+      } else field += c;
+    }
+    if (field.length || row.length) {
+      row.push(field);
+      rows.push(row);
+    }
+    return rows.filter((r) => r.some((cell) => cell.trim() !== ""));
+  }
+  function headerIndex(header) {
+    const out = {};
+    header.forEach((name, i) => {
+      out[String(name).trim().toLowerCase().replace(/[\s-]+/g, "_")] = i;
+    });
+    return out;
+  }
+  function detectSource(header) {
+    const cols = headerIndex(header);
+    if ("exercise_title" in cols && "set_index" in cols) return "hevy";
+    if ("exercise_name" in cols && ("set_order" in cols || "workout_name" in cols)) return "strong";
+    return "unknown";
+  }
+  function toDate(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return null;
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const slash = text.match(/^(\d{4})\/(\d{2})\/(\d{2})/);
+    if (slash) return `${slash[1]}-${slash[2]}-${slash[3]}`;
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return null;
+    const p = (n) => String(n).padStart(2, "0");
+    return `${parsed.getFullYear()}-${p(parsed.getMonth() + 1)}-${p(parsed.getDate())}`;
+  }
+  function num(raw) {
+    const n = typeof raw === "string" ? parseFloat(raw) : typeof raw === "number" ? raw : NaN;
+    return Number.isFinite(n) ? n : void 0;
+  }
+  var round4 = (n) => Math.round(n * 100) / 100;
+  function readRows(rows, source, strongUnit) {
+    const cols = headerIndex(rows[0] || []);
+    const at = (row, key) => cols[key] === void 0 ? "" : row[cols[key]];
+    const out = [];
+    for (const row of rows.slice(1)) {
+      const date = toDate(source === "hevy" ? at(row, "start_time") : at(row, "date"));
+      const name = String(source === "hevy" ? at(row, "exercise_title") : at(row, "exercise_name")).trim();
+      if (!date || !name) continue;
+      const setType = String(at(row, "set_type") || "").toLowerCase();
+      const warmup = setType === "warmup" || setType === "warm up";
+      let weightLb;
+      if (source === "hevy") {
+        const kg = num(at(row, "weight_kg"));
+        weightLb = kg === void 0 ? void 0 : round4(kg * LB_PER_KG);
+      } else {
+        const w = num(at(row, "weight"));
+        weightLb = w === void 0 ? void 0 : strongUnit === "kg" ? round4(w * LB_PER_KG) : w;
+      }
+      const km = num(at(row, "distance_km"));
+      const distance = num(at(row, "distance"));
+      out.push({
+        date,
+        name,
+        weightLb,
+        reps: num(at(row, "reps")),
+        seconds: num(source === "hevy" ? at(row, "duration_seconds") : at(row, "seconds")),
+        metres: km !== void 0 ? round4(km * 1e3) : distance,
+        rpe: num(at(row, "rpe")),
+        warmup
+      });
+    }
+    return out;
+  }
+  function kindOf(row) {
+    const hasTime = row.seconds !== void 0 && row.seconds > 0;
+    const hasDistance = row.metres !== void 0 && row.metres > 0;
+    if (hasTime && hasDistance) return "time_distance";
+    if (hasDistance) return "distance";
+    if (hasTime && !row.reps) return "time";
+    if (row.weightLb === void 0 || row.weightLb === 0) {
+      return row.reps ? "reps_only" : "time";
+    }
+    return "reps_weight";
+  }
+  function importCsv(text, opts = {}) {
+    const rows = parseCsv(text);
+    const source = detectSource(rows[0] || []);
+    const empty = {
+      source,
+      sessions: 0,
+      lifts: 0,
+      sets: 0,
+      from: null,
+      to: null,
+      unresolved: [],
+      duplicates: 0
+    };
+    if (source === "unknown" || rows.length < 2) return { entries: [], report: empty };
+    const raw = readRows(rows, source, opts.strongUnit || "lb");
+    const unresolved = /* @__PURE__ */ new Map();
+    const byKey = /* @__PURE__ */ new Map();
+    const existing = opts.existing || {};
+    let duplicates = 0;
+    for (const row of raw) {
+      const resolved = resolveExercise(row.name, opts);
+      if (resolved.status !== "exact" || !resolved.match) {
+        unresolved.set(row.name, (unresolved.get(row.name) || 0) + 1);
+        continue;
+      }
+      const id = resolved.match.id;
+      if ((existing[id] || []).some((e) => e.date === row.date)) {
+        duplicates++;
+        continue;
+      }
+      const key = `${id}@${row.date}`;
+      const entry = byKey.get(key) || {
+        date: row.date,
+        exerciseId: id,
+        displayName: resolved.match.name,
+        kg: 0,
+        sets: []
+      };
+      const kind = kindOf(row);
+      const set = { imported: source, warmup: row.warmup || void 0 };
+      if (kind !== "reps_weight") set.kind = kind;
+      if (row.weightLb !== void 0) set.w = row.weightLb;
+      if (row.reps !== void 0) set.r = row.reps;
+      if (row.seconds !== void 0) set.s = row.seconds;
+      if (row.metres !== void 0) set.m = row.metres;
+      if (row.rpe !== void 0) set.rpe = row.rpe;
+      entry.sets.push(set);
+      if (!row.warmup && (row.weightLb || 0) > entry.kg) entry.kg = row.weightLb || 0;
+      byKey.set(key, entry);
+    }
+    const entries = [...byKey.values()].sort(
+      (a, b) => a.date.localeCompare(b.date) || a.exerciseId.localeCompare(b.exerciseId)
+    );
+    const dates = entries.map((e) => e.date);
+    return {
+      entries,
+      report: {
+        source,
+        sessions: new Set(dates).size,
+        lifts: new Set(entries.map((e) => e.exerciseId)).size,
+        sets: entries.reduce((n, e) => n + e.sets.length, 0),
+        from: dates.length ? dates[0] : null,
+        to: dates.length ? dates[dates.length - 1] : null,
+        unresolved: [...unresolved.entries()].map(([name, count]) => ({ name, rows: count })).sort((a, b) => b.rows - a.rows),
+        duplicates
+      }
+    };
   }
 
   // lib/train/index.ts
@@ -4431,6 +4617,78 @@ function assignRoutine(id){
       };
     });
 }
+/**
+ * Import a Hevy or Strong export.
+ *
+ * Imported rows go through the same resolution as a typed name, so they
+ * land on canonical ids and merge with anything already there. Names that
+ * do not resolve are listed rather than turned into new lifts.
+ */
+function openImport(){
+  openPop(popHead('Import your history','Hevy or Strong')
+    + '<p class="formGist">Everything here gets better with history. Export a CSV from your old app and drop it in — it merges with what you already have, and importing the same file twice changes nothing.</p>'
+    + '<div class="searchRow"><input id="impFile" type="file" accept=".csv,text/csv" aria-label="CSV file" /></div>'
+    + '<div class="settingsRow"><span class="bouncyLabel">Strong exported in</span><button class="pbtn ghost" id="impUnit" style="padding:6px 12px">lb</button></div>'
+    + '<div id="impStatus" style="margin-top:10px;font-size:13px;min-height:18px"></div>',
+    scrim=>{
+      let unit='lb';
+      const unitBtn=scrim.querySelector('#impUnit');
+      unitBtn.onclick=()=>{ unit = unit==='lb' ? 'kg' : 'lb'; unitBtn.textContent=unit; };
+      const status=scrim.querySelector('#impStatus');
+      scrim.querySelector('#impFile').onchange=ev=>{
+        const file=ev.target.files && ev.target.files[0];
+        if(!file) return;
+        const reader=new FileReader();
+        reader.onload=()=>{
+          try{ runImport(String(reader.result||''), unit, status); }
+          catch(err){ status.style.color='var(--fail)'; status.textContent='Could not read that file.'; }
+        };
+        reader.readAsText(file);
+      };
+    });
+}
+function runImport(text, unit, status){
+  const existing={};
+  Object.keys(STATE.history||{}).forEach(id=>{ existing[id]=(STATE.history[id]||[]).map(e=>({date:e.date})); });
+  const out=TrainEngine.importCsv(text, {
+    userExercises: STATE.exerciseNames||{},
+    aliases: STATE.aliases||{},
+    strongUnit: unit,
+    existing,
+  });
+  const r=out.report;
+  if(r.source==='unknown'){
+    status.style.color='var(--fail)';
+    status.textContent="That doesn't look like a Hevy or Strong export.";
+    return;
+  }
+  out.entries.forEach(entry=>{
+    const def=TrainEngine.catalogExercise(entry.exerciseId);
+    if(def) installExerciseDef(def.id, def.name, {
+      kind:def.defaultSetKind, perSide:def.unilateral, assisted:false,
+      repRange:null, equipment:def.equipment, primary:def.primary,
+    });
+    else if(!(STATE.exerciseNames||{})[entry.exerciseId]){
+      installExerciseDef(entry.exerciseId, entry.displayName, { kind:'reps_weight', equipment:'', primary:[] });
+    }
+    STATE.history=STATE.history||{};
+    const rows=(STATE.history[entry.exerciseId]||[]).filter(x=>x.date!==entry.date);
+    /* Imported rows carry atEstimated so the timing reads skip them: no
+       timestamp was observed and none is claimed. */
+    rows.push({ date:entry.date, kg:entry.kg, imported:r.source,
+                sets:entry.sets.map(st=>Object.assign({}, st, { atEstimated:true })) });
+    rows.sort((a,b)=>a.date.localeCompare(b.date));
+    STATE.history[entry.exerciseId]=rows;
+    if((STATE.finishedDates||[]).indexOf(entry.date)<0){ STATE.finishedDates=STATE.finishedDates||[]; STATE.finishedDates.push(entry.date); }
+  });
+  rederiveFromHistory();
+  status.style.color='var(--signal)';
+  status.innerHTML='Imported <b>'+r.sets+'</b> sets across <b>'+r.sessions+'</b> sessions and <b>'+r.lifts+'</b> lifts'
+    + (r.from?', '+fmtDate(r.from)+' to '+fmtDate(r.to):'') + '.'
+    + (r.duplicates?'<br/>Skipped '+r.duplicates+' already on record.':'')
+    + (r.unresolved.length?'<br/>Not recognised: '+r.unresolved.slice(0,5).map(u=>escapeHtml(u.name)+' ('+u.rows+')').join(', ')+'. Add those by name and re-import.':'');
+  render();
+}
 function openBackdate(){
   const ids=Object.keys(STATE.exerciseNames||{});
   if(!ids.length){
@@ -4562,6 +4820,9 @@ function openSettings(){
     + '<div class="secLbl">Sessions per week</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal" id="wkTarget">'+weeklyTarget()+'</span><button class="step" data-t="1">+</button></div></div>'
     + '<p class="settingsNote">Your streak counts weeks that hit this. Rest days never break it.</p>'
+    + '<div class="secLbl">Bring your history</div>'
+    + '<p class="settingsNote">Import a Hevy or Strong export. Everything intelligent here needs history, and a fresh install has none.</p>'
+    + '<button class="pbtn ghost" id="openImport" style="width:100%">Import CSV</button>'
     + '<div class="secLbl">Routine</div>'
     + '<p class="settingsNote">Save today\'s lifts as a named day and assign it to weekdays. It pre-fills an empty session and never touches anything already logged.</p>'
     + '<button class="pbtn ghost" id="openRoutines" style="width:100%">Routines</button>'
@@ -4592,6 +4853,8 @@ function openSettings(){
           STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
         });
       };
+      const impBtn=scrim.querySelector('#openImport');
+      if(impBtn) impBtn.onclick=()=>{ closePop(); openImport(); };
       const rtBtn=scrim.querySelector('#openRoutines');
       if(rtBtn) rtBtn.onclick=()=>{ closePop(); openRoutines(); };
       const bdBtn=scrim.querySelector('#openBackdate');
