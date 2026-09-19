@@ -98,6 +98,14 @@
   .pillWhy.why-clean { color:var(--signal); }
   .pillWhy.why-layoff, .pillWhy.why-deload { color:var(--gold); }
 
+  /* readiness — stated as fact before the session, not offered as a choice */
+  .readinessNote { margin:var(--sp3) var(--sp5) 0; padding:10px var(--sp4);
+    border-radius:var(--r-md); background:var(--e2); border:1px solid var(--hair);
+    font-size:12px; font-weight:600; line-height:1.4; color:var(--muted); }
+  .readinessNote.verdict-rest_advised { color:var(--fail); border-color:rgba(239,111,106,.3); }
+  .readinessNote.verdict-reduced_volume,
+  .readinessNote.verdict-reduced_intensity { color:var(--gold); border-color:rgba(245,166,35,.28); }
+
   /* warm-up toggle — deliberately quiet. It is a correction, not an action,
      and it should never compete with "Hit it". */
   .pillWarm { flex:none; width:22px; height:22px; border-radius:7px;
@@ -200,6 +208,7 @@
         <div class="heroSub" id="heroSub"></div>
       </div>
     </div>
+    <div class="readinessNote" id="readinessNote"></div>
     <div class="statStrip" id="miniStats"></div>
     <div class="wcSection" id="warmupSlot"></div>
     <div class="exwrap" id="exwrap"></div>
@@ -287,8 +296,11 @@ var TrainEngine = (() => {
     GAP_DAYS: () => GAP_DAYS,
     HIGH_RPE: () => HIGH_RPE,
     LAYOFF_DAYS: () => LAYOFF_DAYS,
+    LOAD_SPIKE: () => LOAD_SPIKE,
+    LOW_RECOVERY: () => LOW_RECOVERY,
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
+    MODERATE_RECOVERY: () => MODERATE_RECOVERY,
     MUSCLES: () => MUSCLES,
     NEAR_THRESHOLD: () => NEAR_THRESHOLD,
     PULL_MUSCLES: () => PULL_MUSCLES,
@@ -297,11 +309,14 @@ var TrainEngine = (() => {
     RATIO_BAND: () => RATIO_BAND,
     RECENT_HEAVY_SETS: () => RECENT_HEAVY_SETS,
     RECOVERY_FLOOR: () => RECOVERY_FLOOR,
+    REST_ADVICE_COOLDOWN_DAYS: () => REST_ADVICE_COOLDOWN_DAYS,
+    REST_FLOOR: () => REST_FLOOR,
     ROLLING_PR_DAYS: () => ROLLING_PR_DAYS,
     SECONDARY_SHARE: () => SECONDARY_SHARE,
     SET_KINDS: () => SET_KINDS,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
     analyse: () => analyse,
+    assessReadiness: () => assessReadiness,
     bestE1RM: () => bestE1RM,
     catalogExercise: () => catalogExercise,
     classifyPR: () => classifyPR,
@@ -2461,6 +2476,87 @@ var TrainEngine = (() => {
     };
   }
 
+  // lib/train/readiness.ts
+  var REST_FLOOR = 35;
+  var LOW_RECOVERY = 55;
+  var MODERATE_RECOVERY = 70;
+  var LOAD_SPIKE = 1.5;
+  var REST_ADVICE_COOLDOWN_DAYS = 7;
+  var SILENT = {
+    verdict: "normal",
+    setsFactor: 1,
+    weightFactor: 1,
+    reason: null,
+    confidence: "inferred"
+  };
+  function daysBetween(a, b) {
+    const parse = (s) => {
+      const [y, m2, d] = s.split("-").map(Number);
+      return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+    };
+    return Math.round((parse(b) - parse(a)) / 864e5);
+  }
+  function restIsCapped(ctx) {
+    return (ctx.restAdvisedDates || []).some(
+      (date) => daysBetween(date, ctx.today) < REST_ADVICE_COOLDOWN_DAYS
+    );
+  }
+  function assessReadiness(ctx) {
+    if (ctx.activeDeload) return SILENT;
+    const hasRecovery = typeof ctx.recovery === "number";
+    const hasLoad = typeof ctx.recentHardSets === "number" && typeof ctx.baselineHardSets === "number" && ctx.baselineHardSets > 0;
+    if (!hasRecovery && !hasLoad) return SILENT;
+    const recovery = ctx.recovery;
+    const ratio = hasLoad ? ctx.recentHardSets / ctx.baselineHardSets : 1;
+    if (hasRecovery && recovery < REST_FLOOR) {
+      if (!restIsCapped(ctx)) {
+        return {
+          verdict: "rest_advised",
+          setsFactor: 0,
+          weightFactor: 1,
+          reason: `Recovery is ${Math.round(recovery)}/100. Today is a rest day.`,
+          confidence: "measured"
+        };
+      }
+      return {
+        verdict: "reduced_volume",
+        setsFactor: 0.5,
+        weightFactor: 1,
+        reason: `Recovery is ${Math.round(recovery)}/100 and you rested recently. Today is half the usual sets.`,
+        confidence: "measured"
+      };
+    }
+    if (hasRecovery && recovery < LOW_RECOVERY) {
+      return {
+        verdict: "reduced_volume",
+        setsFactor: 0.6,
+        weightFactor: 1,
+        reason: `Recovery is ${Math.round(recovery)}/100. Today is scaled to 60% of the usual sets.`,
+        confidence: "measured"
+      };
+    }
+    if (hasLoad && ratio >= LOAD_SPIKE) {
+      const percent = Math.round((ratio - 1) * 100);
+      return {
+        verdict: "reduced_volume",
+        setsFactor: 0.75,
+        weightFactor: 1,
+        reason: `Hard sets are up ${percent}% on your usual week. Today is scaled back.`,
+        confidence: hasRecovery ? "measured" : "inferred"
+      };
+    }
+    if (hasRecovery && recovery < MODERATE_RECOVERY) {
+      return {
+        verdict: "reduced_intensity",
+        setsFactor: 1,
+        weightFactor: 0.9,
+        reason: `Recovery is ${Math.round(recovery)}/100. Weights are eased 10% today.`,
+        confidence: "measured"
+      };
+    }
+    return { ...SILENT, confidence: hasRecovery ? "measured" : "inferred" };
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -2571,6 +2667,55 @@ function saveState(){ if(window.Vitality && typeof window.Vitality.save==='funct
 
 /* ---- helpers on state -------------------------------------------- */
 /* Plate math config, editable in Settings. */
+/**
+ * Today's readiness, computed once on boot and held for the day.
+ *
+ * Read BEFORE the session rather than after it — the point is to prevent
+ * the bad session, not to explain it afterwards. Holding it for the day
+ * also stops the verdict flickering as sets are logged, which would make it
+ * look like guesswork.
+ */
+let READINESS = null;
+function weeklyHardSets(offsetWeeks){
+  const start=new Date(); start.setDate(start.getDate()-(7*(offsetWeeks+1)-1));
+  const end=new Date(); end.setDate(end.getDate()-7*offsetWeeks);
+  const from=ymd(start), to=ymd(end);
+  let n=0;
+  Object.keys(STATE.history||{}).forEach(id=>{
+    (STATE.history[id]||[]).forEach(entry=>{
+      if(entry.off || entry.date<from || entry.date>to) return;
+      n += TrainEngine.workingSets(entry).length;
+    });
+  });
+  return n;
+}
+/** The usual week, from the three before this one. Null without enough. */
+function baselineHardSets(){
+  const weeks=[1,2,3].map(weeklyHardSets).filter(n=>n>0);
+  if(weeks.length<2) return null;
+  return weeks.reduce((a,b)=>a+b,0)/weeks.length;
+}
+function anyDeloadActive(){
+  return Object.values(STATE.deloadStates||{}).some(d=>d && (d.state==='deloading' || d.state==='reapproach'));
+}
+async function computeReadiness(){
+  const rec = noteRecovery(await readRecovery());
+  const base = baselineHardSets();
+  READINESS = TrainEngine.assessReadiness({
+    recovery: rec.status==='connected' ? rec.avg : null,
+    recentHardSets: base==null ? null : weeklyHardSets(0),
+    baselineHardSets: base,
+    activeDeload: anyDeloadActive(),
+    restAdvisedDates: STATE.restAdvisedDates || [],
+    today,
+  });
+  if(READINESS.verdict==='rest_advised'){
+    STATE.restAdvisedDates = STATE.restAdvisedDates || [];
+    if(STATE.restAdvisedDates.indexOf(today)<0){ STATE.restAdvisedDates.push(today); saveState(); }
+  }
+  return READINESS;
+}
+function readiness(){ return READINESS || { verdict:'normal', setsFactor:1, weightFactor:1, reason:null }; }
 function plateConfig(){
   return STATE.plateConfig || TrainEngine.defaultPlateConfig();
 }
@@ -2597,7 +2742,14 @@ function curSession(){
   return STATE.session;
 }
 function sortedEx(session){ return session.ex.map((e,i)=>({e,i})).sort((a,b)=> (b.e.pinned-a.e.pinned)).map(o=>o.e); }
-function prescription(e){ const kg = e.deload ? r1(e.kg*0.9) : e.kg; return { kg, reps:e.reps, sets:e.sets, rest:e.rest }; }
+function prescription(e){
+  /* Readiness scales the prescription BEFORE the session starts, and never
+     stacks with a deload — the engine returns a neutral verdict whenever
+     one is live, so exactly one adjustment is ever in play. */
+  const r = readiness();
+  const base = e.deload ? r1(e.kg*0.9) : e.kg;
+  return { kg: r1(base * r.weightFactor), reps:e.reps, sets:e.sets, rest:e.rest };
+}
 function classifySet(e, idx){ const s=e.log[idx]; if(!s) return 'empty'; if(s.fail) return 'failed'; return 'done'; }
 /* A logged set is working unless it is a miss or a flagged warm-up.
    Absent warmup reads false, so everything already logged stays working. */
@@ -2647,7 +2799,7 @@ function dotsIcon(){ return '<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="
 function gripIcon(){ return '<svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>'; }
 
 function render(){
-  renderDots(); renderHead(); renderProgress(); renderBody(); renderStreak(); renderRail(); renderHeroExtras(); renderNoteBar(); saveState();
+  renderDots(); renderHead(); renderProgress(); renderBody(); renderStreak(); renderRail(); renderHeroExtras(); renderReadiness(); renderNoteBar(); saveState();
 }
 /* ---- top sticker note bar: 3 slots, each cycling on its own timer
    through a pool of short, real, day-dependent callouts. Pool is
@@ -2714,6 +2866,15 @@ function renderNoteBar(){
 /* ---- hero extras: session number, the streak/volume caption under the
    headline, and the 3-up mini stat strip — all real arithmetic over data
    already collected (same rule as the Overview cards), nothing invented. */
+/* Reports; never asks. Same posture as the deload note. */
+function renderReadiness(){
+  const el=$('#readinessNote'); if(!el) return;
+  const r=readiness();
+  if(!r.reason){ el.textContent=''; el.style.display='none'; return; }
+  el.style.display='';
+  el.className='readinessNote verdict-'+r.verdict;
+  el.textContent=r.reason;
+}
 function renderHeroExtras(){
   const fd=STATE.finishedDates||[];
   const numEl=$('#sessionNum');
@@ -3622,9 +3783,16 @@ function repeatLastSession(e){
   e.sets=e.log.length;
   rollupToday(e); render();
 }
-function rollupToday(e){
+/**
+ * The ONE write path from a session exercise into history, for any date.
+ *
+ * Backdating reuses this rather than adding a second writer: the same field
+ * mapping, the same working-set rules, the same top-weight derivation. A
+ * parallel path for past days is how the two drift and disagree.
+ */
+function rollupFor(e, date){
   const done = e.log.filter(s=>s&&!s.fail);
-  let h = histFor(e).filter(x=>x.date!==today);
+  let h = histFor(e).filter(x=>x.date!==date);
   if(done.length){
     /* Per-set weight and the warm-up flag are written from here on, so
        volume and e1RM can tell a ramp-up from the work. Older rows have
@@ -3646,13 +3814,16 @@ function rollupToday(e){
     });
     const working=logWorking(e);
     const top=(working.length?working:done).reduce((a,b)=>((b.kg||0)>(a.kg||0)?b:a));
-    h.push({date:today, kg:top.kg, sets});
+    h.push({date, kg:top.kg, sets});
     h.sort((a,b)=>a.date.localeCompare(b.date));
-    if(top.kg!=null) e.lastKg=top.kg;
+    /* Only a session for TODAY may move the carried-over weight. Editing
+       last month must not rewrite what the next session starts from. */
+    if(top.kg!=null && date===today) e.lastKg=top.kg;
   }
   STATE.history[e.id]=h;
   STATE.exerciseNames=STATE.exerciseNames||{}; STATE.exerciseNames[e.id]=e.name;
 }
+function rollupToday(e){ return rollupFor(e, today); }
 
 /* ---- header actions router --------------------------------------- */
 function handleAct(act, e, session, btn){
@@ -3849,6 +4020,92 @@ const SKY_TOGGLE_HTML =
 /* Merging is offered rather than done. It rewrites a training record, so
    it is confirmed explicitly and it is never destructive — the losing id's
    sessions move onto the winner, they do not vanish. */
+/**
+ * Log or edit a session for a past day.
+ *
+ * Every hole in the history degrades plateau detection and the frequency
+ * reads, and people forget. This seeds a temporary exercise from whatever
+ * is already recorded for that date, edits it with the same controls, and
+ * writes through rollupFor — the same validation and the same
+ * invalidation as a live session.
+ */
+function openBackdate(){
+  const ids=Object.keys(STATE.exerciseNames||{});
+  if(!ids.length){
+    openPop(popHead('Nothing to log yet','Past session')+'<p class="formGist">Add a lift first and you can backfill days you missed.</p>');
+    return;
+  }
+  const yesterday=(()=>{ const d=new Date(); d.setDate(d.getDate()-1); return ymd(d); })();
+  openPop(popHead('Log a past session','Backdate')
+    + '<p class="formGist">Fill in a day you forgot. It counts toward volume, plateaus and your records exactly as if you had logged it then.</p>'
+    + '<div class="searchRow"><input id="bdDate" type="date" max="'+today+'" value="'+yesterday+'" aria-label="Date" /></div>'
+    + '<div class="secLbl">Which lift</div>'
+    + '<div class="swapList">'+ids.map(id=>'<button class="swapItem" data-id="'+id+'"><span class="nm">'+escapeHtml(STATE.exerciseNames[id])+'</span><span class="mu">'+((STATE.history[id]||[]).filter(x=>!x.off).length)+' sessions</span></button>').join('')+'</div>',
+    scrim=>{
+      scrim.querySelectorAll('.swapItem[data-id]').forEach(b=> b.onclick=()=>{
+        const date=scrim.querySelector('#bdDate').value || yesterday;
+        if(date>today) return;
+        closePop(); editPastSession(b.dataset.id, date);
+      });
+    });
+}
+function editPastSession(id, date){
+  const existing=(STATE.history[id]||[]).find(x=>x.date===date);
+  const kind=kindFor({id});
+  /* A temporary session exercise, seeded from whatever that day already
+     holds, so editing and creating are the same operation. */
+  const draft={
+    id, name:STATE.exerciseNames[id]||id, kind,
+    log:(existing? (existing.sets||[]) : []).map(row=>({
+      kind:row.kind||kind, kg:row.w, reps:row.r, s:row.s, m:row.m,
+      warmup:row.warmup, fail:row.fail, rpe:row.rpe,
+      perSide:row.perSide, assisted:row.assisted,
+    })),
+  };
+  const rowsHtml=()=> draft.log.map((row,i)=>
+    '<div class="wcItem"><span class="wcTxt">'+(i+1)+'.</span>'
+    + (kind==='time' ? '<input class="pillInput bdS" data-i="'+i+'" type="number" value="'+(row.s||0)+'" aria-label="Seconds" /><span class="pillUnit">s</span>'
+      : kind==='distance' ? '<input class="pillInput bdM" data-i="'+i+'" type="number" value="'+(row.m||0)+'" aria-label="Metres" /><span class="pillUnit">m</span>'
+      : kind==='reps_only' ? '<input class="pillInput bdR" data-i="'+i+'" type="number" value="'+(row.reps||0)+'" aria-label="Reps" /><span class="pillUnit">reps</span>'
+      : '<input class="pillInput bdW" data-i="'+i+'" type="number" value="'+(row.kg||0)+'" aria-label="Weight" /><span class="pillUnit">'+STATE.unit+'</span><span class="pillTimes">×</span><input class="pillInput bdR" data-i="'+i+'" type="number" value="'+(row.reps||0)+'" aria-label="Reps" />')
+    + '<button class="wcX" data-rm="'+i+'">×</button></div>').join('');
+
+  const render2=scrim=>{
+    scrim.querySelector('#bdRows').innerHTML=rowsHtml() || '<p class="emptyHist">No sets on this day yet.</p>';
+    scrim.querySelectorAll('[data-rm]').forEach(b=> b.onclick=()=>{ draft.log.splice(+b.dataset.rm,1); render2(scrim); });
+    const read=(sel,i)=>{ const el=scrim.querySelector(sel+'[data-i="'+i+'"]'); return el?parseFloat(el.value):NaN; };
+    scrim.querySelectorAll('.pillInput').forEach(el=> el.onchange=()=>{
+      draft.log.forEach((row,i)=>{
+        if(kind==='time') row.s=read('.bdS',i)||0;
+        else if(kind==='distance') row.m=read('.bdM',i)||0;
+        else if(kind==='reps_only') row.reps=Math.round(read('.bdR',i))||0;
+        else { row.kg=read('.bdW',i)||0; row.reps=Math.round(read('.bdR',i))||0; }
+      });
+    });
+  };
+  openPop(popHead(fmtDate(date), draft.name)
+    + '<div id="bdRows"></div>'
+    + '<button class="pbtn ghost" id="bdAdd" style="width:100%;margin-top:10px">Add a set</button>'
+    + '<div class="popBtns"><button class="pbtn ghost" id="bdCancel">Cancel</button><button class="pbtn save" id="bdSave">Save</button></div>',
+    scrim=>{
+      render2(scrim);
+      scrim.querySelector('#bdAdd').onclick=()=>{
+        const last=draft.log[draft.log.length-1];
+        draft.log.push(last? {...last} : { kind, kg:0, reps:kind==='reps_weight'?5:undefined, s:kind==='time'?30:undefined, m:kind==='distance'?20:undefined });
+        render2(scrim);
+      };
+      scrim.querySelector('#bdCancel').onclick=closePop;
+      scrim.querySelector('#bdSave').onclick=()=>{
+        /* Same write path as a live session, then the same invalidation —
+           a backdated edit can change a plateau verdict, so nothing cached
+           may survive it. */
+        rollupFor(draft, date);
+        rederiveFromHistory();
+        closePop(); render();
+        renderStatsPicker && renderStatsPicker(); drawStatsSection && drawStatsSection();
+      };
+    });
+}
 function openMergeTool(){
   const ids=Object.keys(STATE.exerciseNames||{});
   if(ids.length<2){
@@ -3899,6 +4156,9 @@ function openSettings(){
     + '<div class="secLbl">Sessions per week</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal" id="wkTarget">'+weeklyTarget()+'</span><button class="step" data-t="1">+</button></div></div>'
     + '<p class="settingsNote">Your streak counts weeks that hit this. Rest days never break it.</p>'
+    + '<div class="secLbl">A day you missed</div>'
+    + '<p class="settingsNote">Every hole in the history weakens plateau detection and the weekly reads. Fill one in.</p>'
+    + '<button class="pbtn ghost" id="openBackdate" style="width:100%">Log a past session</button>'
     + '<div class="secLbl">Duplicate lifts</div>'
     + '<p class="settingsNote">If the same lift got logged under two names, merge them — every set and date moves onto one, nothing is deleted.</p>'
     + '<button class="pbtn ghost" id="openMerge" style="width:100%">Merge duplicate lifts</button>'
@@ -3923,6 +4183,8 @@ function openSettings(){
           STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
         });
       };
+      const bdBtn=scrim.querySelector('#openBackdate');
+      if(bdBtn) bdBtn.onclick=()=>{ closePop(); openBackdate(); };
       const mergeBtn=scrim.querySelector('#openMerge');
       if(mergeBtn) mergeBtn.onclick=()=>{ closePop(); openMergeTool(); };
       scrim.querySelector('#exAdd').onclick=()=>{
@@ -4107,6 +4369,7 @@ function openSwap(e){
       const installFromCatalog=(cand, normalized)=>{
         const def = TrainEngine.catalogExercise(cand.id);
         STATE.aliases = STATE.aliases || {};
+  STATE.restAdvisedDates = STATE.restAdvisedDates || [];
         STATE.aliases[normalized] = cand.id;
         if(def){
           installExerciseDef(def.id, def.name, {
@@ -5453,6 +5716,7 @@ function spawnParticles(root){
   STATE.photos = STATE.photos || [];
   STATE.sessionDurations = STATE.sessionDurations || [];
   STATE.liftGoals = STATE.liftGoals || [];
+  try{ await computeReadiness(); }catch(err){ READINESS=null; }
   render(); wireFresh();
   renderGoalBubble(); renderPhotos(); wirePhotoUpload(); renderOverviewCards(); renderStatsPicker(); drawStatsSection();
   const exportBtn=$('#exportCsvBtn'); if(exportBtn) exportBtn.onclick=exportCSV;
