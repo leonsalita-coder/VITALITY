@@ -21,12 +21,31 @@ it is believed.
 ## The tool
 
 ```
-npm run verify          # the commit gate: build, typecheck, tests, lint, callsites
-npm run mutate          # everything, including the slow modes
-npm run mutate:lint     # absence assertions without a positive control (seconds)
-npm run mutate:callsites# guards that assert existence rather than reachability
-npm run mutate:fuzz     # every date test, 5 times of day × 4 timezones
+npm run verify       # every commit: build, typecheck, tests, lint   (~1 min)
+npm run verify:full  # pre-push: adds callsites, fuzz, mutate        (~30 min)
+npm run mutate       # all four modes directly
+npm run mutate:lint  # absence assertions with no positive control   (seconds)
 ```
+
+The commit gate is deliberately the fast subset. A gate slow enough to be
+skipped is a gate that is skipped.
+
+## The ratchet, and the numbers it holds
+
+The first run found real debt, so the gate fails on a number getting WORSE
+rather than on the debt existing — a gate that is red on day one gets
+switched off within a week and then protects nothing.
+`.mutation-baseline.json` holds the counts:
+
+| mode | caught | survivors |
+| --- | --- | --- |
+| `mutate` | 123/192 (64%) | **69** across 29 modules |
+| `callsites` | 55/75 (73%) | **20** unguarded call sites |
+| `fuzz` | 20/20 | **0** |
+| `lint` | — | **69** absence assertions |
+
+These are meant to fall. Lower one with `--bless`; raising one has to be
+deliberate and visible in the diff.
 
 Exit codes: `0` clean, `1` survivors, **`2` harness failure** — deliberately
 distinct, because "the tool broke" must never read as "nothing survived".

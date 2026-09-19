@@ -35,7 +35,8 @@ beforeAll(async () => {
         generateWorkout: async () => { throw new Error('no_key') },
       }
       w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
-      w.HTMLCanvasElement.prototype.getContext = () => null
+      const noop = new Proxy({}, { get: () => () => noop })
+      w.HTMLCanvasElement.prototype.getContext = () => noop
     },
   })
   await new Promise((r) => setTimeout(r, 700))

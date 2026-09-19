@@ -17,7 +17,8 @@
     "mutate:lint": "node scripts/mutate.mjs --mode=lint",
     "mutate:callsites": "node scripts/mutate.mjs --mode=callsites",
     "mutate:fuzz": "node scripts/mutate.mjs --mode=fuzz",
-    "verify": "npm run build:tiles && tsc --noEmit && vitest run tests/ && node scripts/mutate.mjs --mode=lint && node scripts/mutate.mjs --mode=callsites"
+    "verify": "npm run build:tiles && tsc --noEmit && vitest run tests/ && node scripts/mutate.mjs --mode=lint",
+    "verify:full": "npm run verify && node scripts/mutate.mjs --mode=callsites && node scripts/mutate.mjs --mode=fuzz && node scripts/mutate.mjs --mode=mutate --limit=6"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.26.0",

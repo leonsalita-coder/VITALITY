@@ -42,7 +42,8 @@ async function boot(load: () => Promise<unknown>, seedLocal?: unknown) {
         generateWorkout: async () => { throw new Error('no_key') },
       }
       w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
-      w.HTMLCanvasElement.prototype.getContext = () => null
+      const noop = new Proxy({}, { get: () => () => noop })
+      w.HTMLCanvasElement.prototype.getContext = () => noop
     },
   })
   dom.virtualConsole.on('warn', (m: string) => logs.push(String(m)))

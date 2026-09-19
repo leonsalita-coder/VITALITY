@@ -498,6 +498,46 @@ function report(title, result, asJson) {
   return survivors.length
 }
 
+/**
+ * The ratchet.
+ *
+ * On its first run this tool found 69 lint findings and 4 unguarded call
+ * sites. A gate that is red on day one gets switched off within a week,
+ * and then it protects nothing — so the baseline records what was already
+ * there and the gate fails only when a number gets WORSE.
+ *
+ * The counts are meant to fall. Lowering one is the point; raising one
+ * has to be deliberate and visible in a diff, which is exactly the
+ * property that was missing when a guard could be added that asserted
+ * nothing.
+ */
+const BASELINE_FILE = '.mutation-baseline.json'
+
+function readBaseline() {
+  try {
+    return JSON.parse(readFileSync(BASELINE_FILE, 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+function checkRatchet(mode, count) {
+  const baseline = readBaseline()
+  const allowed = baseline[mode]
+  if (typeof allowed !== 'number') {
+    console.log(`  no baseline for ${mode}; run with --bless to record ${count}`)
+    return count > 0 ? 1 : 0
+  }
+  if (count > allowed) {
+    console.error(`  REGRESSION: ${count} survivors, baseline allows ${allowed}`)
+    return 1
+  }
+  if (count < allowed) {
+    console.log(`  improved: ${count} against a baseline of ${allowed} — lower it with --bless`)
+  }
+  return 0
+}
+
 function main() {
   const args = process.argv.slice(2)
   const opts = {
@@ -507,17 +547,25 @@ function main() {
     json: args.includes('--json'),
   }
 
+  const bless = args.includes('--bless')
   const modes = opts.mode === 'all' ? ['lint', 'callsites', 'fuzz', 'mutate'] : [opts.mode]
-  let survivors = 0
+  const counts = {}
+  let failed = 0
   for (const mode of modes) {
     const runner = { mutate: modeMutate, callsites: modeCallsites, fuzz: modeFuzz, lint: modeLint }[mode]
     if (!runner) {
       console.error(`unknown mode: ${mode}`)
       process.exit(2)
     }
-    survivors += report(mode.toUpperCase(), runner(opts), opts.json)
+    counts[mode] = report(mode.toUpperCase(), runner(opts), opts.json)
+    if (!bless) failed += checkRatchet(mode, counts[mode])
   }
-  process.exit(survivors ? 1 : 0)
+  if (bless) {
+    writeFileSync(BASELINE_FILE, JSON.stringify({ ...readBaseline(), ...counts }, null, 2) + '\n')
+    console.log(`baseline written: ${JSON.stringify(counts)}`)
+    process.exit(0)
+  }
+  process.exit(failed ? 1 : 0)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()
