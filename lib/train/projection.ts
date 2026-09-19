@@ -185,11 +185,16 @@ export function projectGoal(
     }
   }
 
-  const arrival = now + days * DAY_MS
+  /* Stepped by calendar days, like every other date this engine builds.
+     Adding milliseconds drifts an hour across a daylight-saving change,
+     which can show an arrival a day off — small against the uncertainty
+     of the projection itself, but there is no reason to be wrong. */
+  const arrival = new Date(now)
+  arrival.setDate(arrival.getDate() + Math.round(days))
   const weeks = Math.max(1, Math.round(days / 7))
   return {
     verdict: 'on_track',
-    date: isoOf(arrival),
+    date: isoOf(arrival.getTime()),
     weeks,
     perWeek,
     staticWeeks: null,

@@ -38,16 +38,31 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((localMidnight(to) - localMidnight(from)) / DAY_MS)
 }
 
+/** `n` calendar days before this date — NOT n × 86,400,000 milliseconds. */
+function shiftDays(ms: number, back: number): Date {
+  const d = new Date(ms)
+  d.setDate(d.getDate() - back)
+  return d
+}
+
 /**
  * A window of `days` ending `endingDaysAgo` days before now.
  *
  * `rollingWindow(now)` is the last seven days including today.
  * `rollingWindow(now, 7)` is the seven days before that.
+ *
+ * Stepped by CALENDAR days, and that is not a detail. Subtracting
+ * milliseconds drifts across a daylight-saving change: six times
+ * 86,400,000 back from early on the Monday after the clocks go forward
+ * lands a day too far, because the intervening Sunday was 23 hours long.
+ * The window silently becomes eight days, once a year, inflating every
+ * weekly figure computed inside it — volume, sets, sessions, and the
+ * baseline every change is measured against.
  */
 export function rollingWindow(now: number, endingDaysAgo = 0, days = 7): Window {
-  const end = now - endingDaysAgo * DAY_MS
-  const start = end - (days - 1) * DAY_MS
-  return { from: dateKey(start), to: dateKey(end), days }
+  const end = shiftDays(now, endingDaysAgo)
+  const start = shiftDays(end.getTime(), days - 1)
+  return { from: dateKey(start.getTime()), to: dateKey(end.getTime()), days }
 }
 
 /**

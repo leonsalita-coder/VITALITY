@@ -24,7 +24,6 @@ import { distribute, type Muscle, type MuscleSplit } from './muscles'
 import { topWorkingWeight, workingSets, type HistoryEntry } from './sets'
 import type { TrainingAge } from './onboarding'
 
-const DAY_MS = 86_400_000
 
 export type Band = 'under' | 'in' | 'over'
 
