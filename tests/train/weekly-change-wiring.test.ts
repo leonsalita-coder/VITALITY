@@ -2,6 +2,18 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
 
+/* LOCAL date, never toISOString.
+   toISOString is UTC: east of UTC it returns yesterday's local date, the
+   session never matches the tile's `today`, curSession() rebuilds it
+   empty, and every assertion below silently stops testing anything.
+   Found by `npm run mutate:fuzz` — 44 tests were passing vacuously in
+   Sydney. */
+const localToday = () => {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 /**
  * The weekly change analysis, driven through the real tile.
  *
@@ -12,7 +24,7 @@ import { JSDOM } from 'jsdom'
 
 const state = () => ({
   unit: 'lb', submitted: false,
-  session: { date: new Date().toISOString().slice(0, 10), off: false, warmup: [], cooldown: [], ex: [] },
+  session: { date: localToday(), off: false, warmup: [], cooldown: [], ex: [] },
   history: {}, customLib: {}, exerciseNames: {}, deloadStates: {},
   finishedDates: [], templates: [], shortTermGoal: '', otherTraining: [],
   photos: [], sessionDurations: [], liftGoals: [], bodyweight: [],

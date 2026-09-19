@@ -1,0 +1,525 @@
+#!/usr/bin/env node
+/**
+ * Mutation testing — does the suite actually catch anything?
+ *
+ * Every failure this engine has produced has been a test that could not
+ * fail. Not one has been a bug the tests caught late; they have been
+ * guards asserting that code exists rather than that it runs, gates
+ * masked by other gates, absence assertions against empty fixtures, a
+ * boundary test written at the one time of day it had twelve hours of
+ * slack, and — worst — a harness that resolved zero test files, reported
+ * zero failures, and read exactly like success.
+ *
+ * This tool encodes each of those, so they are caught by the build rather
+ * than by somebody remembering.
+ *
+ *   node scripts/mutate.mjs                 everything
+ *   node scripts/mutate.mjs --mode=lint     absence assertions only (fast)
+ *   node scripts/mutate.mjs --mode=mutate --files=weekly,timing
+ *   node scripts/mutate.mjs --mode=callsites
+ *   node scripts/mutate.mjs --mode=fuzz
+ *   node scripts/mutate.mjs --limit=20 --json
+ *
+ * EXIT CODES: 0 clean, 1 survivors or lint findings, 2 harness failure.
+ * A harness failure is deliberately distinct: "the tool broke" must never
+ * be mistaken for "nothing survived".
+ */
+
+import { execFileSync } from 'node:child_process'
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync, cpSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
+
+const ENGINE_DIR = 'lib/train'
+const TEST_DIR = 'tests/train'
+const TILES = ['public/tiles/train.html', 'tiles-library/train.html']
+
+/* ---------------------------------------------------------------- *
+ * Running tests, and refusing to believe a run that did not happen.
+ * ---------------------------------------------------------------- */
+
+/**
+ * The failure that makes every other check worthless.
+ *
+ * Passing several `.test.ts` paths to vitest made it resolve NO test
+ * files; it printed "No test files found", the grep for failures matched
+ * nothing, and eleven mutations were reported as survived-nothing-caught
+ * when in truth nothing had run. So every result here is checked against
+ * what was expected to run before it is believed.
+ */
+function runTests(patterns, expect = {}) {
+  let stdout = ''
+  try {
+    stdout = execFileSync('npx', ['vitest', 'run', ...patterns], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...(expect.env || {}) },
+      /* A mutation can turn a loop condition into a non-terminating one.
+         Without a deadline the whole run hangs on it, which reads as the
+         tool being slow rather than the mutation being lethal. */
+      timeout: expect.timeoutMs || 120_000,
+    })
+  } catch (err) {
+    /* A timeout is a KILLED mutation, not a broken harness: the code no
+       longer terminates, which is a behaviour change the suite noticed
+       in the most emphatic way available. */
+    if (err && (err.killed || err.code === 'ETIMEDOUT')) {
+      return { ok: true, failed: 1, total: 1, fileCount: 1, timedOut: true }
+    }
+    stdout = String(err.stdout || '') + String(err.stderr || '')
+  }
+
+  return verdictFrom(stdout, expect)
+}
+
+/**
+ * Turning vitest's output into a verdict — the whole safety property of
+ * this tool, extracted so it can be tested without shelling out.
+ *
+ * It exists as its own function because the version inlined in runTests
+ * could not be exercised directly, and the zero-tests check inside it —
+ * the guard against precisely the failure that made this tool necessary —
+ * survived mutation testing of the tool itself.
+ */
+function verdictFrom(stdout, expect = {}) {
+  const files = /Test Files\s+(?:(\d+) failed \| )?(\d+) passed \((\d+)\)/.exec(stdout)
+  const tests = /Tests\s+(?:(\d+) failed \| )?(\d+) passed \((\d+)\)/.exec(stdout)
+  if (!files || !tests) {
+    /* No summary at all. Which of two very different things this is
+       depends on whether the IDENTICAL invocation worked a moment ago:
+       if the baseline ran, the patterns are sound and the mutation has
+       broken collection outright — a kill, and an emphatic one. If there
+       was no baseline, the tool is being misused and must say so rather
+       than score it. */
+    if (expect.baselineRan) {
+      return { ok: true, failed: 1, total: expect.minTests || 1, fileCount: expect.minFiles || 1, collapsed: true }
+    }
+    return { ok: false, reason: `no test summary in output (${firstLine(stdout)})`, failed: 0, total: 0, fileCount: 0 }
+  }
+  const result = {
+    ok: true,
+    failed: Number(tests[1] || 0),
+    total: Number(tests[3]),
+    fileCount: Number(files[3]),
+  }
+  if (result.total === 0) {
+    return { ...result, ok: false, reason: 'resolved zero tests' }
+  }
+  if (expect.minFiles && result.fileCount < expect.minFiles) {
+    return { ...result, ok: false, reason: `ran ${result.fileCount} files, expected at least ${expect.minFiles}` }
+  }
+  if (expect.minTests && result.total < expect.minTests) {
+    return { ...result, ok: false, reason: `ran ${result.total} tests, expected at least ${expect.minTests}` }
+  }
+  return result
+}
+
+const firstLine = (s) => String(s).split('\n').find((l) => l.trim()) || 'no output'
+
+/* ---------------------------------------------------------------- *
+ * Snapshots. Never git checkout — that discarded uncommitted work in
+ * six files once already, because a snapshot taken from HEAD is not a
+ * snapshot of what you were editing.
+ * ---------------------------------------------------------------- */
+
+function snapshot(paths) {
+  const dir = mkdtempSync(join(tmpdir(), 'mutate-'))
+  const saved = new Map()
+  for (const p of paths) saved.set(p, readFileSync(p, 'utf8'))
+  return {
+    dir,
+    restore() {
+      for (const [p, text] of saved) writeFileSync(p, text)
+    },
+    cleanup() {
+      rmSync(dir, { recursive: true, force: true })
+    },
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Which tests exercise which module.
+ * ---------------------------------------------------------------- */
+
+const testFiles = () =>
+  readdirSync(TEST_DIR).filter((f) => f.endsWith('.test.ts')).map((f) => join(TEST_DIR, f))
+
+/** Test files that import this module directly. */
+function testsFor(moduleName) {
+  const found = []
+  for (const file of testFiles()) {
+    const text = readFileSync(file, 'utf8')
+    if (new RegExp(`train/${moduleName}['"]`).test(text)) found.push(file)
+  }
+  return found
+}
+
+/** Test files that boot a tile. Any engine change can move these. */
+function tileTests() {
+  return testFiles().filter((f) => /JSDOM/.test(readFileSync(f, 'utf8')))
+}
+
+/* ---------------------------------------------------------------- *
+ * The operators.
+ * ---------------------------------------------------------------- */
+
+/**
+ * Deliberately conservative. Each of these changes behaviour in a way a
+ * correct suite should notice; operators that merely rename or reorder
+ * produce survivors nobody can act on, which is how a mutation score
+ * becomes a number people stop reading.
+ */
+const OPERATORS = [
+  { id: 'and-to-or', find: / && /g, put: () => ' || ' },
+  { id: 'or-to-and', find: / \|\| /g, put: () => ' && ' },
+  { id: 'gte-to-gt', find: / >= /g, put: () => ' > ' },
+  { id: 'lte-to-lt', find: / <= /g, put: () => ' < ' },
+  { id: 'gt-to-gte', find: / > /g, put: () => ' >= ' },
+  { id: 'lt-to-lte', find: / < /g, put: () => ' <= ' },
+  { id: 'eq-to-neq', find: / === /g, put: () => ' !== ' },
+  { id: 'neq-to-eq', find: / !== /g, put: () => ' === ' },
+  { id: 'true-to-false', find: /\btrue\b/g, put: () => 'false' },
+  { id: 'guard-removed', find: /^(\s*)if \(([^)]{1,120})\) (return|continue)\b/gm, put: (m, indent, _cond, kw) => `${indent}if (false) ${kw}` },
+]
+
+/** Every mutation this file admits, as {file, index, id, before, after}. */
+function mutationsFor(file) {
+  const text = readFileSync(file, 'utf8')
+  const out = []
+  for (const op of OPERATORS) {
+    let match
+    op.find.lastIndex = 0
+    while ((match = op.find.exec(text)) !== null) {
+      const at = match.index
+      /* Comments and doc blocks are prose; mutating them changes nothing
+         and every one would be reported as a survivor. */
+      if (inCommentAt(text, at)) continue
+      const replaced = op.put(...match)
+      if (replaced === match[0]) continue
+      out.push({
+        file,
+        at,
+        id: op.id,
+        line: text.slice(0, at).split('\n').length,
+        before: match[0],
+        after: replaced,
+      })
+    }
+  }
+  return out
+}
+
+/** Cheap but sufficient: is this offset inside a // or /* comment? */
+function inCommentAt(text, at) {
+  const lineStart = text.lastIndexOf('\n', at) + 1
+  const line = text.slice(lineStart, at)
+  if (line.includes('//')) return true
+  const openBlock = text.lastIndexOf('/*', at)
+  const closeBlock = text.lastIndexOf('*/', at)
+  return openBlock > closeBlock
+}
+
+function applyMutation(m) {
+  const text = readFileSync(m.file, 'utf8')
+  writeFileSync(m.file, text.slice(0, m.at) + m.after + text.slice(m.at + m.before.length))
+}
+
+/* ---------------------------------------------------------------- *
+ * MODE: mutate
+ * ---------------------------------------------------------------- */
+
+function modeMutate(opts) {
+  const modules = readdirSync(ENGINE_DIR)
+    .filter((f) => f.endsWith('.ts') && f !== 'index.ts')
+    .map((f) => f.replace(/\.ts$/, ''))
+    .filter((name) => !opts.files.length || opts.files.includes(name))
+
+  const survivors = []
+  let killed = 0
+  let considered = 0
+
+  for (const name of modules) {
+    const file = join(ENGINE_DIR, `${name}.ts`)
+    const scope = testsFor(name)
+    if (!scope.length) {
+      survivors.push({ file, line: 0, id: 'no-tests', note: 'no test file imports this module' })
+      continue
+    }
+
+    /* The baseline has to be green, or every mutation "survives" against
+       a suite that was already failing. */
+    const base = runTests(scope, { minFiles: scope.length })
+    if (!base.ok) return harnessFailure(`baseline for ${name}: ${base.reason}`)
+    if (base.failed) return harnessFailure(`baseline for ${name} is already red (${base.failed} failing)`)
+
+    let all = mutationsFor(file)
+    if (opts.limit) all = evenlySampled(all, opts.limit)
+
+    const snap = snapshot([file])
+    try {
+      for (const m of all) {
+        considered++
+        applyMutation(m)
+        const r = runTests(scope, { minFiles: scope.length, minTests: base.total, baselineRan: true })
+        snap.restore()
+        if (!r.ok) return harnessFailure(`${name}:${m.line} — ${r.reason}`)
+        if (r.failed > 0) killed++
+        else survivors.push({ ...m, scope: scope.length })
+      }
+    } finally {
+      snap.restore()
+      snap.cleanup()
+    }
+    process.stderr.write(`  ${name}: ${all.length} mutations, ${scope.length} test file(s)\n`)
+  }
+  return { considered, killed, survivors }
+}
+
+/** A spread across the file rather than the first N, which cluster. */
+function evenlySampled(list, limit) {
+  if (list.length <= limit) return list
+  const step = list.length / limit
+  return Array.from({ length: limit }, (_, i) => list[Math.floor(i * step)])
+}
+
+/* ---------------------------------------------------------------- *
+ * MODE: callsites — the class that produced kind: e.kind
+ * ---------------------------------------------------------------- */
+
+/**
+ * A guard satisfiable by code merely EXISTING is asserting existence, not
+ * reachability. This removes each tile-side call to the engine and checks
+ * that something goes red. Anything the tile can stop calling with the
+ * suite still green is a wiring path nothing actually guards — which is
+ * how `kind: e.kind`, the missing barrel exports, the unwired coach path
+ * and analysis.ts all shipped.
+ */
+function modeCallsites(opts) {
+  const tile = TILES[0]
+  const text = readFileSync(tile, 'utf8')
+  const calls = []
+  const re = /TrainEngine\.([A-Za-z0-9_]+)\s*\(/g
+  let match
+  while ((match = re.exec(text)) !== null) {
+    if (inCommentAt(text, match.index)) continue
+    calls.push({ name: match[1], at: match.index, line: text.slice(0, match.index).split('\n').length })
+  }
+
+  /* One representative call per engine member: removing all twelve
+     `suggestTarget` calls proves less than removing one, and costs
+     twelve test runs. */
+  const seen = new Set()
+  let unique = calls.filter((c) => (seen.has(c.name) ? false : (seen.add(c.name), true)))
+  if (opts.files.length) unique = unique.filter((c) => opts.files.includes(c.name))
+  if (opts.limit) unique = evenlySampled(unique, opts.limit)
+
+  const scope = tileTests()
+  const base = runTests(scope, { minFiles: scope.length })
+  if (!base.ok) return harnessFailure(`callsite baseline: ${base.reason}`)
+  if (base.failed) return harnessFailure(`callsite baseline already red (${base.failed} failing)`)
+
+  const survivors = []
+  let killed = 0
+  const snap = snapshot(TILES)
+  try {
+    for (const call of unique) {
+      /* Replaced rather than deleted: the expression must still parse, so
+         the failure is "nothing was wired here" and not a syntax error
+         that would fail everything and look like a pass. */
+      const current = readFileSync(tile, 'utf8')
+      const mutated = current.slice(0, call.at) + '((()=>undefined))(' + current.slice(call.at + `TrainEngine.${call.name}(`.length)
+      writeFileSync(tile, mutated)
+      writeFileSync(TILES[1], mutated)
+
+      const r = runTests(scope, { minFiles: scope.length, minTests: base.total, baselineRan: true })
+      snap.restore()
+      if (!r.ok) return harnessFailure(`callsite ${call.name}: ${r.reason}`)
+      if (r.failed > 0) killed++
+      else survivors.push({ file: tile, line: call.line, id: 'unguarded-callsite', name: call.name })
+    }
+  } finally {
+    snap.restore()
+    snap.cleanup()
+  }
+  return { considered: unique.length, killed, survivors }
+}
+
+/* ---------------------------------------------------------------- *
+ * MODE: fuzz — a DST test at noon has twelve hours of slack
+ * ---------------------------------------------------------------- */
+
+const ZONES = ['America/New_York', 'Europe/London', 'Australia/Sydney', 'UTC']
+const HOURS = ['00:30', '01:30', '06:30', '12:30', '23:30']
+
+function modeFuzz(opts) {
+  let dated = testFiles().filter((f) => /Date|day\(|localMidnight|rollingWindow|dateKey/.test(readFileSync(f, 'utf8')))
+  if (opts.files.length) dated = dated.filter((f) => opts.files.some((n) => f.includes(n)))
+
+  const survivors = []
+  let considered = 0
+  for (const zone of ZONES) {
+    /* The hour is supplied to the suite rather than faked here: a test
+       that reads the clock will read this one. Tests that pass `now`
+       explicitly are unaffected, which is the point — they are the ones
+       already immune. */
+    for (const hour of HOURS) {
+      considered++
+      const r = runTests(dated, { minFiles: dated.length, env: { TZ: zone, MUTATE_HOUR: hour } })
+      if (!r.ok) return harnessFailure(`fuzz ${zone} ${hour}: ${r.reason}`)
+      if (r.failed > 0) {
+        survivors.push({ file: `${zone} @ ${hour}`, line: 0, id: 'time-dependent', failed: r.failed })
+      }
+    }
+  }
+  return { considered, killed: considered - survivors.length, survivors }
+}
+
+/* ---------------------------------------------------------------- *
+ * MODE: lint — absence assertions with no positive control
+ * ---------------------------------------------------------------- */
+
+/**
+ * "Stays silent" is indistinguishable from "the fixture never loaded".
+ * Every assertion that something is empty needs a paired assertion in the
+ * same test proving there was something to be empty about.
+ */
+const ABSENCE = /expect\(([^;]*?)\)\s*\.(?:toEqual\(\[\]\)|toBeNull\(\)|toHaveLength\(0\))/g
+const CONTROL = /toBeGreaterThan|toBeTruthy|not\.toBeNull|toBe\(true\)|toContain|toMatch|not\.toEqual|toBeDefined/
+
+/**
+ * Only absence assertions made against a BUILT FIXTURE.
+ *
+ * `expect(epley1RM(NaN)).toBeNull()` needs no control: the input is
+ * inline and visibly present. The dangerous shape is
+ * `expect(weeklyChange(ctx)).toBeNull()`, where `ctx` is assembled by a
+ * helper — because a helper that silently produced nothing gives exactly
+ * the same green. Flagging both makes the lint unactionable, and a lint
+ * nobody acts on is the same failure as a guard nobody can falsify.
+ */
+function localNames(body) {
+  const names = new Set()
+  const re = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=/g
+  let m
+  while ((m = re.exec(body)) !== null) names.add(m[1])
+  return names
+}
+
+function modeLint(opts) {
+  const findings = []
+  for (const file of testFiles()) {
+    if (opts.files.length && !opts.files.some((n) => file.includes(n))) continue
+    const text = readFileSync(file, 'utf8')
+    for (const block of splitTests(text)) {
+      if (CONTROL.test(block.body)) continue
+      /* The subject has to be something THIS TEST BUILT. An absence
+         assertion on a literal input — `frequencyGaps({}, INDEX, NOW)`
+         is empty-in, empty-out — is self-evidently exercised, and
+         flagging it buries the real ones. The dangerous shape is a
+         fixture assembled in the test body and then asserted to have
+         produced nothing, because a fixture that silently assembled
+         nothing gives the identical green. */
+      const locals = localNames(block.body)
+      if (!locals.size) continue
+      ABSENCE.lastIndex = 0
+      let m
+      while ((m = ABSENCE.exec(block.body)) !== null) {
+        const subject = m[1]
+        const built = [...locals].some((n) => new RegExp(`\\b${n}\\b`).test(subject))
+        if (!built) continue
+        findings.push({ file, line: block.line, id: 'absence-without-control', name: block.name })
+        break
+      }
+    }
+  }
+  return { considered: findings.length, killed: 0, survivors: findings, lintOnly: true }
+}
+
+/** Each `it(...)` body, with its line number. */
+function splitTests(text) {
+  const out = []
+  const re = /\bit(?:\.each\([^)]*\))?\(\s*(['"`])([\s\S]*?)\1\s*,/g
+  let match
+  while ((match = re.exec(text)) !== null) {
+    const start = match.index
+    const next = re.lastIndex
+    const after = text.indexOf('\n  })', next)
+    out.push({
+      name: match[2].slice(0, 70),
+      line: text.slice(0, start).split('\n').length,
+      body: text.slice(next, after === -1 ? next + 2000 : after),
+    })
+  }
+  return out
+}
+
+/* ---------------------------------------------------------------- */
+
+function harnessFailure(reason) {
+  return { harnessBroken: reason }
+}
+
+function report(title, result, asJson) {
+  if (result.harnessBroken) {
+    console.error(`\nHARNESS BROKEN — ${result.harnessBroken}`)
+    console.error('  No conclusion can be drawn. The tool failed, which is')
+    console.error('  not the same as nothing surviving.\n')
+    process.exit(2)
+  }
+  if (asJson) {
+    console.log(JSON.stringify({ title, ...result }, null, 2))
+    return result.survivors.length
+  }
+
+  const { considered, killed, survivors } = result
+  console.log(`\n${title}`)
+  if (!result.lintOnly) {
+    const score = considered ? Math.round((killed / considered) * 100) : 0
+    console.log(`  ${killed}/${considered} caught  (${score}%)`)
+  }
+  if (!survivors.length) {
+    console.log('  no survivors\n')
+    return 0
+  }
+  console.log(`  ${survivors.length} SURVIVED — nothing failed when these changed:\n`)
+  const byFile = new Map()
+  for (const s of survivors) {
+    if (!byFile.has(s.file)) byFile.set(s.file, [])
+    byFile.get(s.file).push(s)
+  }
+  for (const [file, list] of [...byFile].sort((a, b) => b[1].length - a[1].length)) {
+    console.log(`    ${file}  (${list.length})`)
+    for (const s of list.slice(0, 8)) {
+      const what = s.name ? ` ${s.name}` : s.before ? ` ${JSON.stringify(s.before)} → ${JSON.stringify(s.after)}` : ''
+      console.log(`      line ${String(s.line).padStart(4)}  ${s.id}${what}`)
+    }
+    if (list.length > 8) console.log(`      … and ${list.length - 8} more`)
+  }
+  console.log('')
+  return survivors.length
+}
+
+function main() {
+  const args = process.argv.slice(2)
+  const opts = {
+    mode: (args.find((a) => a.startsWith('--mode=')) || '--mode=all').split('=')[1],
+    files: (args.find((a) => a.startsWith('--files=')) || '--files=').split('=')[1].split(',').filter(Boolean),
+    limit: Number((args.find((a) => a.startsWith('--limit=')) || '--limit=0').split('=')[1]) || 0,
+    json: args.includes('--json'),
+  }
+
+  const modes = opts.mode === 'all' ? ['lint', 'callsites', 'fuzz', 'mutate'] : [opts.mode]
+  let survivors = 0
+  for (const mode of modes) {
+    const runner = { mutate: modeMutate, callsites: modeCallsites, fuzz: modeFuzz, lint: modeLint }[mode]
+    if (!runner) {
+      console.error(`unknown mode: ${mode}`)
+      process.exit(2)
+    }
+    survivors += report(mode.toUpperCase(), runner(opts), opts.json)
+  }
+  process.exit(survivors ? 1 : 0)
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()
+
+export { OPERATORS, mutationsFor, splitTests, inCommentAt, evenlySampled, ABSENCE, CONTROL, verdictFrom }

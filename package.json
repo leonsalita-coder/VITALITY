@@ -12,7 +12,12 @@
     "lint": "next lint",
     "test": "vitest run",
     "build:tiles": "node scripts/build-tile.mjs",
-    "prebuild": "npm run build:tiles"
+    "prebuild": "npm run build:tiles",
+    "mutate": "node scripts/mutate.mjs",
+    "mutate:lint": "node scripts/mutate.mjs --mode=lint",
+    "mutate:callsites": "node scripts/mutate.mjs --mode=callsites",
+    "mutate:fuzz": "node scripts/mutate.mjs --mode=fuzz",
+    "verify": "npm run build:tiles && tsc --noEmit && vitest run tests/ && node scripts/mutate.mjs --mode=lint && node scripts/mutate.mjs --mode=callsites"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.26.0",
