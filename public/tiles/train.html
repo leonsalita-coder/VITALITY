@@ -334,7 +334,10 @@ var TrainEngine = (() => {
     SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
     analyse: () => analyse,
+    anythingAnswered: () => anythingAnswered,
+    applyOnboarding: () => applyOnboarding,
     assessReadiness: () => assessReadiness,
+    availableEquipment: () => availableEquipment,
     bestE1RM: () => bestE1RM,
     bodyweightAt: () => bodyweightAt,
     bodyweightLoad: () => bodyweightLoad,
@@ -382,6 +385,7 @@ var TrainEngine = (() => {
     normalizeClassification: () => normalizeClassification,
     normalizeName: () => normalizeName2,
     normalizeShares: () => normalizeShares,
+    onboardingNeeded: () => onboardingNeeded,
     parseCsv: () => parseCsv,
     periodComparison: () => periodComparison,
     planSession: () => planSession,
@@ -403,6 +407,7 @@ var TrainEngine = (() => {
     similarity: () => similarity,
     slugFromName: () => slugFromName,
     snapToLoadable: () => snapToLoadable,
+    startingWeightFor: () => startingWeightFor,
     stateLooksEmpty: () => stateLooksEmpty,
     storageReport: () => storageReport,
     streakLabel: () => streakLabel,
@@ -3256,6 +3261,79 @@ Say that back in one short sentence, in the second person, keeping the number ex
     return { host, local, snapshots, detail: parts.join(", ") };
   }
 
+  // lib/train/onboarding.ts
+  var AGES = ["beginner", "intermediate", "advanced"];
+  function cleanStrings(raw) {
+    if (!Array.isArray(raw)) return [];
+    return [...new Set(raw.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean))];
+  }
+  function applyOnboarding(state, answers, today) {
+    const next = { ...state, onboardedAt: today };
+    const seeded = {
+      bodyweight: false,
+      lifts: 0,
+      equipment: 0,
+      avoided: 0,
+      target: null,
+      trainingAge: null
+    };
+    const bw = answers.bodyweightLb;
+    if (typeof bw === "number" && Number.isFinite(bw) && bw > 0) {
+      next.bodyweight = recordBodyweight(state.bodyweight || [], today, bw);
+      seeded.bodyweight = true;
+    }
+    const lifts = Array.isArray(answers.startingLifts) ? answers.startingLifts : [];
+    const weights = { ...state.startingWeights || {} };
+    for (const lift of lifts) {
+      if (!lift || !lift.exerciseId) continue;
+      const w = lift.weightLb;
+      if (typeof w !== "number" || !Number.isFinite(w) || w <= 0) continue;
+      weights[lift.exerciseId] = Math.round(w * 10) / 10;
+      seeded.lifts++;
+    }
+    if (seeded.lifts) next.startingWeights = weights;
+    const equipment = cleanStrings(answers.equipment);
+    if (equipment.length) {
+      next.equipment = equipment;
+      seeded.equipment = equipment.length;
+    }
+    const avoid = cleanStrings(answers.avoid);
+    if (avoid.length) {
+      next.painFlagged = [.../* @__PURE__ */ new Set([...state.painFlagged || [], ...avoid])];
+      seeded.avoided = avoid.length;
+    }
+    const target = answers.sessionsPerWeek;
+    if (typeof target === "number" && Number.isFinite(target) && target >= 1 && target <= 14) {
+      next.weeklyTarget = Math.round(target);
+      seeded.target = next.weeklyTarget;
+    }
+    const age = answers.trainingAge;
+    if (age && AGES.includes(age)) {
+      next.trainingAge = age;
+      seeded.trainingAge = age;
+    }
+    return { state: next, seeded };
+  }
+  function onboardingNeeded(state) {
+    return !state || !state.onboardedAt;
+  }
+  function anythingAnswered(seeded) {
+    return seeded.bodyweight || seeded.lifts > 0 || seeded.equipment > 0 || seeded.avoided > 0 || seeded.target != null || seeded.trainingAge != null;
+  }
+  function startingWeightFor(state, exerciseId) {
+    const w = (state.startingWeights || {})[exerciseId];
+    return typeof w === "number" && w > 0 ? w : null;
+  }
+  function availableEquipment(opts) {
+    const today = cleanStrings(opts.todayOverride);
+    if (today.length) return { equipment: today, source: "today" };
+    const stated = cleanStrings(opts.stated);
+    if (stated.length) return { equipment: stated, source: "stated" };
+    const history = cleanStrings(opts.fromHistory);
+    if (history.length) return { equipment: history, source: "history" };
+    return { equipment: [], source: "none" };
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -3325,7 +3403,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, aliases:{}, bodyweight:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
+    history:{}, customLib:{}, aliases:{}, bodyweight:[], startingWeights:{}, equipment:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -4325,6 +4403,17 @@ function knownExercises(){
 /* Equipment on record IS the equipment list — asking for a barbell session
    in a hotel room is the common failure, and the honest signal for what is
    in the room is what the athlete has actually been training with. */
+/* Stated kit beats what history implies, and what is in the room TODAY
+   beats both — travel and a different gym are the real failure, and an
+   inferred list is wrong in exactly that case. */
+function equipmentAvailable(){
+  return TrainEngine.availableEquipment({
+    todayOverride: (STATE.equipmentToday && STATE.equipmentToday.date===today)
+      ? STATE.equipmentToday.list : null,
+    stated: STATE.equipment || null,
+    fromHistory: equipmentOnRecord(),
+  });
+}
 function equipmentOnRecord(){
   const seen={};
   Object.values(STATE.customLib||{}).forEach(info=>{
@@ -4365,7 +4454,7 @@ function togglePainFlag(e){
 }
 function planConstraints(minutes){
   return {
-    equipment: equipmentOnRecord(),
+    equipment: equipmentAvailable().equipment,
     minutes: typeof minutes==='number' && minutes>0 ? minutes : undefined,
     painFlagged: STATE.painFlagged || [],
     recentMuscleVolume: recentMuscleSets(2),
@@ -4383,7 +4472,10 @@ function progressionInputFor(e, rx){
   return {
     plates: loadingFor(e)==='barbell' ? plateConfig() : undefined,
     kg: rx.kg,
-    lastKg: e.lastKg,
+    /* With no history, the weight they told us at setup IS the basis —
+       stored as a starting weight rather than a fabricated session, which
+       would have counted toward volume, streaks and records. */
+    lastKg: e.lastKg != null ? e.lastKg : TrainEngine.startingWeightFor(STATE, e.id),
     reps: rx.reps,
     repRange: repRangeFor(e) || undefined,
     sets: rx.sets,
@@ -4964,6 +5056,110 @@ const SKY_TOGGLE_HTML =
 const WEEKDAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 /* Named days, and which weekday each falls on. Deliberately small: this
    answers "today is probably push day" and nothing more. */
+/**
+ * Asked once, at setup. Every question is skippable and every answer is
+ * editable later; a fully skipped run leaves behaviour exactly as it is.
+ */
+const SETUP_LIFTS=['back_squat','bench_press','deadlift','overhead_press','barbell_row'];
+const EQUIPMENT_CHOICES=['barbell','dumbbell','machine','cable','kettlebell','bodyweight'];
+function openOnboarding(){
+  const answers={ startingLifts:[], equipment:[], avoid:[] };
+  const liftRow=id=>{
+    const def=TrainEngine.catalogExercise(id);
+    return '<div class="field"><span class="lbl">'+escapeHtml(def?def.name:id)+'</span>'
+      + '<div class="stepper"><input class="pillInput bwLift" data-id="'+id+'" type="number" inputmode="decimal" placeholder="—" aria-label="'+escapeHtml(def?def.name:id)+' working weight" /><span class="pillUnit">'+STATE.unit+'</span></div></div>';
+  };
+  openPop(popHead('A few questions','All optional')
+    + '<p class="formGist">Skip anything you would rather not answer — the app works without all of it, it just has less to go on. Everything here is editable later in Settings.</p>'
+    + '<div class="secLbl">What you can work with today</div>'
+    + SETUP_LIFTS.map(liftRow).join('')
+    + '<div class="secLbl">Setup</div>'
+    + '<button class="pbtn ghost" id="openOnboarding" style="width:100%">Answer the setup questions</button>'
+    + '<button class="pbtn ghost" id="openTodayKit" style="width:100%;margin-top:8px">What I have today</button>'
+    + '<p class="settingsNote" id="equipNote"></p>'
+    + '<div class="secLbl">Bodyweight</div>'
+    + '<div class="searchRow"><input id="obBw" type="number" inputmode="decimal" placeholder="'+STATE.unit+'" aria-label="Bodyweight" /></div>'
+    + '<div class="secLbl">What you have access to</div>'
+    + '<div class="swapList" id="obEquip">'+EQUIPMENT_CHOICES.map(k=>'<button class="swapItem" data-eq="'+k+'"><span class="nm">'+k+'</span><span class="mu">—</span></button>').join('')+'</div>'
+    + '<div class="secLbl">Anything to avoid</div>'
+    + '<div class="swapList" id="obAvoid">'+SETUP_LIFTS.map(id=>{const d=TrainEngine.catalogExercise(id);return '<button class="swapItem" data-av="'+id+'"><span class="nm">'+escapeHtml(d?d.name:id)+'</span><span class="mu">—</span></button>';}).join('')+'</div>'
+    + '<div class="secLbl">Sessions a week you intend to train</div>'
+    + '<div class="searchRow"><input id="obFreq" type="number" inputmode="numeric" placeholder="e.g. 4" aria-label="Sessions per week" /></div>'
+    + '<div class="secLbl">How long you have been training</div>'
+    + '<div class="swapList" id="obAge">'
+      + '<button class="swapItem" data-age="beginner"><span class="nm">Under a year</span><span class="mu">—</span></button>'
+      + '<button class="swapItem" data-age="intermediate"><span class="nm">One to three years</span><span class="mu">—</span></button>'
+      + '<button class="swapItem" data-age="advanced"><span class="nm">Longer than that</span><span class="mu">—</span></button>'
+    + '</div>'
+    + '<div class="popBtns"><button class="pbtn ghost" id="obSkip">Skip all of this</button><button class="pbtn save" id="obSave">Done</button></div>',
+    scrim=>{
+      const toggle=(sel,attr,list)=>scrim.querySelectorAll(sel+' [data-'+attr+']').forEach(b=> b.onclick=()=>{
+        const v=b.dataset[attr]; const i=list.indexOf(v);
+        if(i>=0) list.splice(i,1); else list.push(v);
+        b.classList.toggle('on', list.indexOf(v)>=0);
+        b.querySelector('.mu').textContent = list.indexOf(v)>=0 ? 'yes' : '—';
+      });
+      toggle('#obEquip','eq',answers.equipment);
+      toggle('#obAvoid','av',answers.avoid);
+      scrim.querySelectorAll('#obAge [data-age]').forEach(b=> b.onclick=()=>{
+        answers.trainingAge=b.dataset.age;
+        scrim.querySelectorAll('#obAge [data-age]').forEach(x=>{
+          x.classList.toggle('on', x.dataset.age===answers.trainingAge);
+          x.querySelector('.mu').textContent = x.dataset.age===answers.trainingAge ? 'yes' : '—';
+        });
+      });
+      const finish=()=>{
+        const out=TrainEngine.applyOnboarding(STATE, answers, today);
+        Object.assign(STATE, out.state);
+        saveState(); closePop(); render();
+        if(TrainEngine.anythingAnswered(out.seeded)) snapshotNow('onboarding');
+      };
+      scrim.querySelector('#obSave').onclick=()=>{
+        answers.startingLifts=[...scrim.querySelectorAll('.bwLift')]
+          .map(el=>({ exerciseId:el.dataset.id, weightLb:parseFloat(el.value) }))
+          .filter(x=>Number.isFinite(x.weightLb) && x.weightLb>0);
+        const bw=parseFloat(scrim.querySelector('#obBw').value);
+        if(Number.isFinite(bw) && bw>0) answers.bodyweightLb=bw;
+        const freq=parseInt(scrim.querySelector('#obFreq').value,10);
+        if(Number.isFinite(freq)) answers.sessionsPerWeek=freq;
+        /* Any lift they named needs to exist before a starting weight can
+           attach to it. */
+        (answers.startingLifts||[]).forEach(l=>{
+          const def=TrainEngine.catalogExercise(l.exerciseId);
+          if(def) installExerciseDef(def.id, def.name, {
+            kind:def.defaultSetKind, perSide:def.unilateral, assisted:false,
+            repRange:null, equipment:def.equipment, primary:def.primary,
+          });
+        });
+        finish();
+      };
+      scrim.querySelector('#obSkip').onclick=finish;
+    });
+}
+/* What is in the room today, overriding the usual kit for one day. */
+function openTodayEquipment(){
+  const chosen=(STATE.equipmentToday && STATE.equipmentToday.date===today)
+    ? [...STATE.equipmentToday.list] : [];
+  openPop(popHead('What do you have today?','Just for today')
+    + '<p class="formGist">Travelling, or a different gym? Pick what is actually in the room and the coach will only build from that. Clears itself tomorrow.</p>'
+    + '<div class="swapList" id="teList">'+EQUIPMENT_CHOICES.map(k=>'<button class="swapItem'+(chosen.indexOf(k)>=0?' on':'')+'" data-eq="'+k+'"><span class="nm">'+k+'</span><span class="mu">'+(chosen.indexOf(k)>=0?'yes':'—')+'</span></button>').join('')+'</div>'
+    + '<div class="popBtns"><button class="pbtn ghost" id="teClear">Use my usual kit</button><button class="pbtn save" id="teSave">Use these</button></div>',
+    scrim=>{
+      scrim.querySelectorAll('#teList [data-eq]').forEach(b=> b.onclick=()=>{
+        const v=b.dataset.eq, i=chosen.indexOf(v);
+        if(i>=0) chosen.splice(i,1); else chosen.push(v);
+        b.classList.toggle('on', chosen.indexOf(v)>=0);
+        b.querySelector('.mu').textContent = chosen.indexOf(v)>=0 ? 'yes' : '—';
+      });
+      scrim.querySelector('#teSave').onclick=()=>{
+        STATE.equipmentToday = chosen.length ? { date:today, list:chosen } : null;
+        saveState(); closePop(); render();
+      };
+      scrim.querySelector('#teClear').onclick=()=>{
+        STATE.equipmentToday=null; saveState(); closePop(); render();
+      };
+    });
+}
 function openRoutines(){
   const routines=STATE.routines||[];
   const days=STATE.routineDays||{};
@@ -5263,6 +5459,17 @@ function openSettings(){
           STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
         });
       };
+      const obBtn=scrim.querySelector('#openOnboarding');
+      if(obBtn) obBtn.onclick=()=>{ closePop(); openOnboarding(); };
+      const teBtn=scrim.querySelector('#openTodayKit');
+      if(teBtn) teBtn.onclick=()=>{ closePop(); openTodayEquipment(); };
+      const eqNote=scrim.querySelector('#equipNote');
+      if(eqNote){
+        const eq=equipmentAvailable();
+        eqNote.textContent = eq.equipment.length
+          ? 'Coach is building from: '+eq.equipment.join(', ')+' ('+eq.source+').'
+          : 'No equipment on record yet.';
+      }
       const bwNote=scrim.querySelector('#bwNote');
       const paintBw=()=>{
         const now=TrainEngine.currentBodyweight(STATE.bodyweight||[]);
@@ -5754,7 +5961,8 @@ function installExerciseDef(id, name, fields){
 }
 /* The ONE place a session exercise is built from a definition. */
 function sessionExerciseFrom(p){
-  return { id:p.id, name:p.name, tier:2, sets:p.sets, reps:p.reps, kg:p.weight,
+  const seeded = p.weight || TrainEngine.startingWeightFor(STATE, p.id) || 0;
+  return { id:p.id, name:p.name, tier:2, sets:p.sets, reps:p.reps, kg:seeded,
            perHand:p.perSide, rest:p.rest, lastKg:lastKgFromHistory(p.id),
            pinned:false, collapsed:false, deload:false, note:'',
            log:Array(p.sets).fill(null) };
@@ -6969,6 +7177,8 @@ function spawnParticles(root){
   STATE.routineDays = STATE.routineDays || {};
   STATE.snapshots = STATE.snapshots || [];
   STATE.bodyweight = STATE.bodyweight || [];
+  STATE.startingWeights = STATE.startingWeights || {};
+  STATE.equipment = STATE.equipment || [];
   STORAGE = TrainEngine.storageReport(hostStatus, localLayer()?'ok':'unavailable', STATE.snapshots.length);
   console.info('[train] storage — '+STORAGE.detail);
   if(!STATE.snapshots.length) snapshotNow('first boot');
@@ -6978,6 +7188,10 @@ function spawnParticles(root){
   try{ await computeReadiness(); }
   catch(err){ READINESS=null; console.warn('[train] readiness unavailable: '+(err&&err.message)); }
   applyRoutine(curSession());
+  /* Asked once. A user with history has already answered by doing. */
+  if(TrainEngine.onboardingNeeded(STATE) && !Object.keys(STATE.history||{}).length){
+    setTimeout(()=>openOnboarding(), 400);
+  }
   render(); wireFresh();
   renderGoalBubble(); renderPhotos(); wirePhotoUpload(); renderOverviewCards(); renderStatsPicker(); drawStatsSection();
   const exportBtn=$('#exportCsvBtn'); if(exportBtn) exportBtn.onclick=exportCSV;
