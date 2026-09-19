@@ -95,7 +95,9 @@ describe.each(TILES)('%s — the bundle answers what the tile calls', (path) => 
       [...loggerScript(path).matchAll(/TrainEngine\.(\w+)/g)].map((m) => m[1]),
     )
     expect(used.size).toBeGreaterThan(0)
-    const missing = [...used].filter((name) => typeof engine[name] !== 'function')
+    // constants count too — the tile reads DEFAULT_WEEKLY_TARGET, not just
+    // functions, and "exists" is the property that actually matters here
+    const missing = [...used].filter((name) => engine[name] === undefined)
     expect(missing).toEqual([])
   })
 })

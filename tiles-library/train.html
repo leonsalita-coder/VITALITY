@@ -166,7 +166,7 @@
 <div class="rail" id="statusRail">
   <div class="railDate" id="railDate">—</div>
   <div class="railSpacer"></div>
-  <div class="railStat"><span class="railStatVal" id="railStreak">0</span><span class="railStatLbl">streak</span></div>
+  <div class="railStat"><span class="railStatVal" id="railStreak">0</span><span class="railStatLbl">wk streak</span></div>
   <div class="railDivider"></div>
   <div class="railStat"><span class="railStatVal" id="railVolume">0</span><span class="railStatLbl" id="railVolumeLbl">lb</span></div>
 </div>
@@ -943,19 +943,18 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[],
+    history:{}, customLib:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], weeklyTarget:4,
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
 function seedChecklist(list){ return (list||[]).map(text=>({text, done:false})); }
-/* ---- streak: consecutive days a session was finished --------------- */
-function currentStreak(){
-  const set=new Set(STATE.finishedDates||[]);
-  let n=0, d=new Date();
-  if(!set.has(ymd(d))) d.setDate(d.getDate()-1);
-  while(set.has(ymd(d))){ n++; d.setDate(d.getDate()-1); }
-  return n;
-}
+/* Frequency, not consecutive days. A consecutive-day streak and the rest-day
+   toggle were at war: taking a correctly programmed rest day broke the
+   number, which teaches people to fake-log to protect it. Weeks meeting a
+   session target are indifferent to which days the sessions land on. */
+function weeklyTarget(){ return STATE.weeklyTarget || TrainEngine.DEFAULT_WEEKLY_TARGET; }
+function currentStreak(){ return TrainEngine.currentWeekStreak(STATE.finishedDates||[], weeklyTarget(), Date.now()); }
+function streakText(){ return TrainEngine.streakLabel(currentStreak(), weeklyTarget()); }
 /* ---- AI-classified exercises (typed by name, or from the coach) -----
    Cached in STATE.customLib so a name is only ever sent to the model
    once — it's a real paid call on the user's own key. */
@@ -1061,7 +1060,7 @@ function computeNotes(){
     else if (totals.total>0 && totals.logged===totals.total) notes.push({ emoji:'✅', text:'Crushed it', type:'gold' });
   }
   const streak = currentStreak();
-  if (streak>=2) notes.push({ emoji:'🔥', text:streak+'d streak', type:'gold' });
+  if (streak>=2) notes.push({ emoji:'🔥', text:streak+'wk streak', type:'gold' });
   const hasPR = (curSession().ex||[]).some(exHasPR);
   if (hasPR) notes.push({ emoji:'🏆', text:'New PR', type:'gold' });
   if (!notes.length) notes.push({ emoji:'✦', text:"Let's go", type:'mint' });
@@ -1115,14 +1114,15 @@ function renderHeroExtras(){
   const sub=$('#heroSub');
   if(sub){
     const vol7=Math.round(volByDate.filter(s=>daysAgo(s.date)<=6).reduce((a,s)=>a+s.kg,0));
-    sub.innerHTML = '<b>'+streak+'</b>-day streak &nbsp;·&nbsp; <b>'+vol7.toLocaleString()+'</b> '+STATE.unit+' last 7 days';
+    const label=streakText();
+    sub.innerHTML = (label?'<b>'+escapeHtml(label)+'</b> &nbsp;·&nbsp; ':'')+'<b>'+vol7.toLocaleString()+'</b> '+STATE.unit+' last 7 days';
   }
   const ms=$('#miniStats');
   if(ms){
     const totalVol=Math.round(volByDate.reduce((a,s)=>a+s.kg,0));
     ms.innerHTML =
       '<div class="miniCard"><b>'+fd.length+'</b><span>Sessions</span></div>'
-      + '<div class="miniCard"><b class="gold">'+streak+'</b><span>Streak</span></div>'
+      + '<div class="miniCard"><b class="gold">'+streak+'</b><span>wk streak</span></div>'
       + '<div class="miniCard"><b>'+(totalVol>=1000?(totalVol/1000).toFixed(1)+'k':totalVol)+'</b><span>'+STATE.unit+' lifted</span></div>';
   }
 }
@@ -1314,6 +1314,20 @@ function sessionRpe(e){
   if(!rpes.length) return null;
   return Math.round((rpes.reduce((a,b)=>a+b,0)/rpes.length)*10)/10;
 }
+/* Plain-language status for a lift's deload state, reusing the engine's
+   own vocabulary rather than inventing a second set of words. */
+function deloadExplain(dl){
+  if(!dl) return '';
+  if(dl.state==='flagged') return 'Stalled — watching one more session before doing anything.';
+  if(dl.state==='deloading'){
+    const plan=TrainEngine.deloadPlan(dl);
+    return dl.kind==='volume'
+      ? 'Deloading: same weight, fewer sets, while recovery catches up.'
+      : 'Deloading: holding '+plan.weight+' '+STATE.unit+' ('+(dl.confidence==='inferred'?'no recovery data, so a gentle cut':'measured')+').';
+  }
+  if(dl.state==='reapproach') return 'Easing back up toward '+dl.priorWeight+' '+STATE.unit+'.';
+  return '';
+}
 function plateauFor(e){
   return TrainEngine.detectPlateau(histFor(e).filter(x=>!x.off), { excluded: STATE.deloadExclusions||[] });
 }
@@ -1344,7 +1358,7 @@ function vitalsRecoverySignal(v){
 const RECOVERY_FLOOR=55; // below this, a plateau is treated as fatigue-driven, not a programming problem
 async function buildInsightContext(session){
   const lines=[];
-  lines.push('Streak: '+currentStreak()+' consecutive day(s).');
+  lines.push('Streak: '+currentStreak()+' consecutive week(s) hitting '+weeklyTarget()+'+ sessions. Rest days do not break this.');
   const t=sessionTotals(session);
   lines.push('Today: '+t.logged+'/'+t.total+' sets logged across '+session.ex.length+' exercise(s).');
   const plateaus=[];
@@ -1437,7 +1451,7 @@ function renderInsight(session){
 function renderStreak(){
   const el=$('#streakPill'); if(!el) return;
   const n=currentStreak();
-  el.textContent = n>0 ? n+' day streak' : '';
+  el.textContent = streakText();
   el.style.display = n>0 ? '' : 'none';
 }
 
@@ -1448,7 +1462,13 @@ function renderCard(e, session){
   const range = repRangeFor(e);
   const metaBits = [tier, rx.sets+' × '+(range ? range[0]+'-'+range[1] : rx.reps)];
   if(e.lastKg!=null) metaBits.push('last '+e.lastKg+' '+STATE.unit);
-  const meta = metaBits.map(b=>'<span>'+b+'</span>').join('<span class="metaSep">·</span>') + (e.deload?'<span class="deloadTag">deload</span>':'') + (e.group?'<span class="groupTag">superset '+e.group+'</span>':'');
+  /* What the state machine is doing to this lift, in its own words. The
+     engine already produced the sentence; the card does not compose one. */
+  const dl = STATE.deloadStates && STATE.deloadStates[e.id];
+  const dlTag = dl && dl.state && dl.state!=='normal'
+    ? '<span class="deloadTag" title="'+escapeHtml(deloadExplain(dl))+'">'+dl.state+'</span>'
+    : (e.deload?'<span class="deloadTag">deload</span>':'');
+  const meta = metaBits.map(b=>'<span>'+b+'</span>').join('<span class="metaSep">·</span>') + dlTag + (e.group?'<span class="groupTag">superset '+e.group+'</span>':'');
   card.innerHTML =
     '<div class="exHead">'
     + '<button class="grip" aria-label="Drag to reorder" title="Drag to reorder">'+gripIcon()+'</button>'
@@ -1578,6 +1598,9 @@ function renderPill(e, rx, idx){
     /* one tap, on the row, mid-session — a warm-up flag buried in a popup
        would never get used, and an unflagged warm-up pollutes everything */
     +   '<button class="pillWarm'+(s&&s.warmup?' on':'')+'" data-act="warmup" aria-pressed="'+(s&&s.warmup?'true':'false')+'" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button>'
+    /* RPE is optional forever: the set is already logged by the time this
+       is reachable, so skipping it costs nothing and blocks nothing. */
+    +   (logged && !s.warmup ? '<button class="pillWarm'+(s&&typeof s.rpe==='number'?' on':'')+'" data-act="rpe" title="How hard was that set? Optional.">'+(s&&typeof s.rpe==='number'?s.rpe:'RPE')+'</button>' : '')
     + (logged
         ? '<span class="pillStatus">'+(pr.kind==='e1rm'?'<span class="pillPr">★ </span>':(pr.kind?'<span class="pillPrDot" title="'+(pr.kind==='weight'?'Heaviest yet':'Most reps at this weight')+'"></span>':''))+status+'</span>'
           + (kind==='done'?'<button class="pillDrop" aria-label="Add drop set">+ Drop</button>':'')
@@ -1594,6 +1617,8 @@ function renderPill(e, rx, idx){
   const miss=row.querySelector('.pillMiss'); if(miss) miss.addEventListener('click',ev=>{ stop(ev); const kg=parseFloat(wIn.value)|| (e.lastKg!=null?e.lastKg:rx.kg); doLog(e, idx, kg, 0, true); });
   const reset=row.querySelector('.pillReset'); if(reset) reset.addEventListener('click',ev=>{ stop(ev); e.log[idx]=null; stopRest(e.id); render(); });
   const dropBtn=row.querySelector('.pillDrop'); if(dropBtn) dropBtn.addEventListener('click',ev=>{ stop(ev); addDrop(e, idx); });
+  const rpeBtn=row.querySelector('[data-act="rpe"]');
+  if(rpeBtn) rpeBtn.addEventListener('click',ev=>{ stop(ev); openRpe(e, idx); });
   const warmBtn=row.querySelector('[data-act="warmup"]');
   if(warmBtn) warmBtn.addEventListener('click',ev=>{
     stop(ev);
@@ -1602,6 +1627,20 @@ function renderPill(e, rx, idx){
     rollupToday(e); render();
   });
   return row;
+}
+/* One tap per value, plus an explicit way out. Nothing here is required —
+   an unset RPE leaves every consumer on its pre-RPE behaviour. */
+function openRpe(e, idx){
+  const s=e.log[idx]; if(!s) return;
+  const values=[6,6.5,7,7.5,8,8.5,9,9.5,10];
+  openPop(popHead('How hard was that?','RPE — optional')
+    + '<p class="formGist">10 is nothing left. 7 is about three reps in reserve. Skip it if you would rather not guess.</p>'
+    + '<div class="swapList">'+values.map(v=>'<button class="swapItem" data-v="'+v+'"><span class="nm">RPE '+v+'</span><span class="mu">'+(v>=9.5?'all out':v>=9?'1 left':v>=8?'2 left':v>=7?'3 left':'4+ left')+'</span></button>').join('')+'</div>'
+    + '<button class="pbtn ghost" id="rpeClear" style="width:100%;margin-top:10px">'+(typeof s.rpe==='number'?'Clear':'Skip')+'</button>',
+    scrim=>{
+      scrim.querySelectorAll('.swapItem[data-v]').forEach(b=> b.onclick=()=>{ s.rpe=parseFloat(b.dataset.v); rollupToday(e); closePop(); render(); });
+      scrim.querySelector('#rpeClear').onclick=()=>{ delete s.rpe; rollupToday(e); closePop(); render(); };
+    });
 }
 function addDrop(e, idx){
   const s=e.log[idx]; if(!s) return; s.drops=s.drops||[];
@@ -1870,6 +1909,39 @@ function openSettings(){
     + '<div class="secLbl">Theme</div>'
     + '<div class="settingsRow"><span class="bouncyLabel on">Dark</span>'+SKY_TOGGLE_HTML+'</div>'
     + '<p class="settingsNote">Just a preview for now — not wired to a real light mode yet.</p>'
+    + '<div class="secLbl">Sessions per week</div>'
+    + '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal" id="wkTarget">'+weeklyTarget()+'</span><button class="step" data-t="1">+</button></div></div>'
+    + '<p class="settingsNote">Your streak counts weeks that hit this. Rest days never break it.</p>'
+    + '<div class="secLbl">Ignore a stretch</div>'
+    + '<p class="settingsNote">Sick or travelling? Mark those dates and plateau detection will skip them, so a forced break never reads as a stall.</p>'
+    + '<div class="searchRow"><input id="exFrom" type="date" aria-label="From" /></div>'
+    + '<div class="searchRow" style="margin-top:8px"><input id="exTo" type="date" aria-label="To" /></div>'
+    + '<button class="pbtn ghost" id="exAdd" style="width:100%;margin-top:8px">Ignore these dates</button>'
+    + '<div class="swapList" id="exList" style="margin-top:10px"></div>',
+    scrim=>{
+      scrim.querySelectorAll('.step[data-t]').forEach(b=> b.onclick=()=>{
+        STATE.weeklyTarget=Math.min(14,Math.max(1,weeklyTarget()+(+b.dataset.t)));
+        scrim.querySelector('#wkTarget').textContent=weeklyTarget();
+        saveState(); render();
+      });
+      const paint=()=>{
+        const list=STATE.deloadExclusions||[];
+        scrim.querySelector('#exList').innerHTML = list.length
+          ? list.map((w,i)=>'<button class="swapItem" data-rm="'+i+'"><span class="nm">'+w.from+' → '+w.to+'</span><span class="mu">remove</span></button>').join('')
+          : '<p class="emptyHist">No ignored stretches.</p>';
+        scrim.querySelectorAll('.swapItem[data-rm]').forEach(b=> b.onclick=()=>{
+          STATE.deloadExclusions.splice(+b.dataset.rm,1); saveState(); paint(); render();
+        });
+      };
+      scrim.querySelector('#exAdd').onclick=()=>{
+        const from=scrim.querySelector('#exFrom').value, to=scrim.querySelector('#exTo').value;
+        if(!from||!to) return;
+        STATE.deloadExclusions=STATE.deloadExclusions||[];
+        STATE.deloadExclusions.push(from<=to?{from,to}:{from:to,to:from});
+        saveState(); paint(); render();
+      };
+      paint();
+    }
   );
 }
 
@@ -2533,16 +2605,8 @@ function handlePhotoFile(input){
    collected; nothing invented (no heart rate / calories / VO2 — this
    app doesn't have that data, so it doesn't pretend to).
    ================================================================= */
-function longestStreak(){
-  const dates=[...(STATE.finishedDates||[])].sort();
-  let longest=0, run=0, prev=null;
-  dates.forEach(d=>{
-    if(prev){ const [y,m,dd]=prev.split('-').map(Number); const pd=new Date(y,m-1,dd); pd.setDate(pd.getDate()+1); run = ymd(pd)===d ? run+1 : 1; }
-    else run=1;
-    longest=Math.max(longest,run); prev=d;
-  });
-  return longest;
-}
+/* Same unit as the current streak, so the two can be read side by side. */
+function longestStreak(){ return TrainEngine.longestWeekStreak(STATE.finishedDates||[], weeklyTarget(), Date.now()); }
 function totalPRsAllTime(){
   let count=0;
   Object.keys(STATE.history||{}).forEach(id=>{
@@ -2613,8 +2677,8 @@ function renderOverviewCards(){
     { n:(STATE.finishedDates||[]).length, l:'Sessions', c:'mint', chart:sessBuckets,
       desc: sessDelta!==0 ? '<b>'+(sessDelta>0?'+':'')+sessDelta+'</b> vs last week' : 'same as last week' },
     { n:r1(totalMin/60), l:'Hours trained', c:'mint', chart:hrBuckets },
-    { n:currentStreak(), l:'Day streak', c:'gold' },
-    { n:longestStreak(), l:'Longest streak', c:'gold' },
+    { n:currentStreak(), l:'Week streak', c:'gold', desc:'weeks at '+weeklyTarget()+'+ sessions' },
+    { n:longestStreak(), l:'Longest run', c:'gold', desc:'weeks at '+weeklyTarget()+'+ sessions' },
     { n:totalPRsAllTime(), l:'Personal records', c:'gold' },
     { n:totalVol.toLocaleString(), l:'Total '+STATE.unit+' lifted', c:'mint', chart:volBuckets },
     { n:r1((STATE.finishedDates||[]).length/weeksSinceStart()), l:'Sessions / week', c:'mint' },
@@ -2999,7 +3063,7 @@ function drawSessionsCal(){
   });
   renderCalQuarter();
   cap.textContent='';
-  $('#statsRow').innerHTML='<div class="stat"><div class="k">Streak</div><div class="v gold">'+currentStreak()+'</div></div><div class="stat"><div class="k">Total sessions</div><div class="v">'+(STATE.finishedDates||[]).length+'</div></div><div class="stat"><div class="k">Lifts tracked</div><div class="v">'+Object.keys(STATE.exerciseNames||{}).length+'</div></div>';
+  $('#statsRow').innerHTML='<div class="stat"><div class="k">Week streak</div><div class="v gold">'+currentStreak()+'</div></div><div class="stat"><div class="k">Total sessions</div><div class="v">'+(STATE.finishedDates||[]).length+'</div></div><div class="stat"><div class="k">Lifts tracked</div><div class="v">'+Object.keys(STATE.exerciseNames||{}).length+'</div></div>';
 }
 function renderCalQuarter(){
   const plot=$('#statsPlot'); if(!plot || plot.querySelector('#calTitle')===null) return;
@@ -3204,6 +3268,7 @@ function spawnParticles(root){
   STATE.history = STATE.history || {};
   STATE.deloadStates = STATE.deloadStates || {};
   STATE.deloadExclusions = STATE.deloadExclusions || [];
+  STATE.weeklyTarget = STATE.weeklyTarget || TrainEngine.DEFAULT_WEEKLY_TARGET;
   migrateDeloadOverrides();
   STATE.exerciseNames = STATE.exerciseNames || {};
   STATE.shortTermGoal = STATE.shortTermGoal || '';
