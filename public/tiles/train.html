@@ -318,6 +318,7 @@ var TrainEngine = (() => {
     LB_PER_KG: () => LB_PER_KG,
     LOAD_SPIKE: () => LOAD_SPIKE,
     LOW_RECOVERY: () => LOW_RECOVERY,
+    MAX_RAMP_SETS: () => MAX_RAMP_SETS,
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
     MAX_SNAPSHOTS: () => MAX_SNAPSHOTS,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
@@ -328,6 +329,7 @@ var TrainEngine = (() => {
     OTHER_ACTIVITIES: () => OTHER_ACTIVITIES,
     PULL_MUSCLES: () => PULL_MUSCLES,
     PUSH_MUSCLES: () => PUSH_MUSCLES,
+    RAMP_LADDERS: () => RAMP_LADDERS,
     RAMP_LIMIT: () => RAMP_LIMIT,
     RATIO_BAND: () => RATIO_BAND,
     RECENT_HEAVY_SETS: () => RECENT_HEAVY_SETS,
@@ -442,6 +444,7 @@ var TrainEngine = (() => {
     trainingDates: () => trainingDates,
     validateSnapshot: () => validateSnapshot,
     volumeRamp: () => volumeRamp,
+    warmupRamp: () => warmupRamp,
     weeklyReview: () => weeklyReview,
     weeklySetBand: () => weeklySetBand,
     weeklySets: () => weeklySets,
@@ -450,6 +453,68 @@ var TrainEngine = (() => {
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
+
+  // lib/train/plates.ts
+  var DEFAULT_BAR_LB = 45;
+  var DEFAULT_PLATES_LB = [45, 35, 25, 10, 5, 2.5];
+  function defaultPlateConfig() {
+    return { barLb: DEFAULT_BAR_LB, plates: [...DEFAULT_PLATES_LB] };
+  }
+  var tidy = (n) => Math.round(n * 100) / 100;
+  function loadableWeights(config, maxLb = 1e3) {
+    const bar2 = Math.max(0, config.barLb || 0);
+    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => a - b);
+    if (!plates.length) return [tidy(bar2)];
+    const perSide = /* @__PURE__ */ new Set([0]);
+    const smallest = plates[0];
+    const limit = (maxLb - bar2) / 2;
+    let frontier = [0];
+    while (frontier.length) {
+      const next = [];
+      for (const load of frontier) {
+        for (const plate of plates) {
+          const candidate = tidy(load + plate);
+          if (candidate > limit || perSide.has(candidate)) continue;
+          perSide.add(candidate);
+          next.push(candidate);
+        }
+      }
+      frontier = next;
+      if (perSide.size > 4e3) break;
+    }
+    return [...perSide].map((side) => tidy(bar2 + side * 2)).sort((a, b) => a - b);
+  }
+  function snapToLoadable(target, config) {
+    const options = loadableWeights(config, Math.max(target * 2, 1e3));
+    if (!options.length) return tidy(target);
+    const bar2 = Math.max(0, config.barLb || 0);
+    if (target <= bar2) return tidy(bar2);
+    let best = options[0];
+    let bestGap = Math.abs(options[0] - target);
+    for (const option of options) {
+      const gap = Math.abs(option - target);
+      if (gap < bestGap || gap === bestGap && option < best) {
+        best = option;
+        bestGap = gap;
+      }
+    }
+    return tidy(best);
+  }
+  function plateBreakdown(total, config) {
+    const bar2 = Math.max(0, config.barLb || 0);
+    if (tidy(total) === tidy(bar2)) return [];
+    let remaining = tidy((total - bar2) / 2);
+    if (remaining < 0) return null;
+    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => b - a);
+    const used = [];
+    for (const plate of plates) {
+      while (remaining >= plate - 1e-9) {
+        used.push(plate);
+        remaining = tidy(remaining - plate);
+      }
+    }
+    return remaining <= 1e-9 ? used : null;
+  }
 
   // lib/train/bodyweight.ts
   function bodyweightAt(history, date) {
@@ -617,6 +682,51 @@ var TrainEngine = (() => {
     const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
     if (!values.length) return null;
     return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  // lib/train/ramp.ts
+  var RAMP_LADDERS = {
+    2: [{ fraction: 0.6, reps: 5 }],
+    3: [{ fraction: 0.5, reps: 5 }, { fraction: 0.75, reps: 3 }],
+    4: [{ fraction: 0.4, reps: 5 }, { fraction: 0.6, reps: 3 }, { fraction: 0.8, reps: 2 }],
+    5: [
+      { fraction: 0.4, reps: 5 },
+      { fraction: 0.55, reps: 4 },
+      { fraction: 0.7, reps: 3 },
+      { fraction: 0.85, reps: 2 }
+    ]
+  };
+  var MAX_RAMP_SETS = 5;
+  var MIN_RAMP_SETS = 2;
+  var BAR_REPS = 8;
+  function rungsFor(working, bar2) {
+    if (bar2 <= 0) return MAX_RAMP_SETS;
+    const barLoads = (working - bar2) / bar2;
+    return Math.min(MAX_RAMP_SETS, Math.max(MIN_RAMP_SETS, 1 + Math.round(barLoads)));
+  }
+  var LOADED_KINDS = ["reps_weight", "weighted_bodyweight"];
+  function warmupRamp(request) {
+    const kind = request.kind || DEFAULT_SET_KIND;
+    if (!LOADED_KINDS.includes(kind)) return [];
+    const working = request.workingLb;
+    if (typeof working !== "number" || !Number.isFinite(working) || working <= 0) return [];
+    const config = request.plates;
+    const bar2 = Math.max(0, config && config.barLb || 0);
+    if (working <= bar2) return [];
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    const push = (weightLb, reps) => {
+      const snapped = snapToLoadable(weightLb, config);
+      if (snapped > working) return;
+      if (seen.has(snapped)) return;
+      seen.add(snapped);
+      out.push({ kg: snapped, reps, warmup: true });
+    };
+    if (bar2 > 0) push(bar2, BAR_REPS);
+    for (const rung of RAMP_LADDERS[rungsFor(working, bar2)] || []) {
+      push(working * rung.fraction, rung.reps);
+    }
+    return out.sort((a, b) => a.kg - b.kg);
   }
 
   // lib/train/amrap.ts
@@ -916,68 +1026,6 @@ var TrainEngine = (() => {
       perSide: s.perSide,
       assisted: s.assisted
     }));
-  }
-
-  // lib/train/plates.ts
-  var DEFAULT_BAR_LB = 45;
-  var DEFAULT_PLATES_LB = [45, 35, 25, 10, 5, 2.5];
-  function defaultPlateConfig() {
-    return { barLb: DEFAULT_BAR_LB, plates: [...DEFAULT_PLATES_LB] };
-  }
-  var tidy = (n) => Math.round(n * 100) / 100;
-  function loadableWeights(config, maxLb = 1e3) {
-    const bar2 = Math.max(0, config.barLb || 0);
-    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => a - b);
-    if (!plates.length) return [tidy(bar2)];
-    const perSide = /* @__PURE__ */ new Set([0]);
-    const smallest = plates[0];
-    const limit = (maxLb - bar2) / 2;
-    let frontier = [0];
-    while (frontier.length) {
-      const next = [];
-      for (const load of frontier) {
-        for (const plate of plates) {
-          const candidate = tidy(load + plate);
-          if (candidate > limit || perSide.has(candidate)) continue;
-          perSide.add(candidate);
-          next.push(candidate);
-        }
-      }
-      frontier = next;
-      if (perSide.size > 4e3) break;
-    }
-    return [...perSide].map((side) => tidy(bar2 + side * 2)).sort((a, b) => a - b);
-  }
-  function snapToLoadable(target, config) {
-    const options = loadableWeights(config, Math.max(target * 2, 1e3));
-    if (!options.length) return tidy(target);
-    const bar2 = Math.max(0, config.barLb || 0);
-    if (target <= bar2) return tidy(bar2);
-    let best = options[0];
-    let bestGap = Math.abs(options[0] - target);
-    for (const option of options) {
-      const gap = Math.abs(option - target);
-      if (gap < bestGap || gap === bestGap && option < best) {
-        best = option;
-        bestGap = gap;
-      }
-    }
-    return tidy(best);
-  }
-  function plateBreakdown(total, config) {
-    const bar2 = Math.max(0, config.barLb || 0);
-    if (tidy(total) === tidy(bar2)) return [];
-    let remaining = tidy((total - bar2) / 2);
-    if (remaining < 0) return null;
-    const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => b - a);
-    const used = [];
-    for (const plate of plates) {
-      while (remaining >= plate - 1e-9) {
-        used.push(plate);
-        remaining = tidy(remaining - plate);
-      }
-    }
-    return remaining <= 1e-9 ? used : null;
   }
 
   // lib/train/progression.ts
@@ -4673,6 +4721,14 @@ function renderCard(e, session){
           ? '<button class="actionPill" data-act="repeat">'+svg(IC.history,' fill="none" stroke="currentColor"')+'<span class="pl">Repeat</span></button>'
           : '')
     +   (edit ? '<button class="actionPill" data-act="tune">'+svg(IC.tune,' fill="none" stroke="currentColor"')+'<span class="pl">Tune</span></button>' : '')
+    /* Edit mode, like everything else that is not log / rest / swap.
+       Generating a ramp reads like a training action, but training mode
+       is a promise about what renders between sets and widening it here
+       would be the first crack in it. Shown only where there is actually
+       a ramp to generate. */
+    +   (edit && (TrainEngine.warmupRamp({ workingLb: rx.kg, kind: kindFor(e), plates: plateConfig() }).length || hasWarmupRamp(e))
+          ? '<button class="actionPill" data-act="ramp">'+svg(IC.tune,' fill="none" stroke="currentColor"')+'<span class="pl">'+(hasWarmupRamp(e)?'Clear ramp':'Warm-up')+'</span></button>'
+          : '')
     + '</div>'
     + '<div class="restSlot"></div>'
     + '<div class="pills"></div>';
@@ -4963,10 +5019,14 @@ function renderPill(e, rx, idx){
   const suggestion = logged ? null : suggestionFor(e, rx);
   /* suggestion.weight is null for any kind not measured in pounds, in
      which case the prescribed value stands in. */
-  const prefillKg = s?s.kg:((suggestion && suggestion.weight!=null)?suggestion.weight:rx.kg);
+  /* A ramp row prescribes its own weight and reps; the progression
+     suggestion is about the WORKING set and would put the work on the
+     warm-up. */
+  const ramp = rampAt(e, idx);
+  const prefillKg = s?s.kg:(ramp?ramp.kg:((suggestion && suggestion.weight!=null)?suggestion.weight:rx.kg));
   /* tint the input only when the suggestion is an actual step up */
   const bumped = !logged && !!suggestion && suggestion.basis==='clean' && suggestion.weight>0;
-  const prefillR = s?s.reps:((suggestion && suggestion.reps!=null)?suggestion.reps:rx.reps);
+  const prefillR = s?s.reps:(ramp?ramp.reps:((suggestion && suggestion.reps!=null)?suggestion.reps:rx.reps));
   /* Anticipation beats confetti: if the prefill lands just under the best
      estimated 1RM, say so before the set rather than celebrating after. */
   const nearMiss = logged ? null : TrainEngine.nearMissCue(
@@ -5010,6 +5070,9 @@ function renderPill(e, rx, idx){
   const commit=()=>{
     const values={ kind:setK, perSide:flagFor(e,'perSide')||undefined, assisted:flagFor(e,'assisted')||undefined };
     if(amrapArmed[e.id+':'+idx]) values.amrap=true;
+    /* Flagged at the moment it is logged, because the row came from a
+       generated ramp — not because anybody remembered to press W. */
+    if(rampAt(e, idx)) values.warmup=true;
     if(setK==='time' || setK==='time_distance'){
       const sec=readNum(row.querySelector('.sec'));
       if(!Number.isFinite(sec)||sec<0) return;
@@ -5089,6 +5152,51 @@ function openRpe(e, idx){
       scrim.querySelector('#rpeClear').onclick=()=>{ delete s.rpe; rollupToday(e); closePop(); render(); };
     });
 }
+/**
+ * Put a warm-up ramp on this lift.
+ *
+ * The rows are PREPENDED to the log as unlogged sets carrying warmup:true
+ * from creation, so they are excluded from volume, records and
+ * progression whether or not the lifter ever presses W. Nothing is
+ * logged here — each row still has to be tapped like any other, and the
+ * whole ramp can be cleared in one action.
+ */
+function addWarmupRamp(e){
+  const rx = prescription(e);
+  const ramp = TrainEngine.warmupRamp({
+    workingLb: rx.kg,
+    kind: kindFor(e),
+    plates: plateConfig(),
+  });
+  if(!ramp.length) return 0;
+  if(hasWarmupRamp(e)) return 0;
+  /* The ramp is a PRESCRIPTION, not a log. It adds empty rows at the
+     front and the weights they prefill with — writing filled rows into
+     the log instead would make every ramp set read as already done, which
+     is auto-logging by another name. Each row still has to be tapped. */
+  e.ramp = ramp.map(s=>({ kg:s.kg, reps:s.reps }));
+  e.log = new Array(ramp.length).fill(null).concat(e.log);
+  saveState(); render();
+  return ramp.length;
+}
+/* Clears the generated rows, keeping any the lifter actually logged —
+   a set that happened is theirs, whoever suggested it. */
+function clearWarmupRamp(e){
+  const n=(e.ramp||[]).length; if(!n) return;
+  const kept=[];
+  for(let i=0;i<n;i++) if(e.log[i]) kept.push(e.log[i]);
+  e.log = kept.concat(e.log.slice(n));
+  /* Anything kept stays a warm-up row but is no longer part of a ramp,
+     so the offsets below cannot drift onto a working set. */
+  delete e.ramp;
+  saveState(); render();
+}
+function hasWarmupRamp(e){ return !!(e.ramp && e.ramp.length); }
+/* The ramp row at this index, or null for a working set. */
+function rampAt(e, idx){
+  return (e.ramp && idx < e.ramp.length) ? e.ramp[idx] : null;
+}
+
 function addDrop(e, idx){
   const s=e.log[idx]; if(!s) return; s.drops=s.drops||[];
   const lastKg = s.drops.length? s.drops[s.drops.length-1].kg : s.kg;
@@ -5116,7 +5224,7 @@ function doLog(e, idx, values, fail){
   const _sess=curSession(); if(!_sess.startedAt) _sess.startedAt=Date.now();
   const wasComplete = exComplete(e);
   const entry={};
-  ['kind','kg','reps','s','m','perSide','assisted','amrap'].forEach(k=>{ if(values[k]!==undefined) entry[k]=values[k]; });
+  ['kind','kg','reps','s','m','perSide','assisted','amrap','warmup'].forEach(k=>{ if(values[k]!==undefined) entry[k]=values[k]; });
   if(fail){ entry.reps=0; entry.fail=true; }
   e.log[idx]=entry;
   rollupToday(e);
@@ -5228,8 +5336,17 @@ function rollupFor(e, date){
       return row;
     });
     const working=logWorking(e);
-    const top=(working.length?working:done).reduce((a,b)=>((b.kg||0)>(a.kg||0)?b:a));
-    h.push({date, kg:top.kg, sets});
+    /* The entry's weight is the WORKING weight. Falling back to any
+       logged row lets a session that is so far only warm-ups record a
+       warm-up as the session weight — and then the suggestion for the
+       working sets reads it back and prescribes the heaviest warm-up.
+       A ramp made that routine; it was wrong before that too. With
+       nothing but warm-ups down, the prescribed weight is the honest
+       answer: it is what the lifter is about to work at. */
+    const notWarm=done.filter(s=>!s.warmup);
+    const pool=working.length?working:notWarm;
+    const top=pool.length?pool.reduce((a,b)=>((b.kg||0)>(a.kg||0)?b:a)):null;
+    h.push({date, kg: top ? top.kg : prescription(e).kg, sets});
     h.sort((a,b)=>a.date.localeCompare(b.date));
     /* Only a session for TODAY may move the carried-over weight. Editing
        last month must not rewrite what the next session starts from. */
@@ -5250,6 +5367,7 @@ function handleAct(act, e, session, btn){
   else if(act==='swap'){ openSwap(e); }
   else if(act==='repeat'){ repeatLastSession(e); }
   else if(act==='tune'){ openTune(e); }
+  else if(act==='ramp'){ hasWarmupRamp(e) ? clearWarmupRamp(e) : addWarmupRamp(e); }
   else if(act==='menu'){ openMenu(e, session, btn); }
 }
 

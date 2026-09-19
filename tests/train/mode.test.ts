@@ -147,7 +147,7 @@ describe('edit mode holds everything else', () => {
   it('renders the full set of controls', () => {
     run("setSessionMode('edit')")
     expect(cardControls()!.sort()).toEqual(
-      ['eye', 'form', 'grip', 'history', 'menu', 'pin', 'swap', 'tune'].sort(),
+      ['eye', 'form', 'grip', 'history', 'menu', 'pin', 'ramp', 'swap', 'tune'].sort(),
     )
   })
 
@@ -172,7 +172,9 @@ describe('edit mode holds everything else', () => {
     const edit = cardControls()!.length
     run("setSessionMode('training')")
     const training = cardControls()!.length
-    expect([edit, training]).toEqual([8, 1])
+    /* Nine since the warm-up ramp joined edit mode. Training mode is
+       still the one thing it was: swap. */
+    expect([edit, training]).toEqual([9, 1])
   })
 })
 
