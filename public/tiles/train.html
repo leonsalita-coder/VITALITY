@@ -1352,6 +1352,42 @@ function vitalsRecoverySignal(v){
   if(!scores.length) return null;
   return { avg:Math.round(scores.reduce((a,b)=>a+b,0)/scores.length), days:scores.length };
 }
+/* ---- reading recovery, with the three outcomes kept apart -----------
+   Collapsing them all into null is how a BROKEN read hides behind the same
+   conservative default a genuinely absent one deserves: the deload stays
+   'inferred' forever, takes the gentle 95% cut forever, and nothing ever
+   says why. Only a connected read that returned usable data may produce a
+   measured decision. */
+const RECOVERY_STATUS = {
+  NONE:  'no_connection',      // no bridge, or the read threw
+  EMPTY: 'connected_no_data',  // read succeeded, nothing usable in it
+  OK:    'connected',          // read succeeded with a usable average
+};
+async function readRecovery(){
+  let vitals;
+  try{
+    if(!window.Vitality || typeof window.Vitality.read!=='function'){
+      return { status:RECOVERY_STATUS.NONE, avg:null, days:0, detail:'no bridge' };
+    }
+    vitals = await window.Vitality.read('vitals');
+  }catch(err){
+    return { status:RECOVERY_STATUS.NONE, avg:null, days:0, detail:(err&&err.message)||'read failed' };
+  }
+  const rec = vitalsRecoverySignal(vitals);
+  if(!rec) return { status:RECOVERY_STATUS.EMPTY, avg:null, days:0, detail:'no usable recovery in the last 7 days' };
+  return { status:RECOVERY_STATUS.OK, avg:rec.avg, days:rec.days, detail:null };
+}
+/* Diagnosable rather than silent: a measured deload that never fires is
+   indistinguishable from one that cannot fire, unless something says which. */
+function noteRecovery(rec){
+  const msg = '[train] recovery ' + rec.status
+    + (rec.detail ? ' (' + rec.detail + ')' : '')
+    + (rec.avg != null ? ' — avg ' + rec.avg + '/100 over ' + rec.days + 'd' : '');
+  if(rec.status === RECOVERY_STATUS.OK) console.info(msg); else console.warn(msg);
+  STATE.recoveryStatus = { status:rec.status, avg:rec.avg, days:rec.days, detail:rec.detail, at:Date.now() };
+  return rec;
+}
+
 /* ---- post-session note: one honest observation, computed once per
    finished session and cached — this is the mentor's "noticer" role,
    automated for Train. Silent on failure; it's a bonus, not core flow. */
@@ -1375,12 +1411,16 @@ async function buildInsightContext(session){
       lines.push('- '+e.name+': first time logging this, '+misses+' missed set(s) today'+pr+'.');
     }
   });
-  let recoveryAvg=null;
-  try{
-    const vitals=await window.Vitality.read('vitals');
-    const rec=vitalsRecoverySignal(vitals);
-    if(rec){ recoveryAvg=rec.avg; lines.push('Recovery (Vitals, '+rec.days+'-day avg): '+rec.avg+'/100.'); }
-  }catch(e){ /* Vitals not available — the note still works without it */ }
+  const rec = noteRecovery(await readRecovery());
+  /* Only a connected read with data feeds the deload diagnosis. The other
+     two both mean "we do not know", and the engine treats an unknown
+     recovery as a reason to be gentler, not a reason to guess. */
+  const recoveryAvg = rec.status===RECOVERY_STATUS.OK ? rec.avg : null;
+  if(rec.status===RECOVERY_STATUS.OK){
+    lines.push('Recovery (Vitals, '+rec.days+'-day avg): '+rec.avg+'/100.');
+  } else {
+    lines.push('Recovery: unavailable ('+rec.status+') — deload decisions fall back to RPE and the shape of the plateau.');
+  }
   return { lines, plateaus, recoveryAvg };
 }
 /* ---- fully automatic deload: no button, no confirmation. When a lift is
