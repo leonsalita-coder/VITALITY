@@ -65,6 +65,23 @@ describe('every ramp weight is one you can actually load', () => {
       expect(new Set(kgs).size).toBe(kgs.length)
     }
   })
+
+  it('drops a rung that snaps onto the bar', () => {
+    /* 60 lb on a 45 lb bar: the only rung is 60% = 36, which is below the
+       bar and snaps up onto it. Emitting it would be "warm up at 45, then
+       warm up at 45". */
+    const ramp = warmupRamp({ workingLb: 60, kind: 'reps_weight', plates: config })
+    expect(ramp.map((s) => s.kg)).toEqual([45])
+  })
+
+  it('drops a rung that snaps onto the working weight', () => {
+    /* A plate-loaded machine with no bar, where the top rung rounds all
+       the way up to the work. A "warm-up" at the working weight is the
+       working set with a flag on it. */
+    const machine = { barLb: 0, plates: [2.5] }
+    const ramp = warmupRamp({ workingLb: 10, kind: 'reps_weight', plates: machine })
+    expect(ramp.every((s) => s.kg < 10)).toBe(true)
+  })
 })
 
 describe('the ramp scales to the load', () => {

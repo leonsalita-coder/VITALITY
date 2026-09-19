@@ -110,9 +110,10 @@ export function warmupRamp(request: RampRequest): RampSet[] {
   const config = request.plates
   const bar = Math.max(0, (config && config.barLb) || 0)
 
-  /* Working at or below the bar means there is nothing to work up to.
-     Bar, bar, bar is not a warm-up, it is three sets of standing there. */
-  if (working <= bar) return []
+  /* Working at or below the bar needs no separate check: push() refuses
+     anything at or above the working weight, so an empty-bar lift emits
+     nothing on its own. A `working <= bar` early-out here would be a
+     second guard saying the same thing, and one nothing could falsify. */
 
   const out: RampSet[] = []
   const seen = new Set<number>()
@@ -122,7 +123,7 @@ export function warmupRamp(request: RampRequest): RampSet[] {
     /* Never at or above the work: a "warm-up" at the working weight is a
        working set with a flag on it, and it would make the real set the
        second one. */
-    if (snapped > working) return
+    if (snapped >= working) return
     if (seen.has(snapped)) return
     seen.add(snapped)
     out.push({ kg: snapped, reps, warmup: true })

@@ -712,12 +712,11 @@ var TrainEngine = (() => {
     if (typeof working !== "number" || !Number.isFinite(working) || working <= 0) return [];
     const config = request.plates;
     const bar2 = Math.max(0, config && config.barLb || 0);
-    if (working <= bar2) return [];
     const out = [];
     const seen = /* @__PURE__ */ new Set();
     const push = (weightLb, reps) => {
       const snapped = snapToLoadable(weightLb, config);
-      if (snapped > working) return;
+      if (snapped >= working) return;
       if (seen.has(snapped)) return;
       seen.add(snapped);
       out.push({ kg: snapped, reps, warmup: true });
