@@ -109,6 +109,14 @@
     text-transform:uppercase; color:var(--muted-2); margin-bottom:6px; }
   .weeklyReview .wrLine { font-size:12px; font-weight:600; line-height:1.45; color:var(--text); }
   .weeklyReview .wrLine.mu { color:var(--muted); font-weight:500; }
+
+  /* progress charts — minimal, reusing the existing bar and plot surfaces */
+  .sChart { position:relative; width:100%; aspect-ratio:16/9; }
+  .sPoint { position:absolute; width:9px; height:9px; margin:-4px 0 0 -4px; padding:0;
+    border-radius:50%; border:none; background:var(--signal); }
+  .sPoint:active { transform:scale(1.5); }
+  .mbFill.ok, .mbFill.band-in { background:var(--signal); }
+  .mbFill.band-over, .mbFill.band-under { background:var(--gold); }
   .readinessNote.verdict-reduced_volume,
   .readinessNote.verdict-reduced_intensity { color:var(--gold); border-color:rgba(245,166,35,.28); }
 
@@ -340,6 +348,7 @@ var TrainEngine = (() => {
     detectPlateau: () => detectPlateau,
     detectSource: () => detectSource,
     distribute: () => distribute,
+    e1rmSeries: () => e1rmSeries,
     emptyVolume: () => emptyVolume,
     entryKind: () => entryKind,
     entryScore: () => entryScore,
@@ -358,12 +367,14 @@ var TrainEngine = (() => {
     mapMuscle: () => mapMuscle,
     mergeExercises: () => mergeExercises,
     muscleSplitFrom: () => muscleSplitFrom,
+    muscleWeekSeries: () => muscleWeekSeries,
     nearMissCue: () => nearMissCue,
     nextDeloadState: () => nextDeloadState,
     normalizeClassification: () => normalizeClassification,
     normalizeName: () => normalizeName2,
     normalizeShares: () => normalizeShares,
     parseCsv: () => parseCsv,
+    periodComparison: () => periodComparison,
     planSession: () => planSession,
     plateBreakdown: () => plateBreakdown,
     prefillPlan: () => prefillPlan,
@@ -375,6 +386,7 @@ var TrainEngine = (() => {
     sameAsLastTime: () => sameAsLastTime,
     sessionState: () => sessionState,
     sessionsPerWeek: () => sessionsPerWeek,
+    sessionsPerWeekSeries: () => sessionsPerWeekSeries,
     setKind: () => setKind,
     setWeight: () => setWeight,
     similarity: () => similarity,
@@ -2960,6 +2972,117 @@ Say that back in one short sentence, in the second person, keeping the number ex
         to: dates.length ? dates[dates.length - 1] : null,
         unresolved: [...unresolved.entries()].map(([name, count]) => ({ name, rows: count })).sort((a, b) => b.rows - a.rows),
         duplicates
+      }
+    };
+  }
+
+  // lib/train/series.ts
+  var DAY_MS3 = 864e5;
+  function dateKey3(ms) {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function localMidnight4(date) {
+    const [y, m2, d] = date.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+  function daysAgo2(date, now) {
+    const today = localMidnight4(dateKey3(now));
+    return Math.round((today - localMidnight4(date)) / DAY_MS3);
+  }
+  function e1rmSeries(entries) {
+    const points = [];
+    for (const entry of entries || []) {
+      if (entry.off) continue;
+      let best = 0;
+      for (const set of workingSets(entry)) {
+        const value = epley1RM(setWeight(entry, set), set.r || 0);
+        if (value != null && value > best) best = value;
+      }
+      if (best > 0) points.push({ date: entry.date, value: Math.round(best * 10) / 10 });
+    }
+    return points.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  function muscleWeekSeries(history, index, now) {
+    const totals = /* @__PURE__ */ new Map();
+    for (const id of Object.keys(history || {})) {
+      const split = index[id];
+      if (!split || !split.primary.length && !split.secondary.length) continue;
+      for (const entry of history[id] || []) {
+        if (entry.off) continue;
+        const age = daysAgo2(entry.date, now);
+        if (age < 0 || age > 6) continue;
+        const spread = distribute(workingSets(entry).length, split);
+        for (const muscle of Object.keys(spread)) {
+          const t = totals.get(muscle) || { sets: 0, estimated: false };
+          t.sets += spread[muscle] || 0;
+          t.estimated = t.estimated || split.estimated;
+          totals.set(muscle, t);
+        }
+      }
+    }
+    return [...totals.entries()].map(([muscle, t]) => ({
+      muscle,
+      sets: Math.round(t.sets * 10) / 10,
+      band: t.sets > WEEKLY_SET_BAND[1] ? "over" : t.sets < WEEKLY_SET_BAND[0] ? "under" : "in",
+      estimated: t.estimated
+    })).sort((a, b) => b.sets - a.sets);
+  }
+  function sessionsPerWeekSeries(finishedDates, now, weeks = 12) {
+    const points = [];
+    const seen = new Set(finishedDates || []);
+    for (let w = weeks - 1; w >= 0; w--) {
+      let count = 0;
+      let label2 = "";
+      for (let d = 0; d < 7; d++) {
+        const age = w * 7 + d;
+        const day = new Date(now);
+        day.setDate(day.getDate() - age);
+        const key = dateKey3(day.getTime());
+        if (d === 6) label2 = key;
+        if (seen.has(key)) count++;
+      }
+      points.push({ date: label2, value: count });
+    }
+    return points;
+  }
+  function periodComparison(history, finishedDates, now, weeks = 8) {
+    const span = weeks * 7;
+    const shift2 = (days) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - days);
+      return dateKey3(d.getTime());
+    };
+    const windows = [
+      { from: shift2(span - 1), to: shift2(0) },
+      { from: shift2(span * 2 - 1), to: shift2(span) }
+    ];
+    const measure = (from, to) => {
+      let sets = 0;
+      let tonnage = 0;
+      for (const id of Object.keys(history || {})) {
+        for (const entry of history[id] || []) {
+          if (entry.off || entry.date < from || entry.date > to) continue;
+          for (const set of workingSets(entry)) {
+            sets++;
+            tonnage += setWeight(entry, set) * (set.r || 0);
+          }
+        }
+      }
+      const sessions = new Set((finishedDates || []).filter((d) => d >= from && d <= to)).size;
+      return { from, to, sessions, sets, tonnage: Math.round(tonnage) };
+    };
+    const current = measure(windows[0].from, windows[0].to);
+    const previous = measure(windows[1].from, windows[1].to);
+    const ratio = (a, b) => b > 0 ? Math.round(a / b * 100) / 100 : null;
+    return {
+      current,
+      previous,
+      change: {
+        sessions: ratio(current.sessions, previous.sessions),
+        sets: ratio(current.sets, previous.sets),
+        tonnage: ratio(current.tonnage, previous.tonnage)
       }
     };
   }
@@ -5787,13 +5910,14 @@ function renderOverviewCards(){
   const cards=[
     { n:(STATE.finishedDates||[]).length, l:'Sessions', c:'mint', chart:sessBuckets,
       desc: sessDelta!==0 ? '<b>'+(sessDelta>0?'+':'')+sessDelta+'</b> vs last week' : 'same as last week' },
-    { n:r1(totalMin/60), l:'Hours trained', c:'mint', chart:hrBuckets },
+    /* Hours trained, exercises tracked and sessions-per-week-all-time are
+       gone. Nobody changes what they do because of them, and every card is
+       surface to maintain forever. What is left either predicts progress
+       or rewards the behaviour that produces it. */
     { n:currentStreak(), l:'Week streak', c:'gold', desc:'weeks at '+weeklyTarget()+'+ sessions' },
     { n:longestStreak(), l:'Longest run', c:'gold', desc:'weeks at '+weeklyTarget()+'+ sessions' },
     { n:totalPRsAllTime(), l:'Personal records', c:'gold' },
     { n:totalVol.toLocaleString(), l:'Total '+STATE.unit+' lifted', c:'mint', chart:volBuckets },
-    { n:r1((STATE.finishedDates||[]).length/weeksSinceStart()), l:'Sessions / week', c:'mint' },
-    { n:Object.keys(STATE.exerciseNames||{}).length, l:'Exercises tracked', c:'mint' },
   ];
   el.innerHTML = cards.map(c=>'<div class="ovCard"><div class="ovNum '+c.c+'">'+c.n+'</div><div class="ovLbl">'+c.l+'</div>'
     +(c.desc?'<div class="ovDesc">'+c.desc+'</div>':'')
@@ -5892,13 +6016,18 @@ function exportCSV(){
    history popup but drawing straight from the global STATE.history so
    it survives any single exercise being removed today.
    ================================================================= */
-let statsView={ id:'__volume' }, statsRangeKey='M';
+/* e1RM is the default: it is the one chart that moves when either weight
+   or reps improve, so a session that added a rep shows progress where a
+   weight-only line looks flat. */
+let statsView={ id:'__e1rm' }, statsRangeKey='M';
 function renderStatsPicker(){
   const el=$('#statsPicker'); if(!el) return;
   const names=STATE.exerciseNames||{};
   const items=[
-    {id:'__volume',label:'Volume'},{id:'__sessions',label:'Sessions'},
-    {id:'__records',label:'Records'},{id:'__muscles',label:'Muscles'},{id:'__goals',label:'Goals'}
+    {id:'__e1rm',label:'Strength'},{id:'__muscles',label:'Muscles'},
+    {id:'__consistency',label:'Consistency'},{id:'__compare',label:'8 vs 8'},
+    {id:'__sessions',label:'Calendar'},{id:'__volume',label:'Volume'},
+    {id:'__records',label:'Records'},{id:'__goals',label:'Goals'}
   ].concat(Object.keys(names).map(id=>({id,label:names[id]})));
   el.innerHTML = items.map(it=>'<button class="chip'+(statsView.id===it.id?' on':'')+'" data-id="'+it.id+'">'+escapeHtml(it.label)+'</button>').join('');
   el.querySelectorAll('.chip').forEach(b=> b.onclick=()=>{
@@ -5913,13 +6042,108 @@ function drawStatsSection(){
   if(showRange){
     renderRangeControl(rangeEl, statsRangeKey, r=>{ statsRangeKey=r; drawStatsSection(); });
   }
-  if(statsView.id==='__sessions') drawSessionsCal();
+  if(statsView.id==='__e1rm') drawE1rmTrend();
+  else if(statsView.id==='__consistency') drawConsistency();
+  else if(statsView.id==='__compare') drawPeriodCompare();
+  else if(statsView.id==='__sessions') drawSessionsCal();
   else if(statsView.id==='__volume') drawVolumeChart();
   else if(statsView.id==='__records') drawRecords();
   else if(statsView.id==='__muscles') drawMuscles();
   else if(statsView.id==='__goals') drawGoals();
   else drawExerciseChart(statsView.id);
   animateCounts($('#statsRow'));
+}
+/* A tappable point. Every chart here can be traced back to the session it
+   came from — a chart you cannot open is a picture, not a record. */
+function pointHTML(x, y, date, label, cls){
+  return '<button class="sPoint'+(cls?' '+cls:'')+'" data-date="'+date+'" title="'+escapeHtml(label)+'" '
+    + 'style="left:'+x+'%;bottom:'+y+'%"></button>';
+}
+function wirePoints(plot){
+  plot.querySelectorAll('.sPoint').forEach(b=> b.onclick=()=>openSessionAt(b.dataset.date));
+}
+/* Opens what was actually logged on that day, across every lift. */
+function openSessionAt(date){
+  const rows=[];
+  Object.keys(STATE.history||{}).forEach(id=>{
+    (STATE.history[id]||[]).forEach(entry=>{
+      if(entry.date!==date || entry.off) return;
+      const sets=TrainEngine.workingSets(entry);
+      if(!sets.length) return;
+      rows.push({ name:(STATE.exerciseNames||{})[id]||id, entry, sets });
+    });
+  });
+  if(!rows.length) return;
+  openPop(popHead(fmtDate(date),'That session')
+    + '<div class="swapList">'+rows.map(r=>{
+        const kind=TrainEngine.entryKind(r.entry);
+        const detail = kind==='time' ? TrainEngine.topWorkingSeconds(r.entry)+'s'
+          : kind==='distance' ? TrainEngine.topWorkingMetres(r.entry)+'m'
+          : TrainEngine.topWorkingWeight(r.entry)+' '+STATE.unit;
+        return '<div class="swapItem"><span class="nm">'+escapeHtml(r.name)+'</span><span class="mu">'+r.sets.length+' × '+detail+'</span></div>';
+      }).join('')+'</div>');
+}
+/* THE default chart: estimated 1RM over time for one lift. */
+function drawE1rmTrend(){
+  const plot=$('#statsPlot'), cap=$('#statsCap');
+  plot.style.aspectRatio='';
+  const names=STATE.exerciseNames||{};
+  const best=Object.keys(names)
+    .map(id=>({ id, series:TrainEngine.e1rmSeries((STATE.history[id]||[])) }))
+    .filter(x=>x.series.length>=2)
+    .sort((a,b)=>b.series.length-a.series.length)[0];
+  if(!best){
+    plot.innerHTML='<p class="emptyHist">Two sessions on one lift and this fills in.</p>';
+    cap.textContent=''; $('#statsRow').innerHTML=''; return;
+  }
+  const pts=best.series;
+  const lo=Math.min(...pts.map(p=>p.value)), hi=Math.max(...pts.map(p=>p.value));
+  const span=Math.max(1, hi-lo);
+  plot.innerHTML='<div class="sChart">'+pts.map((p,i)=>{
+    const x = pts.length>1 ? (i/(pts.length-1))*100 : 50;
+    const y = ((p.value-lo)/span)*80 + 10;
+    return pointHTML(r1(x), r1(y), p.date, fmtDate(p.date)+' — '+p.value+' '+STATE.unit+' e1RM');
+  }).join('')+'</div>';
+  wirePoints(plot);
+  const delta=r1(pts[pts.length-1].value-pts[0].value);
+  cap.innerHTML='<b>'+escapeHtml(names[best.id])+'</b> — estimated 1RM, '+(delta>=0?'+':'')+delta+' '+STATE.unit+' across '+pts.length+' sessions. Tap a point for that day.';
+  $('#statsRow').innerHTML='<div class="stat"><div class="k">Now</div><div class="v gold">'+pts[pts.length-1].value+'</div></div>'
+    + '<div class="stat"><div class="k">Best</div><div class="v">'+Math.max(...pts.map(p=>p.value))+'</div></div>'
+    + '<div class="stat"><div class="k">Sessions</div><div class="v">'+pts.length+'</div></div>';
+}
+/* Rolling sessions per week — the consistency metric that predicts progress. */
+function drawConsistency(){
+  const plot=$('#statsPlot'), cap=$('#statsCap');
+  plot.style.aspectRatio='auto';
+  const pts=TrainEngine.sessionsPerWeekSeries(STATE.finishedDates||[], Date.now(), 12);
+  const max=Math.max(1, ...pts.map(p=>p.value), weeklyTarget());
+  plot.innerHTML='<div class="muscleBars">'+pts.map(p=>
+    '<div class="mbRow"><span class="mbLbl">'+fmtDate(p.date)+'</span>'
+    + '<div class="mbTrack"><div class="mbFill'+(p.value>=weeklyTarget()?' ok':'')+'" data-w="'+Math.round(p.value/max*100)+'" style="width:0%"></div></div>'
+    + '<span class="mbVal">'+p.value+'</span></div>').join('')+'</div>';
+  growBars(plot);
+  cap.textContent='Sessions per rolling week against your target of '+weeklyTarget()+'.';
+  $('#statsRow').innerHTML='';
+}
+/* This eight weeks against the eight before it. */
+function drawPeriodCompare(){
+  const plot=$('#statsPlot'), cap=$('#statsCap');
+  plot.style.aspectRatio='auto';
+  const c=TrainEngine.periodComparison(STATE.history||{}, STATE.finishedDates||[], Date.now(), 8);
+  const row=(label, now, then, ratio)=>{
+    const arrow = ratio==null ? '—' : ratio>1.02 ? '▲' : ratio<0.98 ? '▼' : '=';
+    const pct = ratio==null ? 'no prior period' : Math.round((ratio-1)*100)+'%';
+    return '<div class="mbRow"><span class="mbLbl">'+label+'</span>'
+      + '<span class="mbVal">'+now+' vs '+then+'</span>'
+      + '<span class="mbVal '+(ratio!=null&&ratio>1?'gold':'')+'">'+arrow+' '+pct+'</span></div>';
+  };
+  plot.innerHTML='<div class="muscleBars">'
+    + row('Sessions', c.current.sessions, c.previous.sessions, c.change.sessions)
+    + row('Hard sets', c.current.sets, c.previous.sets, c.change.sets)
+    + row(STATE.unit+' lifted', c.current.tonnage.toLocaleString(), c.previous.tonnage.toLocaleString(), c.change.tonnage)
+    + '</div>';
+  cap.textContent=fmtDate(c.current.from)+'–'+fmtDate(c.current.to)+' against '+fmtDate(c.previous.from)+'–'+fmtDate(c.previous.to)+'.';
+  $('#statsRow').innerHTML='';
 }
 function drawRecords(){
   const plot=$('#statsPlot'), cap=$('#statsCap');
@@ -5940,14 +6164,21 @@ function drawRecords(){
 function drawMuscles(){
   const plot=$('#statsPlot'), cap=$('#statsCap');
   plot.style.aspectRatio='auto';
-  const data=muscleVolumeBreakdown();
-  if(!data.length){ plot.innerHTML='<p class="emptyHist">No data yet — muscle groups come from exercises the AI has classified.</p>'; cap.textContent=''; $('#statsRow').innerHTML=''; return; }
-  const max=Math.max(...data.map(d=>d.vol),1);
-  plot.innerHTML='<div class="muscleBars">'+data.map(d=>'<div class="mbRow"><span class="mbLbl">'+escapeHtml(d.m)+'</span><div class="mbTrack"><div class="mbFill" data-w="'+Math.round(d.vol/max*100)+'" style="width:0%"></div></div><span class="mbVal">'+Math.round(d.vol)+'</span></div>').join('')+'</div>';
+  const data=TrainEngine.muscleWeekSeries(
+    STATE.history||{}, TrainEngine.indexFrom(STATE.customLib||{}), Date.now());
+  if(!data.length){
+    plot.innerHTML='<p class="emptyHist">Log a week and this fills in.</p>';
+    cap.textContent=''; $('#statsRow').innerHTML=''; return;
+  }
+  const max=Math.max(...data.map(d=>d.sets),1);
+  plot.innerHTML='<div class="muscleBars">'+data.map(d=>
+    '<div class="mbRow"><span class="mbLbl">'+escapeHtml(d.m||d.muscle.replace(/_/g,' '))+'</span>'
+    + '<div class="mbTrack"><div class="mbFill band-'+d.band+'" data-w="'+Math.round(d.sets/max*100)+'" style="width:0%"></div></div>'
+    + '<span class="mbVal">'+d.sets+(d.estimated?'*':'')+'</span></div>').join('')+'</div>';
   growBars(plot);
-  cap.textContent='Volume by muscle, weighted by how much each lift works it'
-    + (data.estimated ? ' — splits are estimated, so read the shape, not the numbers' : '')
-    + (data.unmapped && data.unmapped.length ? '. Unrecognised: '+data.unmapped.join(', ') : '');
+  const anyEstimated=data.some(d=>d.estimated);
+  cap.textContent='Hard sets per muscle this week, against a 10–20 band.'
+    + (anyEstimated ? ' * rests on an estimated muscle split.' : '');
   $('#statsRow').innerHTML='';
 }
 function drawGoals(){
