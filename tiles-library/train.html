@@ -103,6 +103,12 @@
     border-radius:var(--r-md); background:var(--e2); border:1px solid var(--hair);
     font-size:12px; font-weight:600; line-height:1.4; color:var(--muted); }
   .readinessNote.verdict-rest_advised { color:var(--fail); border-color:rgba(239,111,106,.3); }
+  .weeklyReview { margin:var(--sp3) var(--sp5) 0; padding:12px var(--sp4);
+    border-radius:var(--r-md); background:var(--e1); border:1px solid var(--hair); }
+  .weeklyReview .wrHead { font-size:10px; font-weight:700; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--muted-2); margin-bottom:6px; }
+  .weeklyReview .wrLine { font-size:12px; font-weight:600; line-height:1.45; color:var(--text); }
+  .weeklyReview .wrLine.mu { color:var(--muted); font-weight:500; }
   .readinessNote.verdict-reduced_volume,
   .readinessNote.verdict-reduced_intensity { color:var(--gold); border-color:rgba(245,166,35,.28); }
 
@@ -209,6 +215,7 @@
       </div>
     </div>
     <div class="readinessNote" id="readinessNote"></div>
+    <div class="weeklyReview" id="weeklyReview"></div>
     <div class="statStrip" id="miniStats"></div>
     <div class="wcSection" id="warmupSlot"></div>
     <div class="exwrap" id="exwrap"></div>
@@ -318,8 +325,11 @@ var TrainEngine = (() => {
     analyse: () => analyse,
     assessReadiness: () => assessReadiness,
     bestE1RM: () => bestE1RM,
+    briefFor: () => briefFor,
     catalogExercise: () => catalogExercise,
+    chooseSignal: () => chooseSignal,
     classifyPR: () => classifyPR,
+    collectSignals: () => collectSignals,
     contributionOf: () => contributionOf,
     countsForProgression: () => countsForProgression,
     currentWeekStreak: () => currentWeekStreak,
@@ -353,6 +363,7 @@ var TrainEngine = (() => {
     plateBreakdown: () => plateBreakdown,
     ratios: () => ratios,
     resolveExercise: () => resolveExercise,
+    reviewWorthSending: () => reviewWorthSending,
     sameAsLastTime: () => sameAsLastTime,
     sessionState: () => sessionState,
     sessionsPerWeek: () => sessionsPerWeek,
@@ -369,6 +380,7 @@ var TrainEngine = (() => {
     topWorkingSeconds: () => topWorkingSeconds,
     topWorkingWeight: () => topWorkingWeight,
     volumeRamp: () => volumeRamp,
+    weeklyReview: () => weeklyReview,
     weeklySets: () => weeklySets,
     workingRpe: () => workingRpe,
     workingSetCount: () => workingSetCount,
@@ -604,16 +616,16 @@ var TrainEngine = (() => {
   var REAPPROACH = 0.95;
   function deloadPlan(record) {
     if (!record) return { weight: null, setsFactor: 1 };
-    const round2 = (n) => Math.round(n * 100) / 100;
+    const round4 = (n) => Math.round(n * 100) / 100;
     if (record.state === "reapproach") {
-      return { weight: round2(record.priorWeight * REAPPROACH), setsFactor: 1 };
+      return { weight: round4(record.priorWeight * REAPPROACH), setsFactor: 1 };
     }
     if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
     if (record.kind === "volume") {
-      return { weight: round2(record.priorWeight), setsFactor: VOLUME_CUT };
+      return { weight: round4(record.priorWeight), setsFactor: VOLUME_CUT };
     }
     return {
-      weight: round2(record.priorWeight * INTENSITY_CUT[record.confidence]),
+      weight: round4(record.priorWeight * INTENSITY_CUT[record.confidence]),
       setsFactor: 1
     };
   }
@@ -2557,6 +2569,179 @@ var TrainEngine = (() => {
     return { ...SILENT, confidence: hasRecovery ? "measured" : "inferred" };
   }
 
+  // lib/train/insight.ts
+  var PRIORITY = [
+    "deload_applied",
+    "plateau",
+    "ratio",
+    "volume_ramp",
+    "personal_record",
+    "weekly_sets",
+    "frequency_gap",
+    "streak_milestone",
+    "first_time"
+  ];
+  var round2 = (n) => Math.round(n * 10) / 10;
+  function fromFinding(finding) {
+    const kind = finding.kind === "ratio" ? "ratio" : finding.kind === "volume_ramp" ? "volume_ramp" : finding.kind === "weekly_sets" ? "weekly_sets" : finding.kind === "frequency_gap" ? "frequency_gap" : null;
+    if (!kind) return null;
+    const number = finding.text.match(/[\d.]+/);
+    return {
+      kind,
+      text: finding.text,
+      value: number ? Number(number[0]) : finding.text,
+      estimated: finding.estimated
+    };
+  }
+  function streakMilestone(streak, target) {
+    if (streak < 2) return null;
+    if (streak !== 2 && streak % 4 !== 0) return null;
+    return {
+      kind: "streak_milestone",
+      text: `That is ${streak} weeks running at ${target}+ sessions.`,
+      value: streak,
+      estimated: false
+    };
+  }
+  function collectSignals(ctx) {
+    const signals = [];
+    for (const d of ctx.deloadsApplied || []) {
+      signals.push({
+        kind: "deload_applied",
+        text: `${d.name} moved from ${round2(d.from)} to ${round2(d.to)} lb \u2014 ${d.kind === "intensity" ? "an" : "a"} ${d.kind} deload, applied automatically.`,
+        value: round2(d.to),
+        estimated: false
+      });
+    }
+    for (const p of ctx.plateaus || []) {
+      signals.push({
+        kind: "plateau",
+        text: `${p.name} has been flat at ${round2(p.weight)} for ${p.sessions} sessions.`,
+        value: round2(p.weight),
+        estimated: false
+      });
+    }
+    for (const r of ctx.records || []) {
+      signals.push({
+        kind: "personal_record",
+        text: `${r.name}: ${round2(r.value)}${r.unit} is ${/^[aeiou]/i.test(r.kind) ? "an" : "a"} ${r.kind} record.`,
+        value: round2(r.value),
+        estimated: false
+      });
+    }
+    for (const finding of analyse(ctx.history, ctx.index, ctx.now)) {
+      const signal = fromFinding(finding);
+      if (signal) signals.push(signal);
+    }
+    const milestone = streakMilestone(ctx.streak, ctx.weeklyTarget);
+    if (milestone) signals.push(milestone);
+    for (const name of ctx.firsts || []) {
+      signals.push({
+        kind: "first_time",
+        text: `First time logging ${name}. There is a baseline now.`,
+        value: name,
+        estimated: false
+      });
+    }
+    return signals;
+  }
+  function chooseSignal(signals) {
+    if (!signals || !signals.length) return null;
+    const ranked = [...signals].sort(
+      (a, b) => PRIORITY.indexOf(a.kind) - PRIORITY.indexOf(b.kind)
+    );
+    return ranked[0];
+  }
+  function briefFor(ctx, goal) {
+    const signal = chooseSignal(collectSignals(ctx));
+    if (!signal) return null;
+    return {
+      fact: signal.text,
+      signal,
+      prompt: `The athlete's goal: ${goal}.
+One thing the data shows, already verified: "${signal.text}"
+Say that back in one short sentence, in the second person, keeping the number exactly as given. Add nothing the sentence does not contain. No greeting, no encouragement, no question.`
+    };
+  }
+
+  // lib/train/review.ts
+  function dateKey2(ms) {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function shift(now, days) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + days);
+    return dateKey2(d.getTime());
+  }
+  function bandOf(sets) {
+    if (sets > WEEKLY_SET_BAND[1]) return "over";
+    if (sets < WEEKLY_SET_BAND[0]) return "under";
+    return "in";
+  }
+  var round3 = (n) => Math.round(n * 10) / 10;
+  function weeklyReview(ctx) {
+    const to = dateKey2(ctx.now);
+    const from = shift(ctx.now, -6);
+    const index = indexFrom(ctx.customLib || {});
+    const inWindow = (date) => date >= from && date <= to;
+    const sessions = new Set((ctx.finishedDates || []).filter(inWindow)).size;
+    const perMuscle = /* @__PURE__ */ new Map();
+    const moved = [];
+    const trainedEver = /* @__PURE__ */ new Set();
+    const trainedNow = /* @__PURE__ */ new Set();
+    let estimated = false;
+    for (const id of Object.keys(ctx.history || {})) {
+      const split = index[id];
+      const rows = (ctx.history[id] || []).filter((e) => e && !e.off);
+      if (!rows.length) continue;
+      if (split && (split.primary.length || split.secondary.length)) {
+        split.primary.forEach((c) => trainedEver.add(c.muscle));
+        for (const entry of rows) {
+          const sets = workingSets(entry).length;
+          if (!sets || !inWindow(entry.date)) continue;
+          if (split.estimated) estimated = true;
+          const spread = distribute(sets, split);
+          for (const muscle of Object.keys(spread)) {
+            perMuscle.set(muscle, (perMuscle.get(muscle) || 0) + (spread[muscle] || 0));
+            trainedNow.add(muscle);
+          }
+        }
+      }
+      const window = rows.filter((e) => inWindow(e.date));
+      if (window.length >= 2) {
+        const first = topWorkingWeight(window[0]);
+        const last = topWorkingWeight(window[window.length - 1]);
+        if (last > first && first > 0) {
+          moved.push({ exerciseId: id, name: ctx.exerciseNames[id] || id, from: first, to: last });
+        }
+      }
+    }
+    const hardSetsByMuscle = [...perMuscle.entries()].map(([muscle, sets]) => ({ muscle, sets: round3(sets), band: bandOf(sets) })).sort((a, b) => b.sets - a.sets);
+    const quiet = [...trainedEver].filter((m2) => !trainedNow.has(m2)).sort();
+    const findings = analyse(ctx.history, index, ctx.now);
+    const quiet_week = sessions === 0 && !findings.length && !moved.length;
+    const headline = quiet_week ? "No sessions this week and nothing new in the numbers." : `${sessions} of ${ctx.weeklyTarget} sessions` + (moved.length ? `, ${moved.length} lift${moved.length === 1 ? "" : "s"} up` : "") + (findings.length ? `, ${findings.length} thing${findings.length === 1 ? "" : "s"} to note` : "");
+    return {
+      from,
+      to,
+      sessions,
+      target: ctx.weeklyTarget,
+      metTarget: sessions >= ctx.weeklyTarget,
+      hardSetsByMuscle,
+      moved: moved.sort((a, b) => b.to - b.from - (a.to - a.from)),
+      quiet,
+      findings,
+      quiet_week,
+      headline,
+      estimated
+    };
+  }
+  function reviewWorthSending(review) {
+    return !review.quiet_week;
+  }
+
   // lib/train/index.ts
   var ENGINE_VERSION = "1.0.0";
   return __toCommonJS(index_exports);
@@ -2799,7 +2984,7 @@ function dotsIcon(){ return '<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="
 function gripIcon(){ return '<svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>'; }
 
 function render(){
-  renderDots(); renderHead(); renderProgress(); renderBody(); renderStreak(); renderRail(); renderHeroExtras(); renderReadiness(); renderNoteBar(); saveState();
+  renderDots(); renderHead(); renderProgress(); renderBody(); renderStreak(); renderRail(); renderHeroExtras(); renderReadiness(); renderWeeklyReview(); renderNoteBar(); saveState();
 }
 /* ---- top sticker note bar: 3 slots, each cycling on its own timer
    through a pool of short, real, day-dependent callouts. Pool is
@@ -3257,17 +3442,95 @@ function advanceDeloads(session, recoveryAvg){
   });
   return applied;
 }
+/** Records set today, plateaus found, and lifts logged for the first time. */
+function sessionSignalInputs(session){
+  const records=[], plateaus=[], firsts=[];
+  session.ex.forEach(e=>{
+    e.log.forEach((s,i)=>{
+      if(!s) return;
+      const pr=prFor(e,i);
+      if(pr.kind){
+        const value = pr.kind==='time' ? s.s : pr.kind==='distance' ? s.m
+                    : pr.kind==='reps' ? s.reps : (pr.e1rm!=null ? pr.e1rm : s.kg);
+        if(value!=null) records.push({ name:e.name, kind:pr.kind, value, unit:pr.unit?(' '+pr.unit):'' });
+      }
+    });
+    const p=plateauFor(e);
+    if(p) plateaus.push({ name:e.name, sessions:p.sessions, weight:p.weight });
+    const rows=histFor(e).filter(x=>!x.off);
+    if(rows.length===1 && rows[0].date===today) firsts.push(e.name);
+  });
+  return { records, plateaus, firsts };
+}
+/**
+ * One observation per finished session, and ONLY when the maths found
+ * something.
+ *
+ * The gate is briefFor returning null: no signal, no API call, no note. A
+ * note that speaks every time will often say something generic, and a
+ * reader who gets three of those stops reading the fourth — including the
+ * one that mattered.
+ */
 async function fetchInsight(session){
   try{
     const ctx=await buildInsightContext(session);
     const applied=advanceDeloads(session, ctx.recoveryAvg);
-    const lines=ctx.lines.slice();
-    applied.forEach(a=> lines.push('AUTO-DELOAD APPLIED: '+a.name+' entered a '+(a.kind==='volume'?'volume':'intensity')+' deload, '+a.from+' → '+a.to+' '+STATE.unit+' — report this as a fact that already happened, not a suggestion.'));
-    const digest=lines.join('\n');
-    const note=await window.Vitality.getInsight({ goal:fullGoalContext(), digest });
-    session.insight={ date:today, text:(typeof note==='string'&&note.trim())?note.trim():null };
+    const inputs=sessionSignalInputs(session);
+    const brief=TrainEngine.briefFor({
+      history: STATE.history||{},
+      index: TrainEngine.indexFrom(STATE.customLib||{}),
+      now: Date.now(),
+      today,
+      records: inputs.records,
+      deloadsApplied: applied.map(a=>({ name:a.name, from:a.from, to:a.to, kind:a.kind })),
+      plateaus: inputs.plateaus,
+      streak: currentStreak(),
+      weeklyTarget: weeklyTarget(),
+      firsts: inputs.firsts,
+    }, fullGoalContext());
+
+    if(!brief){
+      /* Nothing worth saying. Silence is the feature. */
+      session.insight={ date:today, text:null };
+      render();
+      return;
+    }
+    /* The deterministic sentence is the answer; the model only rephrases
+       it. If no model answers, the fact stands on its own. */
+    let text=brief.fact;
+    try{
+      const note=await window.Vitality.getInsight({ goal:fullGoalContext(), digest:brief.prompt });
+      if(typeof note==='string' && note.trim()) text=note.trim();
+    }catch(err){ /* keep the fact */ }
+    session.insight={ date:today, text, signal:brief.signal.kind };
   }catch(err){ session.insight={ date:today, text:null }; }
-  render(); // covers saveState + insight display + any auto-deload reflected in the UI
+  render();
+}
+/** The rolling week, as data — displayable, loggable, pushable later. */
+function buildWeeklyReview(){
+  return TrainEngine.weeklyReview({
+    history: STATE.history||{},
+    customLib: STATE.customLib||{},
+    exerciseNames: STATE.exerciseNames||{},
+    finishedDates: STATE.finishedDates||[],
+    weeklyTarget: weeklyTarget(),
+    now: Date.now(),
+  });
+}
+/* Speaks on the days you do not train, and only when it has something. */
+function renderWeeklyReview(){
+  const el=$('#weeklyReview'); if(!el) return;
+  const r=buildWeeklyReview();
+  if(!TrainEngine.reviewWorthSending(r)){ el.style.display='none'; el.textContent=''; return; }
+  el.style.display='';
+  const bands=r.hardSetsByMuscle.filter(m=>m.band!=='in').slice(0,2)
+    .map(m=>m.muscle.replace(/_/g,' ')+' '+m.sets+' sets ('+m.band+' band)');
+  el.innerHTML='<div class="wrHead">This week</div>'
+    + '<div class="wrLine">'+escapeHtml(r.headline)+'</div>'
+    + (bands.length ? '<div class="wrLine mu">'+escapeHtml(bands.join(' · '))+'</div>' : '')
+    + (r.quiet.length ? '<div class="wrLine mu">Quiet: '+escapeHtml(r.quiet.slice(0,3).join(', ').replace(/_/g,' '))+'</div>' : '')
+    + (r.findings.length ? '<div class="wrLine mu">'+escapeHtml(r.findings[0].text)+'</div>' : '')
+    + (r.estimated ? '<div class="wrLine mu">Muscle splits are estimated for some lifts.</div>' : '');
 }
 function renderInsight(session){
   let el=$('#insightBox');
