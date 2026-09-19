@@ -309,6 +309,7 @@ var TrainEngine = (() => {
     E1RM_MAX_REPS: () => E1RM_MAX_REPS,
     ENGINE_VERSION: () => ENGINE_VERSION,
     GAP_DAYS: () => GAP_DAYS,
+    HARD_OTHER_LOAD: () => HARD_OTHER_LOAD,
     HIGH_RPE: () => HIGH_RPE,
     LAYOFF_DAYS: () => LAYOFF_DAYS,
     LB_PER_KG: () => LB_PER_KG,
@@ -317,9 +318,11 @@ var TrainEngine = (() => {
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
     MAX_SNAPSHOTS: () => MAX_SNAPSHOTS,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
+    MODERATE_OTHER_LOAD: () => MODERATE_OTHER_LOAD,
     MODERATE_RECOVERY: () => MODERATE_RECOVERY,
     MUSCLES: () => MUSCLES,
     NEAR_THRESHOLD: () => NEAR_THRESHOLD,
+    OTHER_ACTIVITIES: () => OTHER_ACTIVITIES,
     PULL_MUSCLES: () => PULL_MUSCLES,
     PUSH_MUSCLES: () => PUSH_MUSCLES,
     RAMP_LIMIT: () => RAMP_LIMIT,
@@ -332,6 +335,7 @@ var TrainEngine = (() => {
     SECONDARY_SHARE: () => SECONDARY_SHARE,
     SET_KINDS: () => SET_KINDS,
     SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
+    SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
     analyse: () => analyse,
     anythingAnswered: () => anythingAnswered,
@@ -355,6 +359,7 @@ var TrainEngine = (() => {
     defaultRepRange: () => defaultRepRange,
     deloadCut: () => deloadCut,
     deloadPlan: () => deloadPlan,
+    describeOther: () => describeOther,
     detectPlateau: () => detectPlateau,
     detectSource: () => detectSource,
     distribute: () => distribute,
@@ -385,8 +390,11 @@ var TrainEngine = (() => {
     nextDeloadState: () => nextDeloadState,
     normalizeClassification: () => normalizeClassification,
     normalizeName: () => normalizeName2,
+    normalizeOtherEntry: () => normalizeOtherEntry,
     normalizeShares: () => normalizeShares,
     onboardingNeeded: () => onboardingNeeded,
+    otherLoadOf: () => otherLoadOf,
+    otherTrainingLines: () => otherTrainingLines,
     parseCsv: () => parseCsv,
     periodComparison: () => periodComparison,
     planSession: () => planSession,
@@ -395,6 +403,7 @@ var TrainEngine = (() => {
     profileFor: () => profileFor,
     pushSnapshot: () => pushSnapshot,
     ratios: () => ratios,
+    recentOtherLoad: () => recentOtherLoad,
     recordBodyweight: () => recordBodyweight,
     remapRoutines: () => remapRoutines,
     repRangeFor: () => repRangeFor,
@@ -422,6 +431,7 @@ var TrainEngine = (() => {
     topWorkingReps: () => topWorkingReps,
     topWorkingSeconds: () => topWorkingSeconds,
     topWorkingWeight: () => topWorkingWeight,
+    trainingDates: () => trainingDates,
     validateSnapshot: () => validateSnapshot,
     volumeRamp: () => volumeRamp,
     weeklyReview: () => weeklyReview,
@@ -2699,6 +2709,87 @@ var TrainEngine = (() => {
     };
   }
 
+  // lib/train/other.ts
+  var OTHER_ACTIVITIES = [
+    "conditioning",
+    "sport",
+    "endurance",
+    "martial_arts",
+    "mobility",
+    "labour",
+    "other"
+  ];
+  var SYSTEMIC_WINDOW_DAYS = 3;
+  var MODERATE_OTHER_LOAD = 300;
+  var HARD_OTHER_LOAD = 600;
+  var MAX_MINUTES = 600;
+  function asActivity(raw) {
+    const key = String(raw || "").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    return OTHER_ACTIVITIES.includes(key) ? key : "other";
+  }
+  function clamp(raw, fallback, min, max) {
+    const n = typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
+    return Math.min(max, Math.max(min, Math.round(n)));
+  }
+  function normalizeOtherEntry(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const info = raw;
+    const date = typeof info.date === "string" ? info.date.trim() : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    const entry = {
+      date,
+      activity: asActivity(info.activity),
+      minutes: clamp(info.minutes, 30, 1, MAX_MINUTES),
+      intensity: clamp(info.intensity, 5, 1, 10)
+    };
+    const note = typeof info.note === "string" ? info.note.trim() : "";
+    if (note) entry.note = note.slice(0, 200);
+    return entry;
+  }
+  function otherLoadOf(entry) {
+    return entry.minutes * entry.intensity;
+  }
+  function daysBetween(a, b) {
+    const parse = (s) => {
+      const [y, m2, d] = s.split("-").map(Number);
+      return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+    };
+    return Math.round((parse(b) - parse(a)) / 864e5);
+  }
+  function recentOtherLoad(entries, today, days = SYSTEMIC_WINDOW_DAYS) {
+    const inWindow = (entries || []).filter((e) => {
+      if (!e || typeof e.date !== "string") return false;
+      const age = daysBetween(e.date, today);
+      return age >= 0 && age < days;
+    });
+    let load = 0;
+    let hardest = null;
+    for (const e of inWindow) {
+      const each = otherLoadOf(e);
+      load += each;
+      if (!hardest || each > otherLoadOf(hardest)) hardest = e;
+    }
+    return { load, sessions: inWindow.length, days, estimated: true, hardest };
+  }
+  function describeOther(hardest) {
+    if (!hardest) return "other training";
+    const name = hardest.activity.replace(/_/g, " ");
+    return `${hardest.minutes} minutes of ${name} at ${hardest.intensity}/10`;
+  }
+  function otherTrainingLines(summary) {
+    if (!summary || !summary.sessions) return [];
+    const lines = [
+      `Other training in the last ${summary.days} days: ${summary.sessions} session(s), hardest was ${describeOther(summary.hardest)}.`,
+      "That load is SELF-REPORTED and estimated \u2014 duration times how hard they said it felt. It is a reason to ease a session, never a reason to change a specific lift."
+    ];
+    return lines;
+  }
+  function trainingDates(finishedDates, entries) {
+    const all = new Set(finishedDates || []);
+    for (const e of entries || []) if (e && typeof e.date === "string") all.add(e.date);
+    return [...all].sort();
+  }
+
   // lib/train/readiness.ts
   var REST_FLOOR = 35;
   var LOW_RECOVERY = 55;
@@ -2712,7 +2803,7 @@ var TrainEngine = (() => {
     reason: null,
     confidence: "inferred"
   };
-  function daysBetween(a, b) {
+  function daysBetween2(a, b) {
     const parse = (s) => {
       const [y, m2, d] = s.split("-").map(Number);
       return new Date(y, (m2 || 1) - 1, d || 1).getTime();
@@ -2721,14 +2812,16 @@ var TrainEngine = (() => {
   }
   function restIsCapped(ctx) {
     return (ctx.restAdvisedDates || []).some(
-      (date) => daysBetween(date, ctx.today) < REST_ADVICE_COOLDOWN_DAYS
+      (date) => daysBetween2(date, ctx.today) < REST_ADVICE_COOLDOWN_DAYS
     );
   }
   function assessReadiness(ctx) {
     if (ctx.activeDeload) return SILENT;
     const hasRecovery = typeof ctx.recovery === "number";
     const hasLoad = typeof ctx.recentHardSets === "number" && typeof ctx.baselineHardSets === "number" && ctx.baselineHardSets > 0;
-    if (!hasRecovery && !hasLoad) return SILENT;
+    const other = ctx.otherLoad || null;
+    const hasOther = !!other && other.load >= MODERATE_OTHER_LOAD;
+    if (!hasRecovery && !hasLoad && !hasOther) return SILENT;
     const recovery = ctx.recovery;
     const ratio = hasLoad ? ctx.recentHardSets / ctx.baselineHardSets : 1;
     if (hasRecovery && recovery < REST_FLOOR) {
@@ -2777,7 +2870,28 @@ var TrainEngine = (() => {
         confidence: "measured"
       };
     }
+    if (hasOther) return suppression(other);
     return { ...SILENT, confidence: hasRecovery ? "measured" : "inferred" };
+  }
+  function suppression(other) {
+    const what = describeOther(other.hardest);
+    const also = other.sessions > 1 ? `, plus ${other.sessions - 1} more` : "";
+    if (other.load >= HARD_OTHER_LOAD) {
+      return {
+        verdict: "reduced_volume",
+        setsFactor: 0.75,
+        weightFactor: 1,
+        reason: `You told me about ${what}${also}. Today is scaled back.`,
+        confidence: "inferred"
+      };
+    }
+    return {
+      verdict: "reduced_intensity",
+      setsFactor: 1,
+      weightFactor: 0.9,
+      reason: `Weights are eased 10% today.`,
+      confidence: "inferred"
+    };
   }
 
   // lib/train/insight.ts
@@ -3500,7 +3614,7 @@ function buildState(){
   return {
     unit:'lb', submitted:false,
     session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
-    history:{}, customLib:{}, aliases:{}, bodyweight:[], startingWeights:{}, equipment:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4,
+    history:{}, customLib:{}, aliases:{}, bodyweight:[], startingWeights:{}, equipment:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4, otherTraining:[],
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
 }
@@ -3512,7 +3626,7 @@ function seedChecklist(list){ return (list||[]).map(text=>({text, done:false}));
 /* What they said they intend to train, never a constant. Someone who
    chooses twice a week is succeeding at twice a week. */
 function weeklyTarget(){ return TrainEngine.streakTarget(STATE.weeklyTarget); }
-function currentStreak(){ return TrainEngine.currentWeekStreak(STATE.finishedDates||[], weeklyTarget(), Date.now()); }
+function currentStreak(){ return TrainEngine.currentWeekStreak(allTrainingDates(), weeklyTarget(), Date.now()); }
 function streakText(){ return TrainEngine.streakLabel(currentStreak(), weeklyTarget()); }
 /* ---- AI-classified exercises (typed by name, or from the coach) -----
    Cached in STATE.customLib so a name is only ever sent to the model
@@ -3575,6 +3689,24 @@ function baselineHardSets(){
 function anyDeloadActive(){
   return Object.values(STATE.deloadStates||{}).some(d=>d && (d.state==='deloading' || d.state==='reapproach'));
 }
+/* Training that isn't lifting, normalised on READ. Nothing rewrites the
+   stored rows: an entry saved before a field existed reads back with that
+   field's safe default, and an entry nothing can place at all is dropped
+   here rather than reaching a calculation. */
+function otherEntries(){
+  return (STATE.otherTraining||[])
+    .map(e=>TrainEngine.normalizeOtherEntry(e))
+    .filter(Boolean);
+}
+/* The estimate, summarised. It reaches readiness THROUGH the readiness
+   context and nowhere else — there is no path from here to a lift. */
+function otherLoadNow(){ return TrainEngine.recentOtherLoad(otherEntries(), today); }
+/* Days the athlete trained, counting the runs. A frequency streak asks
+   "did you train this week", and a run is training. */
+function allTrainingDates(){
+  return TrainEngine.trainingDates(STATE.finishedDates||[], otherEntries());
+}
+
 async function computeReadiness(){
   const rec = noteRecovery(await readRecovery());
   const base = baselineHardSets();
@@ -3585,6 +3717,7 @@ async function computeReadiness(){
     activeDeload: anyDeloadActive(),
     restAdvisedDates: STATE.restAdvisedDates || [],
     today,
+    otherLoad: otherLoadNow(),
   });
   if(READINESS.verdict==='rest_advised'){
     STATE.restAdvisedDates = STATE.restAdvisedDates || [];
@@ -4215,6 +4348,7 @@ async function buildInsightContext(session){
     analysisOptsFor(),
   );
   findings.forEach(f=> lines.push('PATTERN: '+f.text+(f.estimated?' (muscle split is estimated)':'')));
+  TrainEngine.otherTrainingLines(otherLoadNow()).forEach(l=> lines.push(l));
 
   const rec = noteRecovery(await readRecovery());
   /* Only a connected read with data feeds the deload diagnosis. The other
@@ -4357,7 +4491,10 @@ function weeklyReviewUncached(){
     history: STATE.history||{},
     customLib: STATE.customLib||{},
     exerciseNames: STATE.exerciseNames||{},
-    finishedDates: STATE.finishedDates||[],
+    /* The same dates the streak counts, against the same target. A
+       review that said "0 of 2 sessions" in a week the streak called met
+       would be two answers to one question. */
+    finishedDates: allTrainingDates(),
     ...athleteContext(),
     now: Date.now(),
   });
@@ -5275,6 +5412,63 @@ function openTodayEquipment(){
       };
     });
 }
+/**
+ * Logging something that isn't lifting.
+ *
+ * Three fields, because three is what someone will actually fill in after
+ * a run. What it was, how long, how hard it felt — and that last one is a
+ * self-report with nothing to check it against, which is why everything
+ * downstream of it is marked estimated and why it may only ever ease a
+ * session, never change a specific lift.
+ */
+function openOtherTraining(){
+  const list=(STATE.otherTraining||[]).slice().sort((a,b)=> String(b.date).localeCompare(String(a.date)));
+  const draft={ date:today, activity:'conditioning', minutes:30, intensity:5 };
+  const acts=TrainEngine.OTHER_ACTIVITIES;
+  const label=k=>k.replace(/_/g,' ');
+  openPop(popHead('Other training','Runs, sport, anything else')
+    + '<p class="formGist">Logged so the app stops pretending it did not happen. It can ease a session back, and it never touches a lift\u2019s weight \u2014 how hard something felt is your estimate, not a measurement.</p>'
+    + '<div class="swapList" id="otActs">'+acts.map(k=>'<button class="swapItem'+(k===draft.activity?' on':'')+'" data-a="'+k+'"><span class="nm">'+label(k)+'</span><span class="mu">'+(k===draft.activity?'yes':'\u2014')+'</span></button>').join('')+'</div>'
+    + '<div class="settingsRow"><span class="bouncyLabel on">Minutes</span><div class="stepper"><button class="step minus" data-m="-15">\u2212</button><span class="stepVal" id="otMin">30</span><button class="step" data-m="15">+</button></div></div>'
+    + '<div class="settingsRow"><span class="bouncyLabel on">How hard</span><div class="stepper"><button class="step minus" data-i="-1">\u2212</button><span class="stepVal" id="otInt">5/10</span><button class="step" data-i="1">+</button></div></div>'
+    + (list.length ? '<div class="swapList" id="otList">'+list.slice(0,8).map((e,i)=>'<button class="swapItem" data-del="'+i+'"><span class="nm">'+escapeHtml(label(String(e.activity||'other')))+'</span><span class="mu">'+e.date+' \u00b7 '+e.minutes+'m \u00b7 '+e.intensity+'/10</span></button>').join('')+'</div>' : '')
+    + '<div class="popBtns"><button class="pbtn ghost" id="otClose">Close</button><button class="pbtn save" id="otSave">Log it</button></div>',
+    scrim=>{
+      const sync=()=>{
+        scrim.querySelector('#otMin').textContent=draft.minutes;
+        scrim.querySelector('#otInt').textContent=draft.intensity+'/10';
+      };
+      scrim.querySelectorAll('#otActs [data-a]').forEach(b=> b.onclick=()=>{
+        draft.activity=b.dataset.a;
+        scrim.querySelectorAll('#otActs [data-a]').forEach(x=>{
+          x.classList.toggle('on', x.dataset.a===draft.activity);
+          x.querySelector('.mu').textContent = x.dataset.a===draft.activity ? 'yes' : '\u2014';
+        });
+      });
+      scrim.querySelectorAll('[data-m]').forEach(b=> b.onclick=()=>{
+        draft.minutes=Math.min(600, Math.max(5, draft.minutes+(+b.dataset.m))); sync();
+      });
+      scrim.querySelectorAll('[data-i]').forEach(b=> b.onclick=()=>{
+        draft.intensity=Math.min(10, Math.max(1, draft.intensity+(+b.dataset.i))); sync();
+      });
+      scrim.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
+        const e=list[+b.dataset.del];
+        STATE.otherTraining=(STATE.otherTraining||[]).filter(x=>x!==e);
+        saveState(); closePop(); render();
+      });
+      scrim.querySelector('#otSave').onclick=()=>{
+        const e=TrainEngine.normalizeOtherEntry(draft);
+        if(e){ STATE.otherTraining=(STATE.otherTraining||[]).concat([e]); saveState(); }
+        closePop(); recomputeReadinessAndRender();
+      };
+      scrim.querySelector('#otClose').onclick=()=>closePop();
+    });
+}
+/* A logged run changes today's readiness, so the verdict is recomputed
+   rather than left showing what it said before the run existed. */
+function recomputeReadinessAndRender(){
+  computeReadiness().then(render).catch(()=>render());
+}
 function openRoutines(){
   const routines=STATE.routines||[];
   const days=STATE.routineDays||{};
@@ -5547,6 +5741,9 @@ function openSettings(){
     + '<div class="secLbl">Routine</div>'
     + '<p class="settingsNote">Save today\'s lifts as a named day and assign it to weekdays. It pre-fills an empty session and never touches anything already logged.</p>'
     + '<button class="pbtn ghost" id="openRoutines" style="width:100%">Routines</button>'
+    + '<div class="secLbl">Other training</div>'
+    + '<p class="settingsNote">Runs, sport, anything that is not lifting. It can ease a session back when you have been hammered, and it never changes a lift\'s weight \u2014 how hard it felt is your estimate, not a measurement.</p>'
+    + '<button class="pbtn ghost" id="openOther" style="width:100%">Log other training</button>'
     + '<div class="secLbl">A day you missed</div>'
     + '<p class="settingsNote">Every hole in the history weakens plateau detection and the weekly reads. Fill one in.</p>'
     + '<button class="pbtn ghost" id="openBackdate" style="width:100%">Log a past session</button>'
@@ -5631,6 +5828,8 @@ function openSettings(){
       if(impBtn) impBtn.onclick=()=>{ closePop(); openImport(); };
       const rtBtn=scrim.querySelector('#openRoutines');
       if(rtBtn) rtBtn.onclick=()=>{ closePop(); openRoutines(); };
+      const otBtn=scrim.querySelector('#openOther');
+      if(otBtn) otBtn.onclick=()=>{ closePop(); openOtherTraining(); };
       const bdBtn=scrim.querySelector('#openBackdate');
       if(bdBtn) bdBtn.onclick=()=>{ closePop(); openBackdate(); };
       const mergeBtn=scrim.querySelector('#openMerge');
@@ -6484,7 +6683,7 @@ function handlePhotoFile(input){
    app doesn't have that data, so it doesn't pretend to).
    ================================================================= */
 /* Same unit as the current streak, so the two can be read side by side. */
-function longestStreak(){ return TrainEngine.longestWeekStreak(STATE.finishedDates||[], weeklyTarget(), Date.now()); }
+function longestStreak(){ return TrainEngine.longestWeekStreak(allTrainingDates(), weeklyTarget(), Date.now()); }
 function totalPRsAllTime(){
   let count=0;
   Object.keys(STATE.history||{}).forEach(id=>{
@@ -7294,6 +7493,7 @@ function spawnParticles(root){
   STATE.bodyweight = STATE.bodyweight || [];
   STATE.startingWeights = STATE.startingWeights || {};
   STATE.equipment = STATE.equipment || [];
+  STATE.otherTraining = STATE.otherTraining || [];
   STORAGE = TrainEngine.storageReport(hostStatus, localLayer()?'ok':'unavailable', STATE.snapshots.length);
   console.info('[train] storage — '+STORAGE.detail);
   if(!STATE.snapshots.length) snapshotNow('first boot');

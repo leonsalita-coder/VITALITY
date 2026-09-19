@@ -21,6 +21,10 @@
  * Pure and DOM-free.
  */
 
+import {
+  HARD_OTHER_LOAD, MODERATE_OTHER_LOAD, describeOther, type OtherLoadSummary,
+} from './other'
+
 /** Below this, training hard today is the wrong call. */
 export const REST_FLOOR = 35
 /** Below this, the athlete cannot absorb a normal volume. */
@@ -59,6 +63,16 @@ export interface ReadinessContext {
   /** Dates rest has already been advised on. */
   restAdvisedDates: string[]
   today: string
+  /**
+   * Self-reported training that isn't lifting, or null when there is none.
+   *
+   * It lives in the CONTEXT rather than in a function of its own on
+   * purpose. Suppression has to sit behind the same deload gate every
+   * other rule here sits behind, and a separate entry point is a separate
+   * thing to remember to guard — which is exactly how the first attempt
+   * stacked a cut onto a lift that was already being cut.
+   */
+  otherLoad?: OtherLoadSummary | null
 }
 
 const SILENT: ReadinessResult = {
@@ -97,9 +111,11 @@ export function assessReadiness(ctx: ReadinessContext): ReadinessResult {
     typeof ctx.recentHardSets === 'number' &&
     typeof ctx.baselineHardSets === 'number' &&
     ctx.baselineHardSets > 0
+  const other = ctx.otherLoad || null
+  const hasOther = !!other && other.load >= MODERATE_OTHER_LOAD
 
   // nothing to reason from; saying anything here would be invention
-  if (!hasRecovery && !hasLoad) return SILENT
+  if (!hasRecovery && !hasLoad && !hasOther) return SILENT
 
   const recovery = ctx.recovery as number
   const ratio = hasLoad ? (ctx.recentHardSets as number) / (ctx.baselineHardSets as number) : 1
@@ -156,5 +172,46 @@ export function assessReadiness(ctx: ReadinessContext): ReadinessResult {
     }
   }
 
+  /* LAST, and only from silence.
+   *
+   * Everything above rests on a measurement. This rests on somebody
+   * telling me how hard something felt, which is a crude proxy with no
+   * objective anchor, so it may only speak when nothing measured had
+   * anything to say. It can hold a session back; it can never advise
+   * rest, because rest is the strongest call this app makes and it should
+   * not turn on a self-report. And it is reached only after the
+   * activeDeload gate at the top, so a lift already being cut is never
+   * cut twice on the strength of an estimate. */
+  if (hasOther) return suppression(other as OtherLoadSummary)
+
   return { ...SILENT, confidence: hasRecovery ? 'measured' : 'inferred' }
+}
+
+/**
+ * What self-reported training is allowed to do, which is hold a session
+ * back and nothing else. Always 'inferred', whatever else was measured
+ * today — the verdict is only as sound as the number behind it.
+ */
+function suppression(other: OtherLoadSummary): ReadinessResult {
+  const what = describeOther(other.hardest)
+  const also = other.sessions > 1 ? `, plus ${other.sessions - 1} more` : ''
+  /* Attributed to what they told me, in their words, because the number
+     behind this is their estimate and the note must not read like a
+     measurement. */
+  if (other.load >= HARD_OTHER_LOAD) {
+    return {
+      verdict: 'reduced_volume',
+      setsFactor: 0.75,
+      weightFactor: 1,
+      reason: `You told me about ${what}${also}. Today is scaled back.`,
+      confidence: 'inferred',
+    }
+  }
+  return {
+    verdict: 'reduced_intensity',
+    setsFactor: 1,
+    weightFactor: 0.9,
+    reason: `Weights are eased 10% today.`,
+    confidence: 'inferred',
+  }
 }
