@@ -394,6 +394,7 @@ var TrainEngine = (() => {
     isAmrapSet: () => isAmrapSet,
     isExcluded: () => isExcluded,
     isWorkingSet: () => isWorkingSet,
+    lastSessionFor: () => lastSessionFor,
     limitDeloads: () => limitDeloads,
     loadableWeights: () => loadableWeights,
     loggedSetCount: () => loggedSetCount,
@@ -467,97 +468,6 @@ var TrainEngine = (() => {
     workingSets: () => workingSets,
     workingVolume: () => workingVolume
   });
-
-  // lib/train/projection.ts
-  var MIN_PROJECTION_POINTS = 4;
-  var STATIC_WEEKS = 6;
-  var MAX_PROJECTION_DAYS = 365;
-  var STALE_DAYS = 180;
-  var NOISE_PER_WEEK = 0.01;
-  var DAY_MS = 864e5;
-  function localMidnight(dateStr) {
-    const [y, m2, d] = dateStr.split("-").map(Number);
-    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
-  }
-  function isoOf(ms) {
-    const d = new Date(ms);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  }
-  function unitLabel(unit) {
-    if (unit === "seconds") return "seconds";
-    if (unit === "metres") return "metres";
-    return "lb";
-  }
-  function slopePerDay(points) {
-    return slopeOf(points.map((p) => ({ t: p.t / DAY_MS, v: p.v })));
-  }
-  function slopeOf(points) {
-    const n = points.length;
-    const meanT = points.reduce((sum, p) => sum + p.t, 0) / n;
-    const meanV = points.reduce((sum, p) => sum + p.v, 0) / n;
-    let top = 0;
-    let bottom = 0;
-    for (const p of points) {
-      top += (p.t - meanT) * (p.v - meanV);
-      bottom += (p.t - meanT) ** 2;
-    }
-    return bottom === 0 ? 0 : top / bottom;
-  }
-  function projectGoal(series, target, now, opts = {}) {
-    if (typeof target !== "number" || !Number.isFinite(target) || target <= 0) return null;
-    const points = (series || []).filter((p) => p && typeof p.value === "number" && Number.isFinite(p.value) && p.date).map((p) => ({ t: localMidnight(p.date), v: p.value })).filter((p) => Number.isFinite(p.t) && (now - p.t) / DAY_MS <= STALE_DAYS && p.t <= now).sort((a, b) => a.t - b.t);
-    if (points.length < MIN_PROJECTION_POINTS) return null;
-    const latest = points[points.length - 1];
-    const earliest = points[0];
-    const unit = unitLabel(opts.unit);
-    const perDay = slopePerDay(points);
-    const perWeek = Math.round(perDay * 7 * 100) / 100;
-    if (latest.v >= target) {
-      return {
-        verdict: "reached",
-        date: null,
-        weeks: null,
-        perWeek,
-        staticWeeks: null,
-        text: `Goal reached \u2014 ${Math.round(latest.v)} ${unit} against a ${Math.round(target)} target.`
-      };
-    }
-    const spanWeeks = Math.round((latest.t - earliest.t) / DAY_MS / 7);
-    if (perWeek <= NOISE_PER_WEEK) {
-      if (spanWeeks < STATIC_WEEKS) return null;
-      return {
-        verdict: "static",
-        date: null,
-        weeks: null,
-        perWeek,
-        staticWeeks: spanWeeks,
-        text: `Hasn't moved in ${spanWeeks} weeks \u2014 still ${Math.round(target - latest.v)} ${unit} short.`
-      };
-    }
-    const remaining = target - latest.v;
-    const days = remaining / perDay;
-    if (!Number.isFinite(days) || days > MAX_PROJECTION_DAYS) {
-      return {
-        verdict: "unreachable",
-        date: null,
-        weeks: null,
-        perWeek,
-        staticWeeks: null,
-        text: `Not on this trajectory \u2014 ${perWeek} ${unit} a week leaves ${Math.round(remaining)} ${unit} to go.`
-      };
-    }
-    const arrival = now + days * DAY_MS;
-    const weeks = Math.max(1, Math.round(days / 7));
-    return {
-      verdict: "on_track",
-      date: isoOf(arrival),
-      weeks,
-      perWeek,
-      staticWeeks: null,
-      text: `About ${weeks} week${weeks === 1 ? "" : "s"} away at ${perWeek} ${unit} a week.`
-    };
-  }
 
   // lib/train/bodyweight.ts
   function bodyweightAt(history, date) {
@@ -725,6 +635,146 @@ var TrainEngine = (() => {
     const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
     if (!values.length) return null;
     return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  // lib/train/lastsession.ts
+  var DAY_MS = 864e5;
+  function shapeOf(set, kind) {
+    const base = {
+      missed: set.fail === true,
+      rpe: typeof set.rpe === "number" && Number.isFinite(set.rpe) ? set.rpe : null,
+      amrap: isAmrapSet(set) || set.amrap === true
+    };
+    switch (kind) {
+      case "time":
+        return { ...base, seconds: set.s || 0 };
+      case "distance":
+        return { ...base, metres: set.m || 0 };
+      case "time_distance":
+        return { ...base, metres: set.m || 0, seconds: set.s || 0 };
+      case "reps_only":
+      case "bodyweight":
+        return { ...base, reps: set.r || 0 };
+      default:
+        return { ...base, weight: typeof set.w === "number" ? set.w : 0, reps: set.r || 0 };
+    }
+  }
+  function lastSessionFor(history, now) {
+    const today = dateKey(now);
+    const usable = (history || []).filter((entry) => entry && !entry.off && entry.date && entry.date < today).sort((a, b) => a.date.localeCompare(b.date));
+    for (let i = usable.length - 1; i >= 0; i--) {
+      const entry = usable[i];
+      const shown = (entry.sets || []).filter((set) => set.warmup !== true);
+      if (!shown.length) continue;
+      const kind = entryKind(entry);
+      return {
+        date: entry.date,
+        daysAgo: Math.round((localMidnight(today) - localMidnight(entry.date)) / DAY_MS),
+        kind,
+        sets: shown.map((set) => shapeOf(set, kind))
+      };
+    }
+    return null;
+  }
+  function dateKey(ms) {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function localMidnight(dateStr) {
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+
+  // lib/train/projection.ts
+  var MIN_PROJECTION_POINTS = 4;
+  var STATIC_WEEKS = 6;
+  var MAX_PROJECTION_DAYS = 365;
+  var STALE_DAYS = 180;
+  var NOISE_PER_WEEK = 0.01;
+  var DAY_MS2 = 864e5;
+  function localMidnight2(dateStr) {
+    const [y, m2, d] = dateStr.split("-").map(Number);
+    return new Date(y, (m2 || 1) - 1, d || 1).getTime();
+  }
+  function isoOf(ms) {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function unitLabel(unit) {
+    if (unit === "seconds") return "seconds";
+    if (unit === "metres") return "metres";
+    return "lb";
+  }
+  function slopePerDay(points) {
+    return slopeOf(points.map((p) => ({ t: p.t / DAY_MS2, v: p.v })));
+  }
+  function slopeOf(points) {
+    const n = points.length;
+    const meanT = points.reduce((sum, p) => sum + p.t, 0) / n;
+    const meanV = points.reduce((sum, p) => sum + p.v, 0) / n;
+    let top = 0;
+    let bottom = 0;
+    for (const p of points) {
+      top += (p.t - meanT) * (p.v - meanV);
+      bottom += (p.t - meanT) ** 2;
+    }
+    return bottom === 0 ? 0 : top / bottom;
+  }
+  function projectGoal(series, target, now, opts = {}) {
+    if (typeof target !== "number" || !Number.isFinite(target) || target <= 0) return null;
+    const points = (series || []).filter((p) => p && typeof p.value === "number" && Number.isFinite(p.value) && p.date).map((p) => ({ t: localMidnight2(p.date), v: p.value })).filter((p) => Number.isFinite(p.t) && (now - p.t) / DAY_MS2 <= STALE_DAYS && p.t <= now).sort((a, b) => a.t - b.t);
+    if (points.length < MIN_PROJECTION_POINTS) return null;
+    const latest = points[points.length - 1];
+    const earliest = points[0];
+    const unit = unitLabel(opts.unit);
+    const perDay = slopePerDay(points);
+    const perWeek = Math.round(perDay * 7 * 100) / 100;
+    if (latest.v >= target) {
+      return {
+        verdict: "reached",
+        date: null,
+        weeks: null,
+        perWeek,
+        staticWeeks: null,
+        text: `Goal reached \u2014 ${Math.round(latest.v)} ${unit} against a ${Math.round(target)} target.`
+      };
+    }
+    const spanWeeks = Math.round((latest.t - earliest.t) / DAY_MS2 / 7);
+    if (perWeek <= NOISE_PER_WEEK) {
+      if (spanWeeks < STATIC_WEEKS) return null;
+      return {
+        verdict: "static",
+        date: null,
+        weeks: null,
+        perWeek,
+        staticWeeks: spanWeeks,
+        text: `Hasn't moved in ${spanWeeks} weeks \u2014 still ${Math.round(target - latest.v)} ${unit} short.`
+      };
+    }
+    const remaining = target - latest.v;
+    const days = remaining / perDay;
+    if (!Number.isFinite(days) || days > MAX_PROJECTION_DAYS) {
+      return {
+        verdict: "unreachable",
+        date: null,
+        weeks: null,
+        perWeek,
+        staticWeeks: null,
+        text: `Not on this trajectory \u2014 ${perWeek} ${unit} a week leaves ${Math.round(remaining)} ${unit} to go.`
+      };
+    }
+    const arrival = now + days * DAY_MS2;
+    const weeks = Math.max(1, Math.round(days / 7));
+    return {
+      verdict: "on_track",
+      date: isoOf(arrival),
+      weeks,
+      perWeek,
+      staticWeeks: null,
+      text: `About ${weeks} week${weeks === 1 ? "" : "s"} away at ${perWeek} ${unit} a week.`
+    };
   }
 
   // lib/train/timing.ts
@@ -1835,12 +1885,12 @@ var TrainEngine = (() => {
     const step = stepFor(reference, exercise);
     return tidy2(Math.round(weight / step) * step);
   }
-  function localMidnight2(dateStr) {
+  function localMidnight3(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function daysSince(dateStr, now) {
-    const then = localMidnight2(dateStr);
+    const then = localMidnight3(dateStr);
     const nowDate = new Date(now);
     const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
     return Math.round((today - then) / 864e5);
@@ -1870,7 +1920,7 @@ var TrainEngine = (() => {
       return { days: trailing, priorWeight: topWorkingWeight(last), sessionsSince: 0 };
     }
     for (let i = sessions.length - 1; i > 0; i--) {
-      const gap = daysSince(sessions[i - 1].date, localMidnight2(sessions[i].date));
+      const gap = daysSince(sessions[i - 1].date, localMidnight3(sessions[i].date));
       if (gap >= LAYOFF_DAYS) {
         return { days: gap, priorWeight: topWorkingWeight(sessions[i - 1]), sessionsSince: sessions.length - i };
       }
@@ -2190,7 +2240,7 @@ var TrainEngine = (() => {
     }
     return best;
   }
-  function dateKey(ms) {
+  function dateKey2(ms) {
     const d = new Date(ms);
     const pad = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -2198,11 +2248,11 @@ var TrainEngine = (() => {
   function shiftDays(ms, delta) {
     const d = new Date(ms);
     d.setDate(d.getDate() + delta);
-    return dateKey(d.getTime());
+    return dateKey2(d.getTime());
   }
   function classifyPR(history, candidate, now) {
     if (!isWorkingSet(candidate)) return NO_PR;
-    const today = dateKey(now);
+    const today = dateKey2(now);
     const base = { excludeDate: today };
     const kind = candidate.kind || DEFAULT_SET_KIND;
     if (kind === "time") {
@@ -2258,7 +2308,7 @@ var TrainEngine = (() => {
   function nearMissCue(history, prefill, incrementLb, now) {
     const value = epley1RM(prefill.weight, prefill.reps);
     if (value == null) return null;
-    const best = bestE1RM(history, { excludeDate: dateKey(now) });
+    const best = bestE1RM(history, { excludeDate: dateKey2(now) });
     if (!best) return null;
     const deficit = best.value - value;
     if (deficit <= 0) return null;
@@ -2269,8 +2319,8 @@ var TrainEngine = (() => {
 
   // lib/train/streaks.ts
   var DEFAULT_WEEKLY_TARGET = 4;
-  var DAY_MS2 = 864e5;
-  function localMidnight3(dateStr) {
+  var DAY_MS3 = 864e5;
+  function localMidnight4(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
@@ -2285,7 +2335,7 @@ var TrainEngine = (() => {
     for (const date of finishedDates || []) {
       if (!date || seen.has(date)) continue;
       seen.add(date);
-      const age = Math.round((today - localMidnight3(date)) / DAY_MS2);
+      const age = Math.round((today - localMidnight4(date)) / DAY_MS3);
       if (age < 0) continue;
       const bucket = Math.floor(age / 7);
       if (bucket < weeks) buckets[bucket] += 1;
@@ -2691,13 +2741,13 @@ var TrainEngine = (() => {
   var WEEKLY_SET_BAND = [10, 20];
   var RATIO_BAND = [0.6, 1.7];
   var RAMP_LIMIT = 1.5;
-  var DAY_MS3 = 864e5;
+  var DAY_MS4 = 864e5;
   function indexFrom(customLib) {
     const out = {};
     for (const id of Object.keys(customLib || {})) out[id] = muscleSplitFrom(customLib[id]);
     return out;
   }
-  function localMidnight4(dateStr) {
+  function localMidnight5(dateStr) {
     const [y, m2, d] = dateStr.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
@@ -2706,7 +2756,7 @@ var TrainEngine = (() => {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   }
   function daysAgo(dateStr, now) {
-    return Math.round((startOfDay2(now) - localMidnight4(dateStr)) / DAY_MS3);
+    return Math.round((startOfDay2(now) - localMidnight5(dateStr)) / DAY_MS4);
   }
   function attribute(history, index) {
     const rows = [];
@@ -3377,7 +3427,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
   }
 
   // lib/train/review.ts
-  function dateKey2(ms) {
+  function dateKey3(ms) {
     const d = new Date(ms);
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -3385,7 +3435,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
   function shift(now, days) {
     const d = new Date(now);
     d.setDate(d.getDate() + days);
-    return dateKey2(d.getTime());
+    return dateKey3(d.getTime());
   }
   function bandOf(sets) {
     if (sets > WEEKLY_SET_BAND[1]) return "over";
@@ -3394,7 +3444,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
   }
   var round3 = (n) => Math.round(n * 10) / 10;
   function weeklyReview(ctx) {
-    const to = dateKey2(ctx.now);
+    const to = dateKey3(ctx.now);
     const from = shift(ctx.now, -6);
     const index = indexFrom(ctx.customLib || {});
     const inWindow = (date) => date >= from && date <= to;
@@ -3664,19 +3714,19 @@ Say that back in one short sentence, in the second person, keeping the number ex
   }
 
   // lib/train/series.ts
-  var DAY_MS4 = 864e5;
-  function dateKey3(ms) {
+  var DAY_MS5 = 864e5;
+  function dateKey4(ms) {
     const d = new Date(ms);
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
-  function localMidnight5(date) {
+  function localMidnight6(date) {
     const [y, m2, d] = date.split("-").map(Number);
     return new Date(y, (m2 || 1) - 1, d || 1).getTime();
   }
   function daysAgo2(date, now) {
-    const today = localMidnight5(dateKey3(now));
-    return Math.round((today - localMidnight5(date)) / DAY_MS4);
+    const today = localMidnight6(dateKey4(now));
+    return Math.round((today - localMidnight6(date)) / DAY_MS5);
   }
   function e1rmSeries(entries) {
     const points = [];
@@ -3726,7 +3776,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
         const age = w * 7 + d;
         const day = new Date(now);
         day.setDate(day.getDate() - age);
-        const key = dateKey3(day.getTime());
+        const key = dateKey4(day.getTime());
         if (d === 6) label2 = key;
         if (seen.has(key)) count++;
       }
@@ -3739,7 +3789,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
     const shift2 = (days) => {
       const d = new Date(now);
       d.setDate(d.getDate() - days);
-      return dateKey3(d.getTime());
+      return dateKey4(d.getTime());
     };
     const windows = [
       { from: shift2(span - 1), to: shift2(0) },
@@ -3786,13 +3836,13 @@ Say that back in one short sentence, in the second person, keeping the number ex
     }
     return n;
   }
-  function dateKey4(ms) {
+  function dateKey5(ms) {
     const d = new Date(ms);
     const p = (x) => String(x).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
   function makeSnapshot(state, now) {
-    return { v: SNAPSHOT_VERSION, at: now, date: dateKey4(now), sets: countSets(state), state };
+    return { v: SNAPSHOT_VERSION, at: now, date: dateKey5(now), sets: countSets(state), state };
   }
   function validateSnapshot(raw) {
     if (!raw || typeof raw !== "object") return false;
@@ -5041,6 +5091,17 @@ function renderPillGroup(e, rx, idx){
       why.textContent=sug.reason;
       frag.appendChild(why);
     }
+    /* What you actually did last time, beside what you are about to do.
+       On the next unlogged set only — repeating it down the card would
+       be noise — and absent entirely with no history, so nothing renders
+       rather than an empty row. */
+    const lastText=lastSessionText(e);
+    if(lastText){
+      const last=document.createElement('div');
+      last.className='pillWhy pillLast';
+      last.textContent=lastText;
+      frag.appendChild(last);
+    }
   }
   if(s && !s.fail){
     const drops=document.createElement('div'); drops.className='drops';
@@ -5292,6 +5353,36 @@ function pillInputsFor(e, kind, pre, bumped){
   return num('w'+(bumped?' bump':''),pre.weight,'Weight'+hint,'decimal')
     + unit(flagFor(e,'assisted')?'lb help':STATE.unit) + times + num('r',pre.reps,'Reps');
 }
+/**
+ * Last session's working sets, as one line.
+ *
+ * The engine returns structured data and deliberately no sentence; this
+ * is where it becomes one, because only the caller knows it has a single
+ * narrow row to fill. Null all the way down when there is no history.
+ */
+function lastSessionText(e){
+  const last=TrainEngine.lastSessionFor(histFor(e), Date.now());
+  if(!last || !last.sets.length) return '';
+  const part=s=>{
+    if(s.seconds!=null && s.metres!=null) return s.metres+'m/'+s.seconds+'s';
+    if(s.seconds!=null) return s.seconds+'s';
+    if(s.metres!=null) return s.metres+'m';
+    if(s.weight!=null) return s.weight+'×'+s.reps;
+    return String(s.reps);
+  };
+  /* Collapsed where consecutive sets match, so 185×8,8,7 reads as it
+     would be said rather than as three repetitions of the weight. */
+  const shown=[];
+  last.sets.forEach((s,i)=>{
+    const prev=last.sets[i-1];
+    const sameLoad = prev && prev.weight===s.weight && prev.seconds===s.seconds && prev.metres===s.metres;
+    const mark=(s.missed?'✗':'')+(s.amrap?'+':'');
+    shown.push(sameLoad && s.weight!=null ? (s.reps+mark) : (part(s)+mark));
+  });
+  const when = last.daysAgo===1 ? 'yesterday' : last.daysAgo+' days ago';
+  return 'Last time ('+when+'): '+shown.join(', ');
+}
+
 function renderPill(e, rx, idx){
   const kind=classifySet(e, idx); const s=e.log[idx]; const logged=kind!=='empty';
   const suggestion = logged ? null : suggestionFor(e, rx);

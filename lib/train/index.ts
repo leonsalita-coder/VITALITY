@@ -1,3 +1,4 @@
+export * from './lastsession'
 export * from './projection'
 export * from './timing'
 export * from './swap'
