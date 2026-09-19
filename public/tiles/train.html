@@ -326,6 +326,8 @@ var TrainEngine = (() => {
     MAX_SETS_PER_MUSCLE: () => MAX_SETS_PER_MUSCLE,
     MAX_SNAPSHOTS: () => MAX_SNAPSHOTS,
     MAX_WORKING_SETS: () => MAX_WORKING_SETS,
+    MIN_ASYMMETRY_SESSIONS: () => MIN_ASYMMETRY_SESSIONS,
+    MIN_LOAD_GAP: () => MIN_LOAD_GAP,
     MIN_PROJECTION_POINTS: () => MIN_PROJECTION_POINTS,
     MIN_TIMED_SESSIONS: () => MIN_TIMED_SESSIONS,
     MODERATE_OTHER_LOAD: () => MODERATE_OTHER_LOAD,
@@ -359,6 +361,7 @@ var TrainEngine = (() => {
     applyOnboarding: () => applyOnboarding,
     asPercent: () => asPercent,
     assessReadiness: () => assessReadiness,
+    asymmetryFor: () => asymmetryFor,
     attribute: () => attribute,
     availableEquipment: () => availableEquipment,
     baselineWindow: () => baselineWindow,
@@ -452,6 +455,8 @@ var TrainEngine = (() => {
     sessionsPerWeekSeries: () => sessionsPerWeekSeries,
     setKind: () => setKind,
     setWeight: () => setWeight,
+    sideGapOf: () => sideGapOf,
+    sidesOf: () => sidesOf,
     similarity: () => similarity,
     slugFromName: () => slugFromName,
     snapToLoadable: () => snapToLoadable,
@@ -524,6 +529,15 @@ var TrainEngine = (() => {
   function isPerSide(set, opts) {
     return set.perSide !== void 0 ? set.perSide === true : opts.perSide === true;
   }
+  function sidesOf(set) {
+    const sides = set && set.sides;
+    if (!sides || !sides.left || !sides.right) return null;
+    const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+    return {
+      left: { w: num2(sides.left.w), r: num2(sides.left.r) },
+      right: { w: num2(sides.right.w), r: num2(sides.right.r) }
+    };
+  }
   function isWorkingSet(set) {
     return !!set && set.fail !== true && set.warmup !== true;
   }
@@ -541,11 +555,18 @@ var TrainEngine = (() => {
     return workingSets(entry).filter((set) => !isAmrapSet(set));
   }
   function setWeight(entry, set) {
+    const limbs = sidesOf(set);
+    if (limbs) return Math.min(limbs.left.w, limbs.right.w);
     return typeof set.w === "number" ? set.w : entry.kg || 0;
   }
   function workingVolume(entry, opts = {}) {
     const totals = emptyVolume();
     for (const set of workingSets(entry)) {
+      const limbs = sidesOf(set);
+      if (limbs) {
+        totals.load += limbs.left.w * limbs.left.r + limbs.right.w * limbs.right.r;
+        continue;
+      }
       const sides = isPerSide(set, opts) ? 2 : 1;
       const reps = (set.r || 0) * sides;
       const bw = typeof opts.bodyweightLb === "number" && opts.bodyweightLb > 0 ? opts.bodyweightLb : null;
@@ -648,6 +669,53 @@ var TrainEngine = (() => {
     const values = workingSets(entry).map((set) => set.rpe).filter((v) => typeof v === "number" && Number.isFinite(v));
     if (!values.length) return null;
     return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  // lib/train/asymmetry.ts
+  var MIN_LOAD_GAP = 0.12;
+  var MIN_ASYMMETRY_SESSIONS = 4;
+  var PERSISTENCE = 0.7;
+  var mean = (v) => v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+  function sideGapOf(entry) {
+    if (!entry || entry.off) return null;
+    const pairs = (entry.sets || []).filter(isWorkingSet).map(sidesOf).filter((s) => s != null);
+    if (!pairs.length) return null;
+    const left = mean(pairs.map((p) => p.left.w));
+    const right = mean(pairs.map((p) => p.right.w));
+    const leftReps = mean(pairs.map((p) => p.left.r));
+    const rightReps = mean(pairs.map((p) => p.right.r));
+    const weaker = Math.min(left, right);
+    const loadGap = weaker > 0 ? Math.abs(left - right) / weaker : 0;
+    return {
+      left: Math.round(left * 10) / 10,
+      right: Math.round(right * 10) / 10,
+      stronger: left === right ? "even" : left > right ? "left" : "right",
+      loadGap: Math.round(loadGap * 1e3) / 1e3,
+      repGap: Math.round(Math.abs(leftReps - rightReps) * 10) / 10
+    };
+  }
+  function asymmetryFor(history) {
+    const gaps = (history || []).map(sideGapOf).filter((g) => g != null);
+    if (gaps.length < MIN_ASYMMETRY_SESSIONS) return null;
+    const sides = ["left", "right"];
+    for (const side of sides) {
+      const showing = gaps.filter((g) => g.stronger === side && g.loadGap >= MIN_LOAD_GAP);
+      if (showing.length < Math.ceil(gaps.length * PERSISTENCE)) continue;
+      const left = Math.round(mean(gaps.map((g) => g.left)) * 10) / 10;
+      const right = Math.round(mean(gaps.map((g) => g.right)) * 10) / 10;
+      const loadGap = Math.round(mean(showing.map((g) => g.loadGap)) * 1e3) / 1e3;
+      return {
+        stronger: side,
+        left,
+        right,
+        loadGap,
+        sessions: gaps.length,
+        /* Both numbers, the word "difference", and no verdict. It is not
+           this file's business whether that difference matters. */
+        text: `Across ${gaps.length} sessions logged per side, your left has averaged ${left} and your right ${right} \u2014 a difference of ${Math.round(loadGap * 100)}%.`
+      };
+    }
+    return null;
   }
 
   // lib/train/timing.ts
@@ -1438,7 +1506,7 @@ var TrainEngine = (() => {
     const weeks = w.days / 7;
     return weeks > 0 ? value / weeks : value;
   }
-  var mean = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  var mean2 = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
   var round3 = (n, places = 1) => {
     const f = 10 ** places;
     return Math.round(n * f) / f;
@@ -1494,17 +1562,17 @@ var TrainEngine = (() => {
           }
         }
         if (!best.size) return NOTHING;
-        return { value: round3(mean([...best.values()])), samples: found.length, estimated: false };
+        return { value: round3(mean2([...best.values()])), samples: found.length, estimated: false };
       }
       case "median_rest": {
         const values = entriesIn(ctx, w).map(({ entry }) => medianRest(entry)).filter((v) => v != null);
         if (!values.length) return NOTHING;
-        return { value: round3(mean(values)), samples: values.length, estimated: false };
+        return { value: round3(mean2(values)), samples: values.length, estimated: false };
       }
       case "rpe": {
         const values = entriesIn(ctx, w).map(({ entry }) => workingRpe(entry)).filter((v) => v != null);
         if (!values.length) return NOTHING;
-        return { value: round3(mean(values)), samples: values.length, estimated: false };
+        return { value: round3(mean2(values)), samples: values.length, estimated: false };
       }
       case "amrap": {
         const values = [];
@@ -1513,12 +1581,12 @@ var TrainEngine = (() => {
           if (set && typeof set.r === "number") values.push(set.r);
         }
         if (!values.length) return NOTHING;
-        return { value: round3(mean(values)), samples: values.length, estimated: false };
+        return { value: round3(mean2(values)), samples: values.length, estimated: false };
       }
       case "bodyweight": {
         const values = (ctx.bodyweight || []).filter((b) => b && inWindow(b.date, w) && typeof b.lb === "number").map((b) => b.lb);
         if (!values.length) return NOTHING;
-        return { value: round3(mean(values)), samples: values.length, estimated: false };
+        return { value: round3(mean2(values)), samples: values.length, estimated: false };
       }
       case "other_load": {
         const rows = (ctx.otherTraining || []).filter((e) => e && inWindow(e.date, w));
@@ -1535,7 +1603,7 @@ var TrainEngine = (() => {
         const pick = (v) => metric === "recovery" ? v.recovery : v.sleepHours;
         const values = (ctx.vitals || []).filter((v) => v && inWindow(v.date, w)).map(pick).filter((n) => typeof n === "number" && Number.isFinite(n));
         if (!values.length) return NOTHING;
-        return { value: round3(mean(values), 2), samples: values.length, estimated: false };
+        return { value: round3(mean2(values), 2), samples: values.length, estimated: false };
       }
       case "relative_strength": {
         const e1 = readMetric("e1rm", ctx, w);
@@ -2592,14 +2660,14 @@ var TrainEngine = (() => {
   var RPE_RISE = 1;
   function readCause(window) {
     const values = window.map(workingRpe).filter((v) => v != null);
-    const mean2 = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+    const mean3 = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
     const trend = amrapTrend(window);
     if (trend && trend.falling) {
-      return { cause: "fatigue", rpe: mean2, amrapFalling: true, restCompressing: false };
+      return { cause: "fatigue", rpe: mean3, amrapFalling: true, restCompressing: false };
     }
     const rest = restTrend(window);
     if (rest && rest.compressing) {
-      return { cause: "rest_compression", rpe: mean2, amrapFalling: false, restCompressing: true };
+      return { cause: "rest_compression", rpe: mean3, amrapFalling: false, restCompressing: true };
     }
     if (values.length < 2) {
       return {
@@ -2610,10 +2678,10 @@ var TrainEngine = (() => {
       };
     }
     const rising = values[values.length - 1] - values[0] >= RPE_RISE;
-    if (rising || mean2 >= HIGH_RPE) {
-      return { cause: "fatigue", rpe: mean2, amrapFalling: false, restCompressing: false };
+    if (rising || mean3 >= HIGH_RPE) {
+      return { cause: "fatigue", rpe: mean3, amrapFalling: false, restCompressing: false };
     }
-    return { cause: "programming", rpe: mean2, amrapFalling: false, restCompressing: false };
+    return { cause: "programming", rpe: mean3, amrapFalling: false, restCompressing: false };
   }
   function detectPlateau(history, opts = {}) {
     const usable = (history || []).filter(
@@ -5294,6 +5362,8 @@ async function buildInsightContext(session){
     const misses=e.log.filter(s=>s&&s.fail).length;
     const pr=exHasPR(e)?' (PR today)':'';
     const plateau=plateauFor(e);
+    const gap=TrainEngine.asymmetryFor(histFor(e));
+    if(gap) lines.push('SIDES ('+e.name+'): '+gap.text);
     if(plateau){
       plateaus.push({ e, plateau });
       /* What this stall actually calls for. Rest compression ends in
@@ -5946,6 +6016,15 @@ function pillInputsFor(e, kind, pre, bumped){
   const plates = loadingFor(e)==='barbell'
     ? TrainEngine.plateBreakdown(pre.weight, plateConfig()) : null;
   const hint = plates ? (plates.length ? ' — '+plates.join(' + ')+' per side' : ' — empty bar') : '';
+  if(pre.sides){
+    /* Four fields instead of two. Prefilled from the last logged values
+       for each side, so a lifter who is consistently uneven does not
+       retype the difference every set. */
+    return '<span class="pillSide">L</span>'
+      + num('lw',pre.sides.left.w,'Left weight','decimal') + times + num('lrp',pre.sides.left.r,'Left reps')
+      + '<span class="pillSide">R</span>'
+      + num('rw',pre.sides.right.w,'Right weight','decimal') + times + num('rrp',pre.sides.right.r,'Right reps');
+  }
   return num('w'+(bumped?' bump':''),pre.weight,'Weight'+hint,'decimal')
     + unit(flagFor(e,'assisted')?'lb help':STATE.unit) + times + num('r',pre.reps,'Reps');
 }
@@ -5979,6 +6058,23 @@ function lastSessionText(e){
   return 'Last time ('+when+'): '+shown.join(', ');
 }
 
+/**
+ * The four numbers a per-limb row starts with, or null.
+ *
+ * Null keeps the ordinary two-field row, which is every set ever logged
+ * before this existed and most of them after.
+ */
+function sidesPrefillFor(e, idx, logged, prefillKg, prefillR){
+  if(logged && logged.sides) return logged.sides;
+  if(!sidesArmed[e.id+':'+idx]) return null;
+  /* Prefill each side from the last time that side was logged, so a
+     lifter who is consistently uneven is not retyping the gap. */
+  const last=(histFor(e).filter(x=>!x.off).slice(-1)[0]||null);
+  const prior=last ? (last.sets||[]).map(s=>s.sides).filter(Boolean).slice(-1)[0] : null;
+  if(prior) return prior;
+  return { left:{ w:prefillKg, r:prefillR }, right:{ w:prefillKg, r:prefillR } };
+}
+
 function renderPill(e, rx, idx){
   const kind=classifySet(e, idx); const s=e.log[idx]; const logged=kind!=='empty';
   const suggestion = logged ? null : suggestionFor(e, rx);
@@ -6009,6 +6105,7 @@ function renderPill(e, rx, idx){
         weight:prefillKg, reps:prefillR,
         seconds:(s&&s.s!=null)?s.s:(suggestion&&suggestion.seconds!=null?suggestion.seconds:0),
         metres:(s&&s.m!=null)?s.m:(suggestion&&suggestion.metres!=null?suggestion.metres:0),
+        sides: sidesPrefillFor(e, idx, s, prefillKg, prefillR),
       }, bumped)+'</span>'
     + '<span class="pillSpacer"></span>'
     + '<div class="pillActions">'
@@ -6018,6 +6115,11 @@ function renderPill(e, rx, idx){
     /* AMRAP, on the last set only — it is the set taken to failure, and
        offering it on set one would invite flagging a set nobody took to
        failure, which is worse than not offering it. Never required. */
+    /* L/R, on a unilateral weighted lift. The gap between limbs is only
+       meaningful where each limb is loaded separately. */
+    +   (flagFor(e,'perSide') && setK === 'reps_weight'
+          ? '<button class="pillWarm'+((s&&s.sides)||(!s&&sidesArmed[e.id+':'+idx])?' on':'')+'" data-act="sides" aria-pressed="'+((s&&s.sides)||(!s&&sidesArmed[e.id+':'+idx])?'true':'false')+'" title="Log each side separately. Optional \u2014 one number means both sides the same.">L/R</button>'
+          : '')
     +   (idx === e.log.length - 1 && (setK === 'reps_weight' || setK === 'reps_only' || setK === 'bodyweight' || setK === 'weighted_bodyweight')
           ? '<button class="pillWarm'+(((s&&s.amrap)||(!s&&amrapArmed[e.id+':'+idx]))?' on':'')+'" data-act="amrap" aria-pressed="'+(((s&&s.amrap)||(!s&&amrapArmed[e.id+':'+idx]))?'true':'false')+'" title="AMRAP — taken to failure. Counts for volume and records, never for the rep range.">A</button>'
           : '')
@@ -6035,6 +6137,18 @@ function renderPill(e, rx, idx){
   const commit=()=>{
     const values={ kind:setK, perSide:flagFor(e,'perSide')||undefined, assisted:flagFor(e,'assisted')||undefined };
     if(amrapArmed[e.id+':'+idx]) values.amrap=true;
+    /* When armed, the row carries four numbers instead of two, and
+       `perSide` is dropped: a per-limb set already holds both sides and
+       must not also be doubled. */
+    if(sidesArmed[e.id+':'+idx] || (e.log[idx] && e.log[idx].sides)){
+      const lw=readNum(row.querySelector('.lw')), lr=readNum(row.querySelector('.lrp'));
+      const rw=readNum(row.querySelector('.rw')), rr=readNum(row.querySelector('.rrp'));
+      if([lw,lr,rw,rr].every(n=>Number.isFinite(n) && n>=0)){
+        values.sides={ left:{ w:lw, r:Math.round(lr) }, right:{ w:rw, r:Math.round(rr) } };
+        delete values.perSide;
+        values.kg=Math.min(lw,rw); values.reps=Math.round(Math.min(lr,rr));
+      }
+    }
     /* Flagged at the moment it is logged, because the row came from a
        generated ramp — not because anybody remembered to press W. */
     if(rampAt(e, idx)) values.warmup=true;
@@ -6047,6 +6161,15 @@ function renderPill(e, rx, idx){
       const met=readNum(row.querySelector('.met'));
       if(!Number.isFinite(met)||met<0) return;
       values.m=met;
+    }
+    /* A per-limb row has four fields and no plain `.w`/`.r`, so the
+       reads below would find nothing and bail before anything is logged.
+       The four numbers have already produced values.kg and values.reps
+       from the weaker side. */
+    if(setK==='reps_weight' && values.sides){
+      if(values.reps===0){ doLog(e, idx, values, true); return; }
+      doLog(e, idx, values, false);
+      return;
     }
     if(setK==='reps_weight' || setK==='reps_only'){
       const reps=Math.round(readNum(row.querySelector('.r')));
@@ -6076,8 +6199,15 @@ function renderPill(e, rx, idx){
   const dropBtn=row.querySelector('.pillDrop'); if(dropBtn) dropBtn.addEventListener('click',ev=>{ stop(ev); addDrop(e, idx); });
   const rpeBtn=row.querySelector('[data-act="rpe"]');
   if(rpeBtn) rpeBtn.addEventListener('click',ev=>{ stop(ev); openRpe(e, idx); });
-  /* Flagged BEFORE the set is logged, so commit() carries it — the same
-     shape as the warm-up flag, and the same one tap on the row. */
+  /* Per-limb entry, armed per row. Optional forever: an unarmed row logs
+     one number meaning "both sides, the same", exactly as it always has. */
+  const sidesBtn=row.querySelector('[data-act="sides"]');
+  if(sidesBtn) sidesBtn.addEventListener('click',ev=>{
+    stop(ev);
+    const key=e.id+':'+idx;
+    sidesArmed[key]=!sidesArmed[key];
+    render();
+  });
   const amrapBtn=row.querySelector('[data-act="amrap"]');
   if(amrapBtn) amrapBtn.addEventListener('click',ev=>{
     stop(ev);
@@ -6184,12 +6314,16 @@ function IC_reset(){ return '<svg viewBox="0 0 24 24" stroke-width="1.5" stroke-
    and reloading into "you said this set was to failure" about a set that
    never happened would be the app remembering something that did not. */
 const amrapArmed = {};
+/* Rows armed for per-limb entry. Session-scoped and not persisted, like
+   the AMRAP arming: an intention about a set that has not happened is
+   not a record of anything. */
+const sidesArmed = {};
 
 function doLog(e, idx, values, fail){
   const _sess=curSession(); if(!_sess.startedAt) _sess.startedAt=Date.now();
   const wasComplete = exComplete(e);
   const entry={};
-  ['kind','kg','reps','s','m','perSide','assisted','amrap','warmup'].forEach(k=>{ if(values[k]!==undefined) entry[k]=values[k]; });
+  ['kind','kg','reps','s','m','perSide','assisted','amrap','warmup','sides'].forEach(k=>{ if(values[k]!==undefined) entry[k]=values[k]; });
   /* When this set happened. Observed, not inferred — which is what lets
      the timing reads trust it. Capture is cheap now and impossible
      later: a year of history logged without it cannot be recovered. */
@@ -6304,6 +6438,7 @@ function rollupFor(e, date){
       if(s.perSide) row.perSide=true;
       if(s.assisted) row.assisted=true;
       if(s.amrap) row.amrap=true;
+      if(s.sides) row.sides=s.sides;
       if(s.at!=null) row.at=s.at;
       /* Only ever set by the importer and by migrations. A row that
          carries it is refused by every timing read. */

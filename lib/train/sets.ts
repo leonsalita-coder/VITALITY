@@ -72,6 +72,16 @@ export interface HistorySet {
    * these, so a median rest is never part measurement and part fiction.
    */
   atEstimated?: boolean
+  /**
+   * Each limb, logged independently.
+   *
+   * Optional forever. A set with a single `w`/`r` still means "both
+   * sides, the same", exactly as it always has — this is a different
+   * thing from `perSide`, which means "this ONE number is one side's
+   * work" and is doubled for volume. A set carrying `sides` already
+   * holds both limbs, so it is counted once each and never doubled.
+   */
+  sides?: { left?: { w?: number; r?: number }; right?: { w?: number; r?: number } }
   /** Absent means reps_weight. */
   kind?: SetKind
   /**
@@ -160,8 +170,38 @@ export function entryKind(entry: HistoryEntry): SetKind {
 }
 
 /** Whether this set counts its work twice. The set wins over the exercise. */
+/**
+ * Is this single number one side's work?
+ *
+ * Deliberately says nothing about per-limb sets: workingVolume handles
+ * those before it reaches here, so a `sidesOf` check in this function
+ * would be unreachable — and an unreachable guard against the very
+ * collision that matters most is worse than none, because it reads like
+ * protection. The protection is the early return in workingVolume, and
+ * that is what the tests hold.
+ */
 function isPerSide(set: HistorySet, opts: VolumeOptions): boolean {
   return set.perSide !== undefined ? set.perSide === true : opts.perSide === true
+}
+
+/**
+ * Both limbs of a per-limb set, or null.
+ *
+ * Null is the common case and the cheap one: almost every set ever
+ * logged is a single number, and everything downstream keeps its
+ * pre-per-limb behaviour on null.
+ */
+export function sidesOf(set: HistorySet | null | undefined): {
+  left: { w: number; r: number }
+  right: { w: number; r: number }
+} | null {
+  const sides = set && set.sides
+  if (!sides || !sides.left || !sides.right) return null
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  return {
+    left: { w: num(sides.left.w), r: num(sides.left.r) },
+    right: { w: num(sides.right.w), r: num(sides.right.r) },
+  }
 }
 
 /** Logged, not missed, not a warm-up. */
@@ -210,6 +250,11 @@ export function rangeSets(entry: HistoryEntry): HistorySet[] {
  * best available answer for them.
  */
 export function setWeight(entry: HistoryEntry, set: HistorySet): number {
+  /* For a per-limb set the WEAKER side is the working weight: you have
+     progressed on a unilateral lift when both limbs can do it, and
+     reading the stronger one prescribes a weight the other cannot lift. */
+  const limbs = sidesOf(set)
+  if (limbs) return Math.min(limbs.left.w, limbs.right.w)
   return typeof set.w === 'number' ? set.w : entry.kg || 0
 }
 
@@ -224,6 +269,14 @@ export function setWeight(entry: HistoryEntry, set: HistorySet): number {
 export function workingVolume(entry: HistoryEntry, opts: VolumeOptions = {}): VolumeTotals {
   const totals = emptyVolume()
   for (const set of workingSets(entry)) {
+    /* A per-limb set is the sum of two limbs, counted once each — not a
+       single number doubled. Handled before the switch because it is a
+       statement about the SET, not about the kind. */
+    const limbs = sidesOf(set)
+    if (limbs) {
+      totals.load += limbs.left.w * limbs.left.r + limbs.right.w * limbs.right.r
+      continue
+    }
     const sides = isPerSide(set, opts) ? 2 : 1
     const reps = (set.r || 0) * sides
     const bw = typeof opts.bodyweightLb === 'number' && opts.bodyweightLb > 0 ? opts.bodyweightLb : null

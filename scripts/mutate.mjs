@@ -384,7 +384,10 @@ function modeFuzz(opts) {
  * same test proving there was something to be empty about.
  */
 const ABSENCE = /expect\(([^;]*?)\)\s*\.(?:toEqual\(\[\]\)|toBeNull\(\)|toHaveLength\(0\))/g
-const CONTROL = /toBeGreaterThan|toBeTruthy|not\.toBeNull|toBe\(true\)|toContain|toMatch|not\.toEqual|toBeDefined/
+/* `toBeCloseTo` counts only when the expected value is NOT zero:
+   toBeCloseTo(0.05) proves the fixture produced something, while
+   toBeCloseTo(0) is another way of asserting absence. */
+const CONTROL = /toBeGreaterThan|toBeTruthy|not\.toBeNull|toBe\(true\)|toContain|toMatch|not\.toEqual|toBeDefined|toBeCloseTo\((?!0[,)\s])/
 
 /**
  * Only absence assertions made against a BUILT FIXTURE.

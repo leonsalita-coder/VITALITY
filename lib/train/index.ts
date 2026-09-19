@@ -1,3 +1,4 @@
+export * from './asymmetry'
 export * from './trim'
 export * from './weekly'
 export * from './windows'
