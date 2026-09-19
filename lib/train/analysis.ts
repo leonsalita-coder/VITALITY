@@ -20,6 +20,7 @@ import { distribute, muscleSplitFrom, PULL_MUSCLES, PUSH_MUSCLES, type Muscle, t
 import { workingSets, type HistoryEntry } from './sets'
 import { weeklySetBand } from './targets'
 import type { TrainingAge } from './onboarding'
+import { deltaOf, inWindow, rollingWindow } from './windows'
 
 /** Days without training a muscle before that is worth mentioning. */
 export const GAP_DAYS = 14
@@ -85,15 +86,21 @@ export interface History {
   [exerciseId: string]: HistoryEntry[]
 }
 
-interface Attribution {
+export interface Attribution {
   muscle: Muscle
   sets: number
   date: string
   estimated: boolean
 }
 
-/** Every muscle-set the record contains, one row per muscle per session. */
-function attribute(history: History, index: ExerciseIndex): Attribution[] {
+/**
+ * Every muscle-set the record contains, one row per muscle per session.
+ *
+ * Exported because the weekly change analysis reads the same attribution
+ * rather than computing its own — a second implementation of "which
+ * muscle did this set belong to" is how two screens come to disagree.
+ */
+export function attribute(history: History, index: ExerciseIndex): Attribution[] {
   const rows: Attribution[] = []
   for (const id of Object.keys(history || {})) {
     const split = index[id]
@@ -313,14 +320,18 @@ export function ratios(history: History, index: ExerciseIndex, now: number, days
  */
 export function volumeRamp(history: History, index: ExerciseIndex, now: number): Finding[] {
   const rows = attribute(history, index)
+  /* The same rolling window every other week-over-week read uses. This
+     used to bucket by `daysAgo <= 6` and `<= 13` with its own arithmetic,
+     which is how two screens end up disagreeing about what week it is. */
+  const week = rollingWindow(now)
+  const before = rollingWindow(now, 7)
   const thisWeek = new Map<Muscle, number>()
   const lastWeek = new Map<Muscle, number>()
   let estimated = false
 
   for (const row of rows) {
-    const age = daysAgo(row.date, now)
-    if (age < 0) continue
-    const bucket = age <= 6 ? thisWeek : age <= 13 ? lastWeek : null
+    const bucket = inWindow(row.date, week) ? thisWeek
+      : inWindow(row.date, before) ? lastWeek : null
     if (!bucket) continue
     bucket.set(row.muscle, (bucket.get(row.muscle) || 0) + row.sets)
     estimated = estimated || row.estimated
@@ -331,8 +342,8 @@ export function volumeRamp(history: History, index: ExerciseIndex, now: number):
   for (const [muscle, current] of thisWeek) {
     const previous = lastWeek.get(muscle) || 0
     if (previous < MIN_BASE) continue
-    const jump = current / previous
-    if (jump < RAMP_LIMIT) continue
+    const jump = deltaOf(current, previous).ratio
+    if (jump == null || jump < RAMP_LIMIT) continue
     findings.push({
       kind: 'volume_ramp',
       muscle,

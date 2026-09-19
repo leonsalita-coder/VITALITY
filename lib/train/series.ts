@@ -14,6 +14,7 @@ import { WEEKLY_SET_BAND, type ExerciseIndex, type History } from './analysis'
 import { distribute, type Muscle } from './muscles'
 import { epley1RM } from './records'
 import { setWeight, workingSets, type HistoryEntry } from './sets'
+import { deltaOf, rollingWindow } from './windows'
 
 const DAY_MS = 86_400_000
 
@@ -141,15 +142,9 @@ export function periodComparison(
   weeks = 8,
 ): PeriodComparison {
   const span = weeks * 7
-  const shift = (days: number) => {
-    const d = new Date(now)
-    d.setDate(d.getDate() - days)
-    return dateKey(d.getTime())
-  }
-  const windows = [
-    { from: shift(span - 1), to: shift(0) },
-    { from: shift(span * 2 - 1), to: shift(span) },
-  ]
+  /* rollingWindow is the one definition of "the last N days" in this
+     engine; this function used to shift dates itself. */
+  const windows = [rollingWindow(now, 0, span), rollingWindow(now, span, span)]
 
   const measure = (from: string, to: string) => {
     let sets = 0
@@ -169,7 +164,10 @@ export function periodComparison(
 
   const current = measure(windows[0].from, windows[0].to)
   const previous = measure(windows[1].from, windows[1].to)
-  const ratio = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) / 100 : null)
+  /* deltaOf owns the "no baseline to divide by" case, so a first block
+     of training reports null rather than a confident zero. */
+  const ratio = (a: number, b: number) =>
+    b > 0 ? Math.round((deltaOf(a, b).ratio as number) * 100) / 100 : null
 
   return {
     current,
