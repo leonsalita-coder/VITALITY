@@ -3822,7 +3822,6 @@ var TrainEngine = (() => {
     return [exercise.reps, exercise.reps];
   }
   function findLayoff(sessions, now) {
-    if (!sessions.length) return null;
     const last = sessions[sessions.length - 1];
     const trailing = daysSince(last.date, now);
     if (trailing >= LAYOFF_DAYS) {
@@ -3837,7 +3836,6 @@ var TrainEngine = (() => {
     return null;
   }
   function rampWeights(prior, days, exercise) {
-    if (prior <= 0) return [0];
     const dropped = snapWeight(prior * layoffFactor(days), exercise, prior);
     const mid = snapWeight(dropped + (prior - dropped) / 2, exercise, prior);
     const target = tidy2(prior);

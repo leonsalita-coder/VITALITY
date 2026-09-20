@@ -239,7 +239,10 @@ interface LayoffState {
 
 /** The most recent break long enough to matter, if there is one. */
 function findLayoff(sessions: HistoryEntry[], now: number): LayoffState | null {
-  if (!sessions.length) return null
+  /* No empty-list guard. suggestLoad returns on `!last` before this is
+     reached, and `last` is null exactly when the list is empty — so the
+     check could never fire, and removing it changed nothing any test
+     could see. */
   const last = sessions[sessions.length - 1]
   const trailing = daysSince(last.date, now)
   if (trailing >= LAYOFF_DAYS) {
@@ -260,7 +263,12 @@ function findLayoff(sessions: HistoryEntry[], now: number): LayoffState | null {
  * returning lifter misses on their second session and stops coming.
  */
 function rampWeights(prior: number, days: number, exercise: ProgressionExercise): number[] {
-  if (prior <= 0) return [0]
+  /* No zero guard. snapWeight already refuses a non-positive weight and
+     returns 0, so a bodyweight lift produces [0, 0, 0, 0], which the
+     dedupe and the collapse below reduce to exactly the [0] this used to
+     return early. Masked by a guard that fires first; the one kept is the
+     one that also stops snapToLoadable rounding a push-up up to an empty
+     bar. */
   const dropped = snapWeight(prior * layoffFactor(days), exercise, prior)
   const mid = snapWeight(dropped + (prior - dropped) / 2, exercise, prior)
   const target = tidy(prior)
@@ -594,6 +602,10 @@ function suggestNonLoad(
     return put(current, 'miss', `holding at ${current}${unit} — missed the last set`)
   }
   const previous = real.length > 1 ? read(real[real.length - 2]) : 0
+  /* `> 0` and `>= 0` are equivalent here: previous is 0 only when there
+     is no earlier session, and `current < 0` is unreachable for a count
+     of reps, seconds or metres. Mutation testing reports that flip as a
+     permanent survivor — an equivalent mutation, not a gap. */
   if (previous > 0 && current < previous) {
     return put(current, 'miss', `holding at ${current}${unit} — down from ${previous}${unit} last time`)
   }
