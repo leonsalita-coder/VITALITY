@@ -34,13 +34,24 @@ describe('values outside the token block', () => {
     expect(BASELINE).toBeGreaterThanOrEqual(0)
   })
 
-  it('carries no hardcoded hex colour in the stylesheet', () => {
-    /* Already true, and the reason this is an absolute rather than a
-       ratchet: the surviving CSS is disciplined about colour. It is the
-       line worth defending before the port adds nine components' worth
-       of palettes. */
+  it('counts every hardcoded hex colour in the stylesheet', () => {
+    /* This was an absolute — "no hex, ever" — written when the surviving
+       CSS had none. That was a conclusion from a partial sample: the
+       rules it measured were the handful re-added after the August
+       deletion, not the stylesheet as it actually shipped. Recovering the
+       nine primitives brought back three real hex values, so the absolute
+       was wrong rather than violated.
+   
+       It is a ratchet now, and the three are named here so they cannot be
+       quietly joined by more:
+         #f4a09c  .pbtn.danger and .menuPop button.danger — a lightened
+                  --fail with no token of its own
+         #f2f2f0  .bouncyThumb — byte-identical to --text
+       Tokenising them is a colour decision and belongs with the rest of
+       the reconciled set. */
     const { rules } = splitCss(readFileSync(TILE, 'utf8'))
-    expect(rules.match(/#[0-9a-fA-F]{3,8}\b/g)).toBeNull()
+    const hits = [...new Set(rules.match(/#[0-9a-fA-F]{3,8}\b/g) || [])].sort()
+    expect(hits).toEqual(['#f2f2f0', '#f4a09c'])
   })
 
   it('carries no hardcoded hex colour in an inline style attribute', () => {
