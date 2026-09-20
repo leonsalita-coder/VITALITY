@@ -22,7 +22,8 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "build:contact": "node scripts/build-contact-sheet.mjs",
     "style:lint": "node scripts/style-lint.mjs",
-    "measure:targets": "node scripts/measure-targets.mjs"
+    "measure:targets": "node scripts/measure-targets.mjs",
+    "build:markup": "node scripts/build-markup-reference.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.26.0",
