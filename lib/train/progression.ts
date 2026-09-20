@@ -325,7 +325,9 @@ function suggestLoad(
       weight,
       reps: minReps,
       basis: 'deload',
-      reason: `holding at ${describeWeight(weight)} — deload, ${exercise.deload.sessions + 1} of ${DELOAD_HOLD}`,
+      /* `sessions` absent means the record does not say how far in it
+         is, and a record that does not say is at the start. */
+      reason: `holding at ${describeWeight(weight)} — deload, ${(exercise.deload.sessions ?? 0) + 1} of ${DELOAD_HOLD}`,
     }
   }
 

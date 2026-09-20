@@ -93,17 +93,23 @@ describe('it captured real states, not empty shells', () => {
     for (const s of surfaces()) expect(s.html, s.title).not.toContain('NaN')
   })
 
-  it('names the one surface that genuinely renders undefined', () => {
-    /* A REAL BUG, captured rather than papered over. SET_KINDS has seven
-       kinds; the tile's KIND_LABELS and KIND_UNITS cover five. The Tune
-       dialog's "How this is measured" list therefore renders two rows
-       reading "undefined / undefined" — bodyweight and
-       weighted_bodyweight — three taps from the session.
-
-       Listed by name so it cannot be forgotten and so a SECOND surface
-       developing the same fault fails this test rather than blending in. */
+  it('renders undefined nowhere', () => {
+    /* This briefly named one surface as a known defect: SET_KINDS had
+       seven kinds and the tile's KIND_LABELS and KIND_UNITS covered five,
+       so the Tune dialog's "How this is measured" list rendered two rows
+       reading "undefined / undefined". Both maps now cover every kind and
+       tests/train/kind-labels.test.ts walks SET_KINDS against them, so
+       the next kind added fails there rather than here. */
     const broken = surfaces().filter((s) => s.html.includes('undefined')).map((s) => s.title)
-    expect(broken).toEqual(['Dialog — Tune'])
+    expect(broken).toEqual([])
+  })
+
+  it('shows the kinds that were missing', () => {
+    /* The control. An empty list above proves nothing if the dialog
+       stopped rendering the list at all. */
+    const tune = surfaces().find((s) => s.title === 'Dialog — Tune')!.html
+    expect(tune).toContain('Weighted bodyweight')
+    expect(tune).toContain('lb added')
   })
 })
 

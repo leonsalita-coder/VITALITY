@@ -350,6 +350,39 @@ export interface DeloadPlan {
 const VOLUME_CUT = 2 / 3
 const REAPPROACH = 0.95
 
+/**
+ * The prior weight, if the record actually carries one.
+ *
+ * Stored records are read, never rewritten, and a record written by an
+ * older version of this engine is exactly what a migration eventually
+ * hands over. This used to be read straight, so a record without it
+ * multiplied undefined by a cut factor and put "holding NaN lb" on the
+ * card — worse than wrong, because it looks like the engine is broken.
+ */
+const priorOf = (record: DeloadRecord): number | null =>
+  Number.isFinite(record.priorWeight) ? record.priorWeight : null
+
+/**
+ * Whether this record can be described without inventing a number.
+ *
+ * Not every state needs a weight to be honest about itself. A volume
+ * deload says "same weight, fewer sets" and a flagged lift says "stalled,
+ * watching one more session" — neither names a figure, so neither is
+ * damaged by a missing one. An intensity deload and a reapproach both
+ * name a weight, and without one there is no sentence to write.
+ *
+ * Callers use this to stay SILENT rather than render a partial tag. Half
+ * a sentence about somebody's training is worth less than none.
+ */
+export function deloadDescribable(record: DeloadRecord | null | undefined): boolean {
+  if (!record) return false
+  if (record.state === 'flagged') return true
+  if (record.state === 'reapproach') return priorOf(record) != null
+  if (record.state !== 'deloading') return false
+  if (record.kind === 'volume') return true
+  return priorOf(record) != null
+}
+
 /** What the current state actually prescribes. */
 export function deloadPlan(
   record: DeloadRecord | null,
@@ -357,19 +390,23 @@ export function deloadPlan(
 ): DeloadPlan {
   if (!record) return { weight: null, setsFactor: 1 }
   const round = (n: number) => Math.round(n * 100) / 100
+  const prior = priorOf(record)
 
   if (record.state === 'reapproach') {
-    return { weight: round(record.priorWeight * REAPPROACH), setsFactor: 1 }
+    return { weight: prior == null ? null : round(prior * REAPPROACH), setsFactor: 1 }
   }
   if (record.state !== 'deloading') return { weight: null, setsFactor: 1 }
 
   if (record.kind === 'volume') {
     // same load, less of it — the lifter can move this weight, they just
-    // cannot currently absorb this much of it
-    return { weight: round(record.priorWeight), setsFactor: VOLUME_CUT }
+    // cannot currently absorb this much of it. The set cut survives a
+    // missing weight because it never depended on one.
+    return { weight: prior == null ? null : round(prior), setsFactor: VOLUME_CUT }
   }
   return {
-    weight: round(record.priorWeight * deloadCut(trainingAge, record.confidence)),
+    /* `confidence` absent takes the INFERRED cut, which is the gentler
+       one: no recovery data is no evidence for a hard reduction. */
+    weight: prior == null ? null : round(prior * deloadCut(trainingAge, record.confidence ?? 'inferred')),
     setsFactor: 1,
   }
 }

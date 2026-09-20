@@ -204,6 +204,49 @@ describe('test bodies are split so a control can be found in the right one', () 
  * the JS callback never gets a turn. Recovery on the NEXT run is the
  * thing that works, and it works for SIGKILL too.
  */
+describe('a short run is only suspicious when nothing failed', () => {
+  /**
+   * The guard that catches "fewer tests resolved than the baseline" was
+   * checked before the failure count, so a mutation lethal enough to
+   * abort whole test files — taking the total down with it — was scored
+   * as a broken tool rather than as the emphatic kill it is.
+   *
+   * It had been doing that on progression.ts for as long as the guard
+   * existed, which means that module was never mutation-tested and the
+   * tool said so every time without anyone reading it as a coverage gap.
+   */
+  const summary = (failedTests: number, passedTests: number, total: number, failedFiles: number, passedFiles: number, fileTotal: number) =>
+    `Test Files  ${failedFiles ? `${failedFiles} failed | ` : ''}${passedFiles} passed (${fileTotal})\n`
+    + `      Tests  ${failedTests ? `${failedTests} failed | ` : ''}${passedTests} passed (${total})\n`
+
+  it('scores a short run WITH failures as a kill', () => {
+    /* The real case: 80 failed, 165 passed, 245 of an expected 261. */
+    const v = verdictFrom(summary(80, 165, 245, 8, 1, 9), { minTests: 261, minFiles: 9 })
+    expect(v.ok).toBe(true)
+    expect(v.failed).toBe(80)
+  })
+
+  it('still refuses a short run where everything passed', () => {
+    /* The case the guard was built for, and it must keep firing: fewer
+       tests, none failing, is indistinguishable from a survivor. */
+    const v = verdictFrom(summary(0, 245, 245, 0, 9, 9), { minTests: 261, minFiles: 9 })
+    expect(v.ok).toBe(false)
+    expect((v as { reason?: string }).reason).toContain('expected at least 261')
+  })
+
+  it('still refuses a run that resolved fewer FILES with nothing failing', () => {
+    const v = verdictFrom(summary(0, 100, 100, 0, 4, 4), { minTests: 50, minFiles: 9 })
+    expect(v.ok).toBe(false)
+    expect((v as { reason?: string }).reason).toContain('files')
+  })
+
+  it('still refuses a run that resolved nothing at all', () => {
+    const v = verdictFrom(summary(0, 0, 0, 0, 0, 0), { minTests: 261, minFiles: 9 })
+    expect(v.ok).toBe(false)
+    expect((v as { reason?: string }).reason).toContain('zero')
+  })
+})
+
 describe('an interrupted run leaves nothing behind', () => {
   const SNAPSHOT = '.mutate-snapshot.json'
   const TARGET = 'lib/train/deload.ts'

@@ -843,6 +843,7 @@ var TrainEngine = (() => {
     defaultPlateConfig: () => defaultPlateConfig,
     defaultRepRange: () => defaultRepRange,
     deloadCut: () => deloadCut,
+    deloadDescribable: () => deloadDescribable,
     deloadPlan: () => deloadPlan,
     deltaOf: () => deltaOf,
     describeOther: () => describeOther,
@@ -3479,18 +3480,30 @@ var TrainEngine = (() => {
   }
   var VOLUME_CUT = 2 / 3;
   var REAPPROACH = 0.95;
+  var priorOf = (record) => Number.isFinite(record.priorWeight) ? record.priorWeight : null;
+  function deloadDescribable(record) {
+    if (!record) return false;
+    if (record.state === "flagged") return true;
+    if (record.state === "reapproach") return priorOf(record) != null;
+    if (record.state !== "deloading") return false;
+    if (record.kind === "volume") return true;
+    return priorOf(record) != null;
+  }
   function deloadPlan(record, trainingAge) {
     if (!record) return { weight: null, setsFactor: 1 };
     const round11 = (n2) => Math.round(n2 * 100) / 100;
+    const prior = priorOf(record);
     if (record.state === "reapproach") {
-      return { weight: round11(record.priorWeight * REAPPROACH), setsFactor: 1 };
+      return { weight: prior == null ? null : round11(prior * REAPPROACH), setsFactor: 1 };
     }
     if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
     if (record.kind === "volume") {
-      return { weight: round11(record.priorWeight), setsFactor: VOLUME_CUT };
+      return { weight: prior == null ? null : round11(prior), setsFactor: VOLUME_CUT };
     }
     return {
-      weight: round11(record.priorWeight * deloadCut(trainingAge, record.confidence)),
+      /* `confidence` absent takes the INFERRED cut, which is the gentler
+         one: no recovery data is no evidence for a hard reduction. */
+      weight: prior == null ? null : round11(prior * deloadCut(trainingAge, record.confidence ?? "inferred")),
       setsFactor: 1
     };
   }
@@ -3746,7 +3759,9 @@ var TrainEngine = (() => {
         weight,
         reps: minReps,
         basis: "deload",
-        reason: `holding at ${describeWeight(weight)} \u2014 deload, ${exercise.deload.sessions + 1} of ${DELOAD_HOLD_SESSIONS}`
+        /* `sessions` absent means the record does not say how far in it
+           is, and a record that does not say is at the start. */
+        reason: `holding at ${describeWeight(weight)} \u2014 deload, ${(exercise.deload.sessions ?? 0) + 1} of ${DELOAD_HOLD_SESSIONS}`
       };
     }
     if (!last) {
@@ -7304,7 +7319,10 @@ function renderCard(e, session){
   /* What the state machine is doing to this lift, in its own words. The
      engine already produced the sentence; the card does not compose one. */
   const dl = STATE.deloadStates && STATE.deloadStates[e.id];
-  const dlTag = dl && dl.state && dl.state!=='normal'
+  /* An incomplete record renders NOTHING, not a partial tag. A stored
+     row from an older engine may lack the weight the sentence names, and
+     half a sentence about somebody's training is worth less than none. */
+  const dlTag = dl && dl.state && dl.state!=='normal' && TrainEngine.deloadDescribable(dl)
     ? '<span class="deloadTag" title="'+escapeHtml(deloadExplain(dl))+'">'+dl.state+'</span>'
     : (e.deload?'<span class="deloadTag">deload</span>':'');
   const meta = metaBits.map(b=>'<span>'+b+'</span>').join('<span class="metaSep">·</span>') + dlTag + (e.group?'<span class="groupTag">superset '+e.group+'</span>':'');
@@ -7698,11 +7716,19 @@ function accuracyNow(){
    the session, so they survive the day rolling over. Absent means
    reps_weight and false — exactly how every existing lift already reads. */
 /* Plain names for the five kinds, and the unit each one logs in. */
+/* Every SET_KIND needs an entry in BOTH maps. Two were missing and the
+   Tune dialog rendered rows reading "undefined / undefined", three taps
+   from a session. A test walks TrainEngine.SET_KINDS against these. */
 const KIND_LABELS = {
   reps_weight:'Weight x reps', reps_only:'Reps only', time:'Time',
   distance:'Distance', time_distance:'Time + distance',
+  bodyweight:'Bodyweight', weighted_bodyweight:'Weighted bodyweight',
 };
-const KIND_UNITS = { time:'s', distance:'m', time_distance:'s / m', reps_only:'reps', reps_weight:'lb' };
+/* The unit says what the number MEANS, not just what it is measured in —
+   the pattern "lb help" already set for assisted lifts. Bodyweight has no
+   load to name, so its slot stays empty rather than showing a zero. */
+const KIND_UNITS = { time:'s', distance:'m', time_distance:'s / m', reps_only:'reps', reps_weight:'lb',
+  bodyweight:'', weighted_bodyweight:'lb added' };
 function kindFor(e){
   const info = STATE.customLib && STATE.customLib[e.id];
   const k = info && info.kind;

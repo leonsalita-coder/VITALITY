@@ -105,10 +105,28 @@ function verdictFrom(stdout, expect = {}) {
   if (result.total === 0) {
     return { ...result, ok: false, reason: 'resolved zero tests' }
   }
-  if (expect.minFiles && result.fileCount < expect.minFiles) {
+  /**
+   * A short run with FAILURES in it is a kill, not a broken tool.
+   *
+   * These two guards exist to catch a run that resolved fewer tests than
+   * the baseline while everything passed — which looks exactly like a
+   * surviving mutation and is the failure that made this tool necessary.
+   * They were checked before the failure count, and so fired on the
+   * opposite case: a mutation lethal enough to abort whole test FILES
+   * takes the total down with it, and the harness called itself broken
+   * instead of scoring the most emphatic kill available.
+   *
+   * It had been doing that on lib/train/progression.ts for as long as the
+   * guard has existed, so that module was never mutation-tested at all —
+   * the tool reported a failure and nobody read it as a gap in coverage.
+   *
+   * A run where tests failed cannot be mistaken for a survivor, so the
+   * count only matters when nothing failed.
+   */
+  if (result.failed === 0 && expect.minFiles && result.fileCount < expect.minFiles) {
     return { ...result, ok: false, reason: `ran ${result.fileCount} files, expected at least ${expect.minFiles}` }
   }
-  if (expect.minTests && result.total < expect.minTests) {
+  if (result.failed === 0 && expect.minTests && result.total < expect.minTests) {
     return { ...result, ok: false, reason: `ran ${result.total} tests, expected at least ${expect.minTests}` }
   }
   return result
