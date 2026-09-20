@@ -1,0 +1,392 @@
+#!/usr/bin/env node
+/**
+ * The contact sheet: every primitive, every state, one page.
+ *
+ * Nine primitives cannot be reviewed by hunting through the app — the
+ * popup shell alone serves twenty dialogs, and half the states (disabled,
+ * failed, warm-up, deload, over-time) need a session in exactly the right
+ * condition to appear at all.
+ *
+ * IT CANNOT DRIFT, which is the only reason it is worth having. The
+ * <style> block is copied VERBATIM from public/tiles/train.html at build
+ * time and a test asserts the copy is byte-identical. A contact sheet
+ * with its own stylesheet is a lie that gets more convincing over time.
+ *
+ * The page adds structural CSS of its own — grid, labels, section rules —
+ * under a `cs-` prefix. A test asserts that block never targets a tile
+ * class, so the sheet can lay itself out without quietly restyling the
+ * thing it is supposed to be showing.
+ *
+ * Pseudo-states are NOT faked. hover, active and focus-visible are shown
+ * by real interactive instances you hover and tab through; there is no
+ * `.is-hover` helper, because a helper would be the contact sheet's own
+ * CSS pretending to be the tile's.
+ *
+ *   node scripts/build-contact-sheet.mjs
+ *
+ * Output: docs/contact-sheet.html — open it in a browser. Not shipped in
+ * the tile, not loaded by it, referenced by nothing at runtime.
+ */
+
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
+
+const TILE = 'public/tiles/train.html'
+const OUT = 'docs/contact-sheet.html'
+
+/** The tile's stylesheet, verbatim. Never edited, never reformatted. */
+export function tileCss(source = readFileSync(TILE, 'utf8')) {
+  const m = /<style[^>]*>([\s\S]*?)<\/style>/.exec(source)
+  if (!m) throw new Error(`no <style> block in ${TILE}`)
+  return m[1]
+}
+
+/** Structural CSS for the sheet itself. Must never name a tile class. */
+const SHEET_CSS = `
+  .cs-page { max-width:1100px; margin:0 auto; padding:32px 20px 120px; }
+  .cs-title { font:600 26px/1.2 var(--sans); color:var(--text); margin:0 0 4px; }
+  .cs-lede { font:400 14px/1.5 var(--sans); color:var(--muted); margin:0 0 8px; max-width:60ch; }
+  .cs-sec { margin:56px 0 0; }
+  .cs-sec > h2 { font:600 13px/1 var(--sans); letter-spacing:.14em; text-transform:uppercase;
+                 color:var(--muted); margin:0 0 6px; padding-bottom:10px; border-bottom:1px solid var(--hair); }
+  .cs-note { font:400 13px/1.5 var(--sans); color:var(--muted); margin:10px 0 18px; max-width:70ch; }
+  .cs-grid { display:grid; gap:18px; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); align-items:start; margin-top:18px; }
+  .cs-cell { display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .cs-lbl { font:500 11px/1 var(--mono); letter-spacing:.06em; color:var(--muted-2); text-transform:uppercase; }
+  .cs-stack { display:flex; flex-direction:column; gap:14px; margin-top:18px; }
+  .cs-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-top:18px; }
+  .cs-swatch { height:54px; border-radius:8px; border:1px solid var(--hair); }
+  .cs-mono { font:400 12px/1.5 var(--mono); color:var(--muted); }
+  .cs-warn { font:400 13px/1.5 var(--sans); color:var(--fail); margin:10px 0 0; }
+  .cs-ruler { background:var(--muted-2); height:10px; border-radius:2px; }
+  .cs-box { border:1px solid var(--hair); border-radius:8px; padding:16px; }
+  .cs-kbd { font:500 11px/1 var(--mono); border:1px solid var(--hair-strong); border-radius:4px;
+            padding:3px 5px; color:var(--text); }
+`
+
+const TOKEN_GROUPS = [
+  ['elevation', ['--e0', '--e1', '--e2', '--e3', '--e4', '--hair', '--hair-strong']],
+  ['signal', ['--signal', '--signal-ink', '--gold', '--fail']],
+  ['text', ['--text', '--muted', '--muted-2']],
+]
+const SPACING = ['--sp1', '--sp2', '--sp3', '--sp4', '--sp5', '--sp6', '--sp7', '--sp8', '--sp9']
+const RADII = ['--r-sm', '--r-md', '--r-lg', '--r-pill']
+const MOTION = ['--d1', '--d2', '--d3', '--d4', '--d5']
+
+const cell = (label, html) => `<div class="cs-cell"><div class="cs-lbl">${label}</div>${html}</div>`
+const sec = (id, title, note, html) =>
+  `<section class="cs-sec" id="${id}"><h2>${title}</h2>${note ? `<p class="cs-note">${note}</p>` : ''}${html}</section>`
+
+/* ---------------------------------------------------------------- *
+ * The set row, assembled the way renderPill assembles it.
+ * ---------------------------------------------------------------- */
+
+const inputs = (bump = false) =>
+  `<input class="pillInput w${bump ? ' bump' : ''}" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" />`
+  + `<span class="pillUnit">lb</span><span class="pillTimes">×</span>`
+  + `<input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" />`
+
+const sideInputs = () =>
+  `<span class="pillSide">L</span><input class="pillInput lw" type="number" inputmode="decimal" value="60" aria-label="Left weight" />`
+  + `<span class="pillTimes">×</span><input class="pillInput lrp" type="number" inputmode="numeric" value="8" aria-label="Left reps" />`
+  + `<span class="pillSide">R</span><input class="pillInput rw" type="number" inputmode="decimal" value="55" aria-label="Right weight" />`
+  + `<span class="pillTimes">×</span><input class="pillInput rrp" type="number" inputmode="numeric" value="7" aria-label="Right reps" />`
+
+const flagBtns = ({ warm = false, sides = false, amrap = false, rpe = null } = {}) =>
+  `<button class="pillWarm${warm ? ' on' : ''}" aria-pressed="${warm}" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button>`
+  + (sides ? `<button class="pillWarm on" aria-pressed="true" title="Log each side separately.">L/R</button>` : '')
+  + (amrap ? `<button class="pillWarm on" aria-pressed="true" title="AMRAP — taken to failure.">A</button>` : '')
+  + (rpe !== null ? `<button class="pillWarm on" title="How hard was that set? Optional.">${rpe}</button>` : '')
+
+const unloggedRow = ({ idx = 'I', bump = false, near = null, warm = false, sides = false, amrap = false } = {}) =>
+  `<div class="pill tappable"><span class="pillIdx">${idx}</span>`
+  + `<span class="pillValue">${sides ? sideInputs() : inputs(bump)}</span>`
+  + `<span class="pillSpacer"></span><div class="pillActions">${flagBtns({ warm, sides, amrap })}`
+  + (near ? `<span class="pillNear">${near}</span>` : '')
+  + `<button class="pillHit" aria-label="Log set">Hit it →</button><button class="pillMiss" aria-label="Mark missed">Miss</button></div></div>`
+
+const loggedRow = ({ idx = 'I', kind = 'done', status = 'done', pr = null, warm = false, rpe = null } = {}) =>
+  `<div class="pill ${kind}${warm ? ' warmup' : ''}"><span class="pillIdx">${idx}</span>`
+  + `<span class="pillValue">${inputs()}</span><span class="pillSpacer"></span><div class="pillActions">`
+  + flagBtns({ warm, rpe })
+  + `<span class="pillStatus">`
+  + (pr === 'e1rm' ? '<span class="pillPr">★ </span>' : '')
+  + (pr === 'dot' ? '<span class="pillPrDot" title="Heaviest yet"></span>' : '')
+  + `${status}</span>`
+  + (kind === 'done' ? '<button class="pillDrop" aria-label="Add drop set">+ Drop</button>' : '')
+  + `<button class="pillReset" aria-label="Undo set">↺</button></div></div>`
+
+const dropRow = () =>
+  `<div class="drops"><div class="dropRow"><span class="dropArrow">↳</span>`
+  + `<input class="pillInput w small" type="number" inputmode="decimal" value="135" aria-label="Drop weight" />`
+  + `<span class="pillUnit">lb</span><span class="pillTimes">×</span>`
+  + `<input class="pillInput r small" type="number" inputmode="numeric" value="8" aria-label="Drop reps" />`
+  + `<button class="dropX" aria-label="Remove drop">×</button></div></div>`
+
+const switchHtml = (on, mini = false) =>
+  `<div class="bouncyRow"><span class="bouncyLabel${on ? ' on' : ''}">Rest day</span>`
+  + `<button class="bouncyToggle" role="switch" aria-checked="${on}" title="Mark today a rest day">`
+  + `<span class="bouncyTrack${mini ? ' mini' : ''}"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div>`
+
+const stepper = (value) =>
+  `<div class="stepper"><button class="step minus" data-t="-1">−</button>`
+  + `<span class="stepVal">${value}</span><button class="step" data-t="1">+</button></div>`
+
+const swapItem = (name, meta, on = false) =>
+  `<button class="swapItem${on ? ' on' : ''}"><span class="nm">${name}</span><span class="mu">${meta}</span></button>`
+
+const noteCard = (type, emoji, text) =>
+  `<div class="noteCard note-${type}"><span class="noteDot"></span><span class="noteEmo">${emoji}</span><span class="noteTxt">${text}</span></div>`
+
+const restBar = (over) =>
+  `<div class="restbar${over ? ' over' : ''}"><button class="restStep" data-d="-15">−15</button>`
+  + `<div class="restMid"><svg class="restRing" viewBox="0 0 36 36" aria-hidden="true">`
+  + `<circle class="restRingTrack" cx="18" cy="18" r="15"/>`
+  + `<circle class="restRingFill" cx="18" cy="18" r="15" style="stroke-dasharray:94.2;stroke-dashoffset:${over ? 0 : 30}"/></svg>`
+  + `<div class="restTime">${over ? '+0:12' : '1:24'}</div><div class="restLabel">Bench Press</div></div>`
+  + `<button class="restStep" data-d="15">+15</button><button class="restX" aria-label="Dismiss">×</button></div>`
+
+const liftCard = (edit) =>
+  `<div class="ex"><div class="exHead">`
+  + (edit ? `<button class="grip" aria-label="Drag to reorder">⠿</button>` : '')
+  + (edit ? `<button class="exEye" aria-label="Hide">👁</button>` : '')
+  + (edit
+    ? `<button class="exName"><span class="nameTxt">Bench Press</span><span class="exInfo" aria-label="Form notes">i</span></button>`
+    : `<div class="exName"><span class="nameTxt">Bench Press</span></div>`)
+  + (edit ? `<button class="pinBtn" aria-label="Pin to top">☆</button>` : '')
+  + (edit ? `<button class="menuBtn" aria-label="More">⋯</button>` : '')
+  + `</div><div class="exMeta"><span>compound</span><span class="metaSep">·</span><span>3 × 5</span>`
+  + `<span class="metaSep">·</span><span>last 185 lb</span>`
+  + `<span class="deloadTag" title="Two sessions flat, so the load steps back.">deloading</span>`
+  + `<span class="groupTag">superset A</span></div>`
+  + `<div class="exNote"><span class="ndot">•</span><span>Left shoulder — keep elbows tucked.</span></div>`
+  + `<div class="exActions"><button class="actionPill"><span class="pl">Swap</span></button>`
+  + (edit ? `<button class="actionPill"><span class="pl">History</span></button>
+             <button class="actionPill"><span class="pl">Tune</span></button>
+             <button class="actionPill"><span class="pl">What if</span></button>` : '')
+  + `</div><div class="restSlot"></div><div class="pills"></div></div>`
+
+/* ---------------------------------------------------------------- *
+ * The page.
+ * ---------------------------------------------------------------- */
+
+export function contactSheet(css = tileCss()) {
+  const tokenSwatches = TOKEN_GROUPS.map(([group, names]) =>
+    `<div class="cs-cell"><div class="cs-lbl">${group}</div><div class="cs-grid">`
+    + names.map((n) => cell(n, `<div class="cs-swatch" style="background:var(${n})"></div>`)).join('')
+    + `</div></div>`).join('')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Train — contact sheet</title>
+<!-- GENERATED by scripts/build-contact-sheet.mjs. Do not edit by hand. -->
+<!-- CSS BELOW IS COPIED VERBATIM FROM public/tiles/train.html -->
+<style>${css}</style>
+<style>${SHEET_CSS}</style>
+</head>
+<body>
+<div id="vt-backdrop" aria-hidden="true">
+  <div class="wb-atmosphere"></div><div class="wb-mist"></div><div class="wb-particles"></div>
+</div>
+<div class="cs-page">
+  <h1 class="cs-title">Train — contact sheet</h1>
+  <p class="cs-lede">Every primitive, every state that a class or attribute can express. The stylesheet
+  is copied verbatim from the tile, so this page cannot drift from what ships.</p>
+  <p class="cs-lede">Hover, active and focus-visible are <strong>not simulated</strong> — the instances below are
+  real. Hover them; press <span class="cs-kbd">Tab</span> to walk focus through the page.</p>
+
+${sec('tokens', '1 · Tokens', 'Everything below resolves from this block. A light mode should be a swap here and nothing else.', `
+  <div class="cs-stack">${tokenSwatches}</div>
+  <div class="cs-cell" style="margin-top:22px"><div class="cs-lbl">spacing ladder</div>
+    <div class="cs-stack">${SPACING.map((n) => `<div class="cs-cell"><div class="cs-lbl">${n}</div><div class="cs-ruler" style="width:var(${n})"></div></div>`).join('')}</div>
+  </div>
+  <div class="cs-grid" style="margin-top:22px">
+    ${RADII.map((n) => cell(n, `<div class="cs-swatch" style="background:var(--e3);border-radius:var(${n})"></div>`)).join('')}
+  </div>
+  <div class="cs-grid" style="margin-top:22px">
+    ${cell('--sans', '<div style="font:400 16px/1.4 var(--sans);color:var(--text)">Hit it — 185 lb × 5</div>')}
+    ${cell('--serif', '<div style="font:400 16px/1.4 var(--serif);color:var(--text)">Hit it — 185 lb × 5</div>')}
+    ${cell('--mono', '<div style="font:400 16px/1.4 var(--mono);color:var(--text)">185 × 5 · 1:24</div>')}
+    ${cell('.num (tabular)', '<div class="num" style="font:400 16px/1.4 var(--mono);color:var(--text)">1111 / 8888</div>')}
+  </div>
+  <div class="cs-row">${MOTION.map((n) => `<span class="cs-mono">${n}</span>`).join('')}</div>
+`)}
+
+${sec('popup', '2 · Popup shell', 'Serves twenty dialogs. The header must hold while the body scrolls.', `
+  <div class="cs-stack">
+    <div class="scrim" style="position:relative;inset:auto">
+      <div class="pop" role="dialog" aria-modal="true">
+        <div class="popHead"><div><div class="eyebrow">How hard was that?</div><div class="popTitle">RPE — optional</div></div>
+        <button class="popX" aria-label="Close">×</button></div>
+        <p class="formGist">10 is nothing left. 7 is about three reps in reserve. Skip it if you would rather not guess.</p>
+        <div class="swapList">${swapItem('RPE 8', '2 left')}${swapItem('RPE 9', '1 left', true)}${swapItem('RPE 10', 'all out')}</div>
+        <div class="popBtns"><button class="pbtn ghost">Skip</button><button class="pbtn save">Save</button></div>
+      </div>
+    </div>
+  </div>
+`)}
+
+${sec('button', '3 · Button', 'finishBtn has a real disabled state — locked until a set is logged.', `
+  <div class="cs-grid">
+    ${cell('pbtn save', '<button class="pbtn save">Save</button>')}
+    ${cell('pbtn ghost', '<button class="pbtn ghost">Download a full backup</button>')}
+    ${cell('pbtn danger', '<button class="pbtn danger">Remove from day</button>')}
+    ${cell('pbtn disabled', '<button class="pbtn save" disabled>Save</button>')}
+    ${cell('actionPill', '<button class="actionPill"><span class="pl">Swap</span></button>')}
+    ${cell('finishBtn', '<button class="finishBtn">Finish session</button>')}
+    ${cell('finishBtn disabled', '<button class="finishBtn" disabled>Finish session</button>')}
+    ${cell('finishBtn locked', '<button class="finishBtn locked">Re-lock session</button>')}
+    ${cell('freshbtn', '<button class="freshbtn">Start fresh</button>')}
+    ${cell('wcAddBtn', '<button class="wcAddBtn">+</button>')}
+    ${cell('cvSend', '<button class="cvSend" aria-label="Send">↑</button>')}
+    ${cell('photoX', '<button class="photoX" title="Export CSV">Export ⇩</button>')}
+  </div>
+`)}
+
+${sec('input', '4 · Input', 'The set-row variant is the one that matters: large, one-handed, numeric.', `
+  <div class="cs-grid">
+    ${cell('pillInput w + r', `<span class="pillValue">${inputs()}</span>`)}
+    ${cell('pillInput bump', `<span class="pillValue">${inputs(true)}</span>`)}
+    ${cell('pillInput L/R', `<span class="pillValue">${sideInputs()}</span>`)}
+    ${cell('pillInput sec', '<span class="pillValue"><input class="pillInput sec" type="number" inputmode="numeric" value="60" aria-label="Seconds" /><span class="pillUnit">s</span></span>')}
+    ${cell('pillInput met', '<span class="pillValue"><input class="pillInput met" type="number" inputmode="numeric" value="400" aria-label="Metres" /><span class="pillUnit">m</span></span>')}
+    ${cell('pillInput /ea', '<span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="40" aria-label="Weight" /><span class="pillUnit">lb<span class="pillPerHand">/ea</span></span></span>')}
+    ${cell('pillInput small', dropRow())}
+    ${cell('pillInput empty', '<span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="" placeholder="0" aria-label="Weight" /></span>')}
+    ${cell('pillInput disabled', '<span class="pillValue"><input class="pillInput w" type="number" value="185" disabled aria-label="Weight" /></span>')}
+    ${cell('wInput', '<span class="field"><input class="wInput" type="number" inputmode="decimal" step="0.5" value="185" /><span class="wUnit">lb</span></span>')}
+    ${cell('wcIn', '<div class="wcAdd"><input class="wcIn" placeholder="Add item" /><button class="wcAddBtn">+</button></div>')}
+    ${cell('searchRow', '<div class="searchRow"><input placeholder="e.g. Zercher squat, 5k run" autocomplete="off" /></div>')}
+  </div>
+`)}
+
+${sec('switch', '5 · Switch', 'role="switch" with aria-checked. On and off must differ without relying on colour.', `
+  <div class="cs-grid">
+    ${cell('off', switchHtml(false))}
+    ${cell('on', switchHtml(true))}
+    ${cell('mini — off', switchHtml(false, true))}
+    ${cell('mini — on', switchHtml(true, true))}
+  </div>
+`)}
+
+${sec('stepper', '6 · Stepper', 'Tune’s Top reps reads "off" rather than a number, so the value slot has to hold a word.', `
+  <div class="cs-grid">
+    ${cell('number', stepper('3'))}
+    ${cell('word', stepper('off'))}
+    ${cell('time', stepper('1:30'))}
+    ${cell('in a row', `<div class="settingsRow"><span class="bouncyLabel on">Target</span>${stepper('4')}</div>`)}
+  </div>
+`)}
+
+${sec('row', '7 · Selectable row', 'Primary label plus muted secondary — match %, unit, reps-in-reserve gloss.', `
+  <div class="cs-stack">
+    <div class="swapList">
+      ${swapItem('Incline Bench Press', '92% match')}
+      ${swapItem('Dumbbell Bench Press', '88% match', true)}
+      ${swapItem('Weight × reps', 'lb × reps')}
+      ${swapItem('Time only', 'seconds')}
+    </div>
+    <p class="emptyHist">No saved templates yet.</p>
+  </div>
+`)}
+
+${sec('chip', '8 · Chip', 'Selected state is load-bearing — it is the only indication of which Progress view is showing.', `
+  <div class="cs-stack">
+    <div class="chipRow">
+      <button class="chip on">Strength</button><button class="chip">Muscles</button>
+      <button class="chip">Consistency</button><button class="chip">8 vs 8</button>
+      <button class="chip">Calendar</button><button class="chip">Volume</button>
+      <button class="chip">Records</button><button class="chip">Goals</button>
+    </div>
+    <div class="range"><button class="chip on">4w</button><button class="chip">12w</button><button class="chip">1y</button><button class="chip">All</button><span class="rangeInd"></span></div>
+    <div class="formCues"><span class="cuePill">Control the negative</span><span class="cuePill">Full range of motion</span></div>
+    <div class="formMuscles"><span class="primary">chest</span><span class="metaSep">·</span><span class="secondary">triceps</span></div>
+  </div>
+`)}
+
+${sec('card', '9 · Card', 'One elevation and radius system, not six.', `
+  <div class="cs-stack">
+    ${cell('ex — training mode (Swap only)', liftCard(false))}
+    ${cell('ex — edit mode (full controls)', liftCard(true))}
+  </div>
+  <div class="cs-grid">
+    ${cell('miniCard', '<div class="statStrip"><div class="miniCard"><b>128</b><span>Sessions</span></div><div class="miniCard"><b class="gold">6</b><span>wk streak</span></div></div>')}
+    ${cell('ovCard', '<div class="ovCard"><div class="ovNum">128</div><div class="ovLbl">Sessions</div><div class="ovDesc"><b>+2</b> vs last week</div></div>')}
+    ${cell('chart-card', '<div class="chart-card"><div class="plot" style="height:90px"></div><div class="delta-cap">+12 lb over 8 weeks</div></div>')}
+    ${cell('photoCard', '<div class="photoCard"><div class="photoImg photoImg--pending skeleton-shimmer" style="height:120px"></div></div>')}
+  </div>
+  <div class="cs-cell" style="margin-top:22px"><div class="cs-lbl">noteCard — four types</div>
+    <div class="noteBar">
+      <div class="noteSlot">${noteCard('gold', '★', 'Heaviest bench yet — 195 for 5.')}</div><div class="noteDiv"></div>
+      <div class="noteSlot">${noteCard('mint', '✓', 'Three weeks running at 4+ sessions.')}</div><div class="noteDiv"></div>
+      <div class="noteSlot">${noteCard('plain', '·', 'Chest took 26 hard sets this week.')}</div>
+    </div>
+    <div class="noteBar" style="margin-top:10px"><div class="noteSlot">${noteCard('fail', '!', 'Squat has been flat at 275 for four sessions.')}</div></div>
+  </div>
+`)}
+
+${sec('sheet', '10 · Sheet', 'Four stacked in one scroll, no tab bar. They must read as separate sections.', `
+  <div class="cs-stack">
+    <div class="sheet"><div class="eyebrow">Short-term goal</div>
+      <div style="margin-top:14px"><button class="goalPill empty">Set a short-term goal (optional)</button></div></div>
+    <div class="sheet"><div class="eyebrow">Progress photos</div><p class="emptyHist">No progress photos yet.</p></div>
+  </div>
+`)}
+
+${sec('setrow', '11 · Set row — the composite', 'The most-tapped surface in the tile. done, failed and warmup must be distinguishable in greyscale.', `
+  <div class="cs-stack">
+    ${cell('unlogged', unloggedRow({ idx: 'I' }))}
+    ${cell('unlogged + suggestion bump', unloggedRow({ idx: 'I', bump: true }))}
+    ${cell('unlogged + near-miss cue', unloggedRow({ idx: 'I', near: '5 lb under your best' }))}
+    ${cell('unlogged + reason line + last session', `<div class="pillWrap">${unloggedRow({ idx: 'I', bump: true })}<div class="pillWhy why-clean">Three clean sessions — up 5 lb.</div><div class="pillWhy pillLast">Last time: 180 × 5, 5, 4</div></div>`)}
+    ${cell('why-deload', `<div class="pillWrap">${unloggedRow({ idx: 'I' })}<div class="pillWhy why-deload">Deloading — back to 165 for two sessions.</div></div>`)}
+    ${cell('why-layoff', `<div class="pillWrap">${unloggedRow({ idx: 'I' })}<div class="pillWhy why-layoff">Three weeks off — starting lighter.</div></div>`)}
+    ${cell('L/R armed (four fields)', unloggedRow({ idx: 'II', sides: true }))}
+    ${cell('AMRAP armed (last set)', unloggedRow({ idx: 'III', amrap: true }))}
+    ${cell('warm-up armed', unloggedRow({ idx: 'I', warm: true }))}
+    ${cell('done', loggedRow({ idx: 'I', status: 'done' }))}
+    ${cell('done + over target', loggedRow({ idx: 'II', status: 'done <span class="sub">· +2</span>' }))}
+    ${cell('done + under target', loggedRow({ idx: 'II', status: 'done <span class="sub">· 3 reps</span>' }))}
+    ${cell('done + weight PR (dot)', loggedRow({ idx: 'III', status: 'done', pr: 'dot' }))}
+    ${cell('done + e1RM PR (star)', loggedRow({ idx: 'III', status: 'done', pr: 'e1rm' }))}
+    ${cell('done + RPE recorded', loggedRow({ idx: 'I', status: 'done', rpe: 8.5 }))}
+    ${cell('failed', loggedRow({ idx: 'II', kind: 'failed', status: 'missed' }))}
+    ${cell('warm-up logged', loggedRow({ idx: 'I', status: 'done', warm: true }))}
+    ${cell('done + drop set', `<div class="pillWrap">${loggedRow({ idx: 'III', status: 'done' })}${dropRow()}</div>`)}
+  </div>
+  <p class="cs-warn">Greyscale check: view this section with a greyscale filter. done / failed / warmup must stay
+  tellable apart.</p>
+`)}
+
+${sec('rest', '12 · Rest bar', 'Runs inside a card. over flips the whole bar once remaining time passes zero.', `
+  <div class="cs-stack">
+    ${cell('running', restBar(false))}
+    ${cell('over', restBar(true))}
+  </div>
+`)}
+
+${sec('verdicts', '13 · Engine-driven states', 'Classes the engine composes by name. Every one must read distinctly.', `
+  <div class="cs-stack">
+    ${cell('verdict-rest_advised', '<div class="readinessNote verdict-rest_advised">Two nights under six hours and recovery at 41% — a rest day is the honest call.</div>')}
+    ${cell('verdict-reduced_volume', '<div class="readinessNote verdict-reduced_volume">Recovery is low. Two working sets instead of four today.</div>')}
+    ${cell('verdict-reduced_intensity', '<div class="readinessNote verdict-reduced_intensity">Hard conditioning yesterday — same sets, 10% off the bar.</div>')}
+    ${cell('weeklyReview', '<div class="weeklyReview"><div class="wrHead">This week</div><div class="wrLine">Four sessions, 28,400 lb, two personal records.</div><div class="wrLine mu">chest 26 sets (over band) · quads 4 sets (under band)</div><div class="wrLine mu">Quiet: hamstrings, calves</div></div>')}
+    ${cell('muscle bands', '<div class="muscleBars"><div class="mbRow"><span class="mbLbl">chest</span><span class="mbTrack"><span class="mbFill band-over" style="width:88%"></span></span><span class="mbVal">26</span></div><div class="mbRow"><span class="mbLbl">back</span><span class="mbTrack"><span class="mbFill ok band-in" style="width:62%"></span></span><span class="mbVal">18</span></div><div class="mbRow"><span class="mbLbl">quads</span><span class="mbTrack"><span class="mbFill band-under" style="width:14%"></span></span><span class="mbVal">4</span></div></div>')}
+  </div>
+`)}
+
+</div>
+</body>
+</html>
+`
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const html = contactSheet()
+  mkdirSync(dirname(OUT), { recursive: true })
+  writeFileSync(OUT, html)
+  console.log(`contact sheet → ${OUT} (${html.length} bytes)`)
+}

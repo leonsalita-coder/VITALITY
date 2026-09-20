@@ -17,6 +17,14 @@ import { JSDOM } from 'jsdom'
  * AND staying silent, not just staying silent.
  */
 
+/* Every test here carries an explicit 30s timeout.
+   They are genuinely slow: each drives a real session to completion
+   through jsdom, which recomputes every shadow verdict — dose plus all
+   eleven curated transfer pairs, at 400 resamples each. Two of them ran
+   5.7s and 5.2s against vitest's 5s default, passed standalone and in a
+   quiet full run, and failed only under the commit hook's load. A timeout
+   that depends on what else is running is not a timeout. */
+
 /* LOCAL date, never toISOString — east of UTC that returns yesterday and
    the session never matches the tile's `today`. */
 const localToday = () => {
@@ -110,11 +118,11 @@ describe('the fixture itself', () => {
     expect(run('typeof TrainEngine.recordDose')).toBe('function')
     expect(run('typeof TrainEngine.reviewLines')).toBe('function')
     expect(run('typeof TrainEngine.emptyLog')).toBe('function')
-  })
+  }, 30_000)
 
   it('has the history the finding needs', () => {
     expect(run('STATE.history.bench.length')).toBe(160)
-  })
+  }, 30_000)
 })
 
 describe('finishing a session writes the verdicts down', () => {
@@ -122,12 +130,12 @@ describe('finishing a session writes the verdicts down', () => {
     const log = run(finishSession)
     expect(log).toBeTruthy()
     expect(Array.isArray(log.entries)).toBe(true)
-  })
+  }, 30_000)
 
   it('records a verdict, not an empty log', () => {
     const log = run(finishSession)
     expect(log.entries.length).toBeGreaterThan(0)
-  })
+  }, 30_000)
 
   it('records the evidence alongside the answer', () => {
     const entry = run(finishSession).entries[0]
@@ -148,7 +156,7 @@ describe('finishing a session writes the verdicts down', () => {
     const daysBack = Math.round((new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - stamped.getTime()) / 86_400_000)
     expect(daysBack).toBeGreaterThanOrEqual(0)
     expect(daysBack).toBeLessThanOrEqual(6)
-  })
+  }, 30_000)
 
   it('does not write the same verdict twice in a day', () => {
     const first = run(finishSession).entries.length
@@ -161,7 +169,7 @@ describe('finishing a session writes the verdicts down', () => {
         return STATE.shadowLog.entries.length;
       })()`)
     expect(again).toBe(first)
-  })
+  }, 30_000)
 })
 
 describe('and shows the athlete none of it', () => {
@@ -183,19 +191,19 @@ describe('and shows the athlete none of it', () => {
     /* The control: the board DID render, so the absence above is the
        shadow gate rather than an empty page. */
     expect(shown).toContain('Bench Press')
-  })
+  }, 30_000)
 
   it('has a verdict in the log that would have spoken', () => {
     /* Without this the test above proves nothing: a log full of silent
        verdicts would show nothing on the board for the ordinary reason. */
     const log = run(finishSession)
     expect(log.entries.some((e: any) => e.would === true)).toBe(true)
-  })
+  }, 30_000)
 
   it('offers the review only as a console command', () => {
     const lines = run('__shadowReview(), typeof window.__shadowReview')
     expect(lines).toBe('function')
-  })
+  }, 30_000)
 
   it('prints a logged verdict through the review command', () => {
     const text = run(`
@@ -206,7 +214,7 @@ describe('and shows the athlete none of it', () => {
     expect(text).toMatch(/WOULD HAVE SAID|stayed silent/)
     expect(text).toContain('minimum_effective_dose')
     expect(text).toMatch(/None were shown/)
-  })
+  }, 30_000)
 })
 
 describe('transfer is written down too', () => {
@@ -214,7 +222,7 @@ describe('transfer is written down too', () => {
     const log = run(finishSession)
     const pairs = log.entries.filter((e: any) => e.feature === 'transfer_between_lifts')
     expect(pairs.length).toBe(run('TrainEngine.TRANSFER_PAIRS.length'))
-  })
+  }, 30_000)
 
   it('records the pairs that cannot be asked as unaskable, not as quiet', () => {
     /* This athlete benches and nothing else, so no curated pair has the
@@ -224,7 +232,7 @@ describe('transfer is written down too', () => {
     const pairs = log.entries.filter((e: any) => e.feature === 'transfer_between_lifts')
     expect(pairs.every((e: any) => e.status === 'not_enough_overlap')).toBe(true)
     expect(pairs[0].inputs.needed).toBeGreaterThan(0)
-  })
+  }, 30_000)
 
   it('shows none of it on the board', () => {
     const shown = run(`
@@ -237,7 +245,7 @@ describe('transfer is written down too', () => {
     expect(shown).not.toContain('moved together')
     expect(shown).not.toContain('shared weeks needed')
     expect(shown).toContain('Bench Press')
-  })
+  }, 30_000)
 
   it('reaches the review command', () => {
     const text = run(`
@@ -247,7 +255,7 @@ describe('transfer is written down too', () => {
       })()`)
     expect(text).toContain('transfer_between_lifts')
     expect(text).toMatch(/shared weeks needed/)
-  })
+  }, 30_000)
 })
 
 /**
@@ -269,7 +277,7 @@ describe('the resolution report reaches the board when switched on', () => {
         return clone.textContent;
       })()`)
     expect(shown).not.toContain('RESOLUTION:')
-  })
+  }, 30_000)
 
   it('has a call site that produces the line when the flag is forced', () => {
     /* Forced through the engine rather than by editing shadow.ts, so
@@ -282,7 +290,7 @@ describe('the resolution report reaches the board when switched on', () => {
         now: Date.now(),
       }, { dose_resolution: true })`)
     expect(typeof line === 'string' || line === null).toBe(true)
-  })
+  }, 30_000)
 
   it('never carries an equivalence claim, flag or no flag', () => {
     const forced = run(`
@@ -292,7 +300,7 @@ describe('the resolution report reaches the board when switched on', () => {
         now: Date.now(),
       }, { dose_resolution: true }) || ''`)
     expect(forced).not.toMatch(/the same|no difference|equivalent/i)
-  })
+  }, 30_000)
 
   it('refuses to surface the verdict even with its flag forced on', () => {
     /* The load-bearing guarantee, checked through the shipped bundle
@@ -313,5 +321,5 @@ describe('the resolution report reaches the board when switched on', () => {
     expect(surfaced.exists).toBe(true)
     expect(surfaced.would).toBe(true)
     expect(surfaced.forced).toBeNull()
-  })
+  }, 30_000)
 })
