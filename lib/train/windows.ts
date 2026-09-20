@@ -39,6 +39,37 @@ export function daysBetween(from: string, to: string): number {
 }
 
 /** `n` calendar days before this date — NOT n × 86,400,000 milliseconds. */
+/**
+ * Step back whole CALENDAR days, not 86,400,000 milliseconds at a time.
+ *
+ * Exported because the millisecond version is wrong and keeps getting
+ * rewritten: subtracting `n * DAY_MS` drifts by an hour every time the
+ * clocks change, and across a year of history that is two hours, which
+ * lands a boundary on the wrong date. It cost a real bug in rollingWindow
+ * (windows became eight days long the week after the clocks went
+ * forward) and then again in dose.ts.
+ */
+export function shiftDaysBack(ms: number, back: number): string {
+  return dateKey(shiftDays(ms, back).getTime())
+}
+
+/**
+ * The Monday of the week containing `ms`, as a date string.
+ *
+ * Shadow verdicts are dated to the week rather than the day. Recording
+ * one per pair per SESSION overruns the log's cap in about twelve weeks
+ * and fills it with three near-identical rows per week, which answers
+ * the tuning question no better and costs four times the space. A week
+ * is also the unit these findings actually work in.
+ */
+export function weekStartOf(ms: number): string {
+  const d = new Date(ms)
+  /* getDay is 0 for Sunday. Monday-based so a week is not split across
+     a weekend, which is when most people train. */
+  const back = (d.getDay() + 6) % 7
+  return dateKey(shiftDays(ms, back).getTime())
+}
+
 function shiftDays(ms: number, back: number): Date {
   const d = new Date(ms)
   d.setDate(d.getDate() - back)

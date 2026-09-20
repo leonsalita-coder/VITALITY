@@ -98,6 +98,15 @@ export interface History {
 }
 
 export interface Attribution {
+  /**
+   * The lift the sets came from.
+   *
+   * Carried so a caller can weight a muscle's reading by which lifts
+   * contributed, without re-deriving the split. The alternative was a
+   * second answer to "which muscle did this set belong to", which is
+   * how two screens come to disagree.
+   */
+  exerciseId: string
   muscle: Muscle
   sets: number
   date: string
@@ -122,7 +131,7 @@ export function attribute(history: History, index: ExerciseIndex): Attribution[]
       if (!sets) continue
       const spread = distribute(sets, split)
       for (const muscle of Object.keys(spread) as Muscle[]) {
-        rows.push({ muscle, sets: spread[muscle] || 0, date: entry.date, estimated: split.estimated })
+        rows.push({ exerciseId: id, muscle, sets: spread[muscle] || 0, date: entry.date, estimated: split.estimated })
       }
     }
   }

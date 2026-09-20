@@ -128,3 +128,126 @@ here:
 
 Judge which before writing a test. A test written purely to kill a mutant is
 how a mutation score becomes a number people stop reading.
+
+## Constants that survived, and what they were measured against
+
+Two findings — minimum effective dose and transfer between lifts — replace
+a guessed effect size with a null resampled from the athlete's own history.
+That removes the threshold but not every number: something still has to
+decide **how** to resample, and picking those badly is the failure the
+design exists to avoid. So they were measured rather than argued.
+
+The method: simulate histories where the truth is known, and count how
+often each finding gets it wrong. `tests/train/calibration.test.ts` keeps
+the headline of each executable, so a change to the resampling cannot
+quietly stop being justified.
+
+### `TRANSFER_BLOCK_WEEKS = 8`
+
+How often does transfer fire on two **independent** autocorrelated series?
+It should be 5%, the margin.
+
+| autocorrelation | block 1 | block 4 | block 6 | block 8 |
+|---|---|---|---|---|
+| phi 0.60 | 20.8% | 5.8% | 5.0% | 5.0% |
+| phi 0.75 | 25.0% | 9.2% | 6.7% | 5.0% |
+| phi 0.85 | 33.3% | 15.0% | 7.5% | 6.7% |
+
+Block 1 is naive shuffling, and it fires on a third of unrelated pairs —
+the number that justifies the whole design. Block 4, which a "training
+block is about a month" argument gives, is still two to three times
+nominal: four weeks is roughly the length of the autocorrelation itself,
+so most of the structure is destroyed at the block boundaries anyway.
+
+Checked again at the sample sizes it actually runs at, since a gate should
+be calibrated where it is weakest (phi 0.85, 160 draws each):
+
+| overlap | 33w | 41w | 49w | 57w | 65w | 73w |
+|---|---|---|---|---|---|---|
+| block 4 | 7.5% | 8.8% | 11.3% | 11.3% | 10.0% | 11.3% |
+| block 8 | 3.1% | 3.8% | 1.3% | 3.8% | 4.4% | 4.4% |
+
+### `DOSE_BLOCK_WEEKS = 4`
+
+Deliberately **not** the eight transfer measured its way to, because this
+finding's error runs the other way: it claims the ABSENCE of a
+relationship, so a tight null makes it fire *less*. How often does it
+claim equivalence when the high-volume weeks genuinely progressed faster?
+
+| true ratio | block 2 | block 4 | block 6 | block 8 |
+|---|---|---|---|---|
+| 1.0x (equal) | 90% | 95% | 93% | 94% |
+| 1.5x | 29% | 43% | 46% | 65% |
+| 2.0x | 0% | 3% | 3% | 8% |
+
+The first row should be high and the rest low. Bigger blocks are strictly
+worse. Two is better still, but a two-week block keeps almost none of the
+structure this is there to preserve, so it would be right by accident.
+
+### `POWER_MARGIN = 3`
+
+The null band must be narrower than the athlete's weekly progression rate
+divided by this before equivalence may be claimed. It was 1 — "the test
+could have seen a difference the size of your whole progression rate" —
+and 1 is far too loose:
+
+| true ratio | /1 | /2 | /3 | /4 |
+|---|---|---|---|---|
+| 1.0x, 40w | 84% | 26% | 6% | 0% |
+| 1.0x, 80w | 95% | 75% | 24% | 5% |
+| 1.0x, 120w | 96% | 93% | 55% | 11% |
+| 1.5x, 40w | 71% | 38% | 8% | 0% |
+| 1.5x, 80w | 43% | 40% | 19% | 8% |
+| 1.5x, 120w | 28% | 28% | 18% | 6% |
+| 2.0x, 80w | 3% | 3% | 3% | 0% |
+
+At /1 this tells somebody their volume made no difference on nearly half
+the histories where it made a 50% difference. /4 silences it almost
+entirely.
+
+**And a limit worth stating plainly: at a true ratio of 1.25x the rates
+are indistinguishable from the equal case at every sample size a real
+person will produce.** This finding cannot tell "the same" from "a quarter
+more". That is why the sentence it prints names what the log could
+resolve instead of saying "the same" and stopping.
+
+### `MIN_OVERLAP_WEEKS = 32`, `MIN_TRAINED_WEEKS = 32`
+
+Eight blocks of four for dose, four blocks of eight for transfer. The
+floor on a permutation p is one over the number of arrangements, so four
+blocks gives 1/24 ≈ 0.042 — the minimum at which a result below a 0.05
+margin can exist at all.
+
+### Still unmeasured
+
+`DEFAULT_MARGIN = 0.05` is convention, not physiology, and is the one
+number here chosen by taste. It is defensible as a starting point because
+it is a stated, checkable rule rather than a guessed effect size — and
+because shadow mode means the first year of real verdicts can be read back
+and this moved against evidence.
+
+`MAX_LOG_ENTRIES = 1000` is about fifteen months of weekly verdicts across
+both features. That is also when the log starts dropping its oldest rows,
+so **exporting it is part of the tuning workflow**, not an afterthought.
+
+## Guards deleted because nothing could make them fail
+
+Mutation testing found five this round, on top of the three already listed
+above. Two are worth recording because the reasoning generalises:
+
+- **`z > 0` in transfer.** Guarded against reporting an unusually WEAK
+  co-movement as a finding, since the margin is two-sided. It could never
+  fire: measured over 400 simulated athletes — 200 with the lifts
+  deliberately mirrored — `outside` and a negative z co-occurred exactly
+  zero times. Not an accident of the fixtures: the statistic is a MAXIMUM
+  across lags, and the null of a maximum is right-skewed with almost no
+  lower tail, so a real value essentially cannot sit far enough below it.
+  The two-sidedness is conservative rather than wrong.
+
+- **`overall > 0` in dose.** Subsumed by the power gate beside it:
+  `detectable` is a half-width and never negative, so `detectable <
+  overall / POWER_MARGIN` is already false whenever progression is zero or
+  negative.
+
+The pattern is the one in the table above — a defensive check written near
+an existing one should immediately be asked whether either can fire alone.

@@ -50,9 +50,27 @@ describe('every engine export has a caller', () => {
     expect(exports_.length).toBeGreaterThan(20)
   })
 
+  /**
+   * The shadow-mode reads, which are meant to have no caller.
+   *
+   * doseNote and transferNote are the ONLY path from a silent verdict to
+   * a sentence somebody reads. Nothing calls them, on purpose: that is
+   * what "switching on is one flag, not a rewrite" means — the door
+   * exists, closed, so shipping a finding is a flag in shadow.ts and a
+   * call site here rather than new code.
+   *
+   * They were passing this check by accident, because the name happened
+   * to appear in a comment elsewhere in the same module and the rule
+   * matches any mention. An accident is not an exemption, so here it is,
+   * written down — with a companion test below asserting the thing that
+   * actually matters, which is that the tile does not call them.
+   */
+  const SHADOWED_READS = ['doseNote', 'transferNote']
+
   it('has no export that nothing anywhere calls', () => {
     const logger = loggerOf(TILES[0])
     const unreachable = exports_.filter(({ file, name }) => {
+      if (SHADOWED_READS.includes(name)) return false
       if (logger.includes(`TrainEngine.${name}`)) return false
       /* Any engine module counts, INCLUDING the defining one — a helper
          exported for tests but used at home is reachable, not dead. The
@@ -66,6 +84,20 @@ describe('every engine export has a caller', () => {
       })
     })
     expect(unreachable.map((u) => `${u.file}::${u.name}`)).toEqual([])
+  })
+
+  it('keeps every shadowed read out of the tile', () => {
+    /* The exemption above is only honest while this holds. If a shadowed
+       read ever gains a tile call site, the feature has been switched on
+       and the exemption must go with it. */
+    const logger = loggerOf(TILES[0])
+    for (const name of SHADOWED_READS) {
+      expect(logger, name).not.toContain(`TrainEngine.${name}`)
+    }
+    /* The control: the tile does call the engine, so the absences above
+       are decisions rather than an empty haystack. */
+    expect(logger).toContain('TrainEngine.recordDose')
+    expect(logger).toContain('TrainEngine.recordTransfer')
   })
 
   it('exports every engine module from the barrel, so the tile can reach it', () => {

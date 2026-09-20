@@ -33,29 +33,26 @@ concerns which controls *render* (see training mode vs edit mode in
 
 # Other deferred decisions
 
-## Minimum effective dose, and transfer between lifts
+## Minimum effective dose, and transfer between lifts — NO LONGER DEFERRED
 
-Both were specified and both were **deliberately not built**, for the same
-reason: each needs within-person variation across many months before it
-can fire at all.
+Both were deferred, for a stated reason: their gates would be guesswork,
+with no way to validate them for close to a year, and they are the two
+findings a lifter is most likely to act on.
 
-- **Minimum effective dose** — "you progressed the same on 12 sets of
-  chest as on 18" — requires periods of genuinely different weekly volume
-  in the same person, long enough apart to compare.
-- **Transfer between lifts** — "your front squat went up and your back
-  squat followed three weeks later" — requires a lead-lag signal across
-  enough cycles to separate it from coincidence.
+**Both are now built**, because the objection was answered rather than
+waited out. The gates are not constants: an effect is compared against a
+null resampled from the athlete's own history by block permutation, so
+there is no threshold to guess. The handful of numbers that decide *how*
+to resample were measured against simulated histories where the truth is
+known — see `docs/train-verification.md` for the tables, and
+`tests/train/calibration.test.ts`, which keeps them executable.
 
-Their gates would be pure guesswork today, with no way to validate them
-for close to a year. And they are the two findings a serious lifter is
-**most likely to act on** — someone who is told twelve sets is enough will
-drop six — which makes a guessed threshold expensive in a way a wrong
-volume warning is not.
+Both also ship in **shadow mode**: they compute from the first session and
+surface nothing. Every verdict is stored with its inputs, its resampled
+null and the date; `node scripts/shadow-review.mjs` and the tile's
+`__shadowReview()` print what would have been said and on what evidence.
+Turning either on is one boolean in `lib/train/shadow.ts` plus a call
+site — `doseNote` and `transferNote` exist, closed, for exactly that.
 
-The engine already has everything they need: per-muscle volume
-attribution, e1RM series, `periodComparison`, the curated-hypothesis
-discipline from `weekly.ts`, and now `simulate()` for testing a fit
-against replayed history.
-
-**Revisit once there is real history to tune the gates against.** This is
-a deferred decision, not an oversight.
+See `lib/train/dose.ts`, `lib/train/transfer.ts`, `lib/train/resample.ts`,
+`lib/train/shadow.ts`.
