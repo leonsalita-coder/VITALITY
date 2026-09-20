@@ -117,6 +117,48 @@ describe('the type ramp', () => {
     expect(used.length).toBeGreaterThan(30)
     expect([...new Set(used)].filter((u) => !ROLES.includes(u))).toEqual([])
   })
+
+  it('sizes every font from the ramp or the glyph scale, and nothing else', () => {
+    /* Two families, and a font-size that names neither is a value that
+       escaped both. */
+    const { rules } = splitCss(readFileSync(TILE, 'utf8'))
+    const sizes = [...rules.matchAll(/font-size\s*:\s*([^;]+)/g)].map((m) => m[1].trim())
+    const stray = sizes.filter((v) => !/^var\(--(fs|glyph)-/.test(v) && !/^[\d.]+em$/.test(v) && v !== 'inherit')
+    expect(stray).toEqual([])
+  })
+})
+
+describe('glyphs are not text', () => {
+  const tokens = () => splitCss(readFileSync(TILE, 'utf8')).tokens
+  const rules = () => splitCss(readFileSync(TILE, 'utf8')).rules
+
+  it('keeps a glyph scale separate from the reading scale', () => {
+    /* The moon in a switch thumb is a graphic. Sizing a graphic by a
+       reading scale is a category error, and it produced an 11px glyph
+       inside a 14x14 thumb. */
+    expect(tokens()).toContain('--glyph-base:')
+    expect(tokens()).toContain('--glyph-mini:')
+  })
+
+  it('lets a glyph go below the ramp floor, which is the point', () => {
+    const glyphs = [...tokens().matchAll(/--glyph-\w+:\s*([\d.]+)px/g)].map((m) => parseFloat(m[1]))
+    const ramp = [...tokens().matchAll(/--fs-\w+:\s*([\d.]+)px/g)].map((m) => parseFloat(m[1]))
+    expect(Math.min(...glyphs)).toBeLessThan(Math.min(...ramp))
+  })
+
+  it('fits the mini thumb it broke', () => {
+    /* 8px in a 14x14 box. The ramp's floor of 11 does not fit. */
+    const mini = parseFloat(/--glyph-mini:\s*([\d.]+)px/.exec(tokens())![1])
+    const thumb = parseFloat(/\.bouncyTrack\.mini \.bouncyThumb\s*\{[^}]*width:\s*([\d.]+)px/.exec(rules())![1])
+    expect(mini).toBeLessThan(thumb)
+    expect(rules()).toContain('.deloadRow .bouncyDot { font-size:var(--glyph-mini)')
+  })
+
+  it('exempts only glyphs that sit in a fixed-size box', () => {
+    /* The test for exemption is narrow. .noteEmo is an emoji too, has no
+       such box, and stays on the ramp. */
+    expect(rules()).toMatch(/\.noteEmo\s*\{[^}]*var\(--fs-/)
+  })
 })
 
 describe('the token block', () => {

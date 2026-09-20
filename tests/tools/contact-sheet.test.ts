@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { JSDOM } from 'jsdom'
 import { tileCss, contactSheet } from '../../scripts/build-contact-sheet.mjs'
 
 /**
@@ -59,6 +60,39 @@ describe('the contact sheet cannot drift from the tile', () => {
     const tile = readFileSync(TILE, 'utf8')
     expect(tile).not.toContain('cs-page')
     expect(tile).not.toContain('contact-sheet')
+  })
+})
+
+/**
+ * Completeness is correctness here, not convenience.
+ *
+ * The tap-target measurement matches selectors against this page, so a
+ * surface missing from it cannot be measured — and that is exactly how
+ * .wcCheck came to be invented instead of recovered. The measurement
+ * could not see it, "no rule" was read as confirmation that August never
+ * styled it, and a rewrite went in on top of rules that already existed.
+ *
+ * An incomplete review vehicle is the same class of problem as a test
+ * that silently does not run.
+ */
+describe('every styled class appears on the sheet', () => {
+  it('leaves nothing unrenderable', () => {
+    const css = blocks(readFileSync(SHEET, 'utf8'))[0].replace(/\/\*[\s\S]*?\*\//g, '')
+    const styled = [...new Set([...css.matchAll(/\.([A-Za-z][\w-]*)/g)].map((m) => m[1]))].sort()
+    const dom = new JSDOM(readFileSync(SHEET, 'utf8'))
+    const present = new Set<string>()
+    dom.window.document.querySelectorAll('*').forEach((el) =>
+      el.classList.forEach((c: string) => present.add(c)))
+    const missing = styled.filter((c) => !present.has(c))
+    expect(missing, `not rendered anywhere on the contact sheet: ${missing.join(' ')}`).toEqual([])
+  })
+
+  it('checks a meaningful number of classes', () => {
+    /* The control. If the class extraction broke, the assertion above
+       would pass on an empty list and prove nothing. */
+    const css = blocks(readFileSync(SHEET, 'utf8'))[0]
+    const styled = new Set([...css.matchAll(/\.([A-Za-z][\w-]*)/g)].map((m) => m[1]))
+    expect(styled.size).toBeGreaterThan(140)
   })
 })
 

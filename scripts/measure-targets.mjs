@@ -95,10 +95,24 @@ const px = (v) => {
 
 const SHEET = 'docs/contact-sheet.html'
 
-/** One element per target, taken from the contact sheet. */
-function sample(sel) {
+/**
+ * The most representative instance of a target in the contact sheet.
+ *
+ * Not the first one. `.pillInput` appears both inside a `.pill` and on
+ * its own in the Input section, and `.pill .pillInput { height:44px }`
+ * only reaches the first — taking whichever came first in the document
+ * reported a 44px field as 19.2. The instance the MOST rules reach is
+ * the one in its real context, which is what a measurement of "how big
+ * is this control" is asking about.
+ */
+function sample(sel, css) {
   const dom = sample.dom || (sample.dom = new JSDOM(readFileSync(SHEET, 'utf8')))
-  return dom.window.document.querySelector(sel)
+  const all = [...dom.window.document.querySelectorAll(sel)]
+  if (all.length < 2) return all[0] || null
+  const score = (el) => rules(css).reduce((n, { prelude }) => n + prelude.split(',').filter((part) => {
+    try { return el.matches(part.replace(/::(before|after)/g, '').trim()) } catch { return false }
+  }).length, 0)
+  return all.reduce((best, el) => (score(el) > score(best) ? el : best), all[0])
 }
 
 /**
@@ -109,7 +123,7 @@ function sample(sel) {
  * the later one is the one that was written to win.
  */
 function declared(css, tok, sel, pseudo = '') {
-  const el = sample(sel)
+  const el = sample(sel, css)
   if (!el) return null
   const box = {}
   let hit = false

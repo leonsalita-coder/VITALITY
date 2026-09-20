@@ -69,23 +69,49 @@ describe('the set row cannot produce an ambiguous tap', () => {
   })
 
   it('keeps the whole target inside its own row', () => {
-    /* .pill sets overflow:hidden and is taller than the target, so a hit
-       area cannot reach the row above or below. */
-    const warm = find('.pillWarm')
+    /* The row's height now comes from the FIELD, which fills it at 44,
+       not from the flag buttons. .pill sets overflow:hidden, so a 44px
+       hit area is contained by the row rather than reaching the rows
+       above or below. If the field ever shrinks below the target, taps
+       near a row edge become ambiguous between rows. */
+    const field = find('.pillInput')
     const pill = /\.pill\s*\{([^}]*)\}/.exec(css())![1]
     const padding = parseFloat(/padding\s*:\s*([\d.]+)px/.exec(pill)![1])
-    expect(warm.boxH! + padding * 2).toBeGreaterThanOrEqual(warm.hitH!)
+    const rowHeight = field.boxH! + padding * 2
+    expect(rowHeight).toBeGreaterThanOrEqual(MIN_TARGET)
+    for (const sel of ['.pillHit', '.pillMiss', '.pillWarm', '.pillReset', '.pillDrop']) {
+      expect(rowHeight, sel).toBeGreaterThanOrEqual(find(sel).hitH!)
+    }
     expect(pill).toContain('overflow:hidden')
   })
 })
 
-describe('what is still under, recorded rather than forgotten', () => {
-  it('names the inputs, which a pseudo-element cannot reach', () => {
-    /* ::before does not apply to a void element, so .pillInput cannot be
-       padded the way every button here was — reaching 44 needs a real
-       height change and a taller row. Recorded so it is a decision
-       rather than an oversight. */
-    expect(find('.pillInput').hitH).toBeLessThan(MIN_TARGET)
+describe('the field takes a real height, not a pseudo-element', () => {
+  it('reaches the minimum on its own box', () => {
+    /* A ::before does not apply to a void element, so the field could not
+       be padded the way every button here was. It fills the row instead. */
+    const field = find('.pillInput')
+    expect(field.boxH).toBeGreaterThanOrEqual(MIN_TARGET)
+    expect(field.grew).toBe(false)
+  })
+
+  it('does not make the row taller than it was', () => {
+    /* The height moved out of .pill's padding and into the field: 12px
+       padding on a ~31px child became 4px padding on a 44px one, so the
+       row went from about 55 to 52 while the target more than doubled. */
+    const pill = /\.pill\s*\{([^}]*)\}/.exec(
+      /<style[^>]*>([\s\S]*?)<\/style>/.exec(readFileSync('public/tiles/train.html', 'utf8'))![1],
+    )![1]
+    const padding = parseFloat(/padding\s*:\s*([\d.]+)px/.exec(pill)![1])
+    expect(find('.pillInput').boxH! + padding * 2).toBeLessThan(55)
+  })
+
+  it('leaves drop-row fields alone', () => {
+    /* Scoped to .pill. Drop rows are a secondary surface and were not
+       sized here; giving them a 44px field would have made each one
+       taller than the set row it hangs off. */
+    const css2 = /<style[^>]*>([\s\S]*?)<\/style>/.exec(readFileSync('public/tiles/train.html', 'utf8'))![1]
+    expect(css2).toContain('.pill .pillInput { height:44px; }')
   })
 })
 

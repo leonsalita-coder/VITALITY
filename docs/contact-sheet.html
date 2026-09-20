@@ -69,6 +69,18 @@
     --fs-title:20px; --lh-title:26px; --fw-title:700;
     --fs-display:22px; --lh-display:27px; --fw-display:800; --ls-display:-.02em;
     --fs-hero:27px; --lh-hero:31px; --fw-hero:800; --ls-hero:-.02em;
+    /* ---- glyphs ---------------------------------------------------------
+       NOT part of the ramp, and deliberately below its floor. These are
+       icons that happen to be characters, sized to the box that holds
+       them rather than to a reading scale — the moon in a switch thumb is
+       a graphic, and sizing a graphic by a text scale is a category
+       error. The 8px one lives in a 14x14 thumb; 11px does not fit it.
+
+       The test for exemption is narrow: the glyph sits inside a box with
+       an explicit pixel size. .noteEmo is an emoji too and has no such
+       box, so it stays on the ramp. */
+    --glyph-base:11px;   /* .bouncyDot, in a 20x20 thumb */
+    --glyph-mini:8px;    /* .deloadRow .bouncyDot, in a 14x14 thumb */
   }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   ::selection { background:var(--signal); color:var(--signal-ink); }
@@ -307,12 +319,12 @@
   #moonbtn.on .bouncyThumb { transform:translateX(20px) scale(1); }
   #moonbtn:active:not(.on) .bouncyThumb { transform:translateX(0) scale(.82); transition-duration:.15s; }
   #moonbtn.on:active .bouncyThumb { transform:translateX(20px) scale(.82); transition-duration:.15s; }
-  .bouncyDot { font-size:var(--fs-micro); line-height:1; font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);}
+  .bouncyDot { font-size:var(--glyph-base); line-height:1; }
   .bouncyTrack.mini { width:32px; height:18px; padding:2px; }
   .bouncyTrack.mini .bouncyThumb { width:14px; height:14px; }
   .deloadRow.on .bouncyTrack { background:var(--signal); border-color:color-mix(in srgb, var(--signal) 55%, black); }
   .deloadRow.on .bouncyThumb { transform:translateX(14px); }
-  .deloadRow .bouncyDot { font-size:var(--fs-micro); line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);}
+  .deloadRow .bouncyDot { font-size:var(--glyph-mini); line-height:1; }
 
   /* 5 · stepper — 6 rules */
   .stepper { display:flex; align-items:center; gap:14px; }
@@ -391,7 +403,7 @@
      .pillUnit, .pillTimes, .pillPerHand, .drops, .dropRow, .dropArrow,
      .dropX — 45 rules in total, all byte-for-byte from 731e891. */
   .pills { display:flex; flex-direction:column; gap:8px; width:100%; margin-top:16px; }
-  .pill { display:flex; align-items:center; gap:11px; padding:12px 14px 12px 16px; border-radius:12px; border:1px solid var(--hair); border-left:2px solid var(--hair-strong); background:var(--e3); position:relative; overflow:hidden; transition:background var(--d3) var(--ease-out), border-color var(--d3) var(--ease-out), box-shadow var(--d3) var(--ease-out); }
+  .pill { display:flex; align-items:center; gap:11px; padding:4px 14px 4px 16px; border-radius:12px; border:1px solid var(--hair); border-left:2px solid var(--hair-strong); background:var(--e3); position:relative; overflow:hidden; transition:background var(--d3) var(--ease-out), border-color var(--d3) var(--ease-out), box-shadow var(--d3) var(--ease-out); }
   .pill.tappable { cursor:pointer; }
   .pill.tappable:hover { background:var(--e4); }
   .pillIdx { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); width:14px; flex:none; line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);}
@@ -574,6 +586,22 @@
     content:''; position:absolute; left:-5px; right:-5px;
     top:50%; height:44px; transform:translateY(-50%);
   }
+
+  /* ---- the field you tap to correct a prefill --------------------------
+     It was 19.2px, which is worse than any button in the row, and it is
+     edited on roughly two sets in five. A ::before cannot pad a void
+     element, so it takes a real height: the input fills the row's inner
+     box at 44.
+
+     The row does not get taller for it. .pill's vertical padding drops
+     from 12 to 4 and the height moves into the field, so the row goes
+     from about 55 to 52 — slightly SHORTER than before, with a target
+     more than twice the size. Every other control in the row is pinned at
+     44 and centred, so all of them now fill the same inner box.
+
+     Scoped to .pill, so drop rows keep their own smaller fields. Those
+     are a secondary surface and are not sized here. */
+  .pill .pillInput { height:44px; }
 </style>
 <style>
   .cs-page { max-width:1100px; margin:0 auto; padding:32px 20px 120px; }
@@ -599,7 +627,9 @@
 </head>
 <body>
 <div id="vt-backdrop" aria-hidden="true">
-  <div class="wb-atmosphere"></div><div class="wb-mist"></div><div class="wb-particles"></div>
+  <div class="wb-atmosphere"></div>
+  <div class="wb-mountains"><svg viewBox="0 0 1600 420" preserveAspectRatio="none"><path d="M0,300 L320,180 L680,210 L1100,180 L1600,220 L1600,420 L0,420 Z" fill="#0d1a17"/></svg></div>
+  <div class="wb-mist"></div><div class="wb-particles"></div>
 </div>
 <div class="cs-page">
   <h1 class="cs-title">Train — contact sheet</h1>
@@ -667,7 +697,7 @@
     <div class="cs-cell"><div class="cs-lbl">pillInput small</div><div class="drops"><div class="dropRow"><span class="dropArrow">↳</span><input class="pillInput w small" type="number" inputmode="decimal" value="135" aria-label="Drop weight" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r small" type="number" inputmode="numeric" value="8" aria-label="Drop reps" /><button class="dropX" aria-label="Remove drop">×</button></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">pillInput empty</div><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="" placeholder="0" aria-label="Weight" /></span></div>
     <div class="cs-cell"><div class="cs-lbl">pillInput disabled</div><span class="pillValue"><input class="pillInput w" type="number" value="185" disabled aria-label="Weight" /></span></div>
-    <div class="cs-cell"><div class="cs-lbl">wInput</div><span class="field"><input class="wInput" type="number" inputmode="decimal" step="0.5" value="185" /><span class="wUnit">lb</span></span></div>
+    <div class="cs-cell"><div class="cs-lbl">wInput + field label</div><div class="field"><span class="lbl">Weight</span><input class="wInput" type="number" inputmode="decimal" step="0.5" value="185" /><span class="wUnit">lb</span></div></div>
     <div class="cs-cell"><div class="cs-lbl">wcIn</div><div class="wcAdd"><input class="wcIn" placeholder="Add item" /><button class="wcAddBtn">+</button></div></div>
     <div class="cs-cell"><div class="cs-lbl">searchRow</div><div class="searchRow"><input placeholder="e.g. Zercher squat, 5k run" autocomplete="off" /></div></div>
   </div>
@@ -746,7 +776,7 @@
     <div class="wcBody open"><div class="wcBodyInner">
       <div class="wcItem">
         <button class="wcCheck on" aria-pressed="true"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <span class="wcTxt done">Five minutes on the bike</span>
+        <span class="wcTxt done"><svg class="wcScribble" viewBox="0 0 340 32" preserveAspectRatio="none"><path class="wcScribblePath" d="M4 18 C 80 10, 160 24, 336 14" fill="none" stroke-width="2" stroke-linecap="round"/></svg>Five minutes on the bike</span>
         <button class="wcX" aria-label="Remove">×</button>
       </div>
       <div class="wcItem">
@@ -764,6 +794,23 @@
     <div class="sheet"><div class="eyebrow">Short-term goal</div>
       <div style="margin-top:14px"><button class="goalPill empty">Set a short-term goal (optional)</button></div></div>
     <div class="sheet"><div class="eyebrow">Progress photos</div><p class="emptyHist">No progress photos yet.</p></div>
+  </div>
+</section>
+
+<section class="cs-sec" id="chrome"><h2>10b · Header, menu, coach and overlays</h2><p class="cs-note">Surfaces that live outside the session sheet, plus the transient states JS applies mid-animation.</p>
+  <div class="cs-stack">
+    <div class="cs-cell"><div class="cs-lbl">topSticker + noteBar</div><header class="topSticker"><div class="stickerGreet">Welcome Piglet</div><div class="noteBar"><div class="noteSlot"><div class="noteCard note-mint"><span class="noteDot"></span><span class="noteEmo">✓</span><span class="noteTxt">Three weeks running at 4+ sessions.</span></div></div></div></header></div>
+    <div class="cs-cell"><div class="cs-lbl">menuPop — the card overflow menu</div><div class="menuPop"><button class="deloadRow on" role="switch" aria-checked="true"><span class="menuRowLabel">Deload active</span><span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">⬇️</span></span></span></button><button>This hurts — stop suggesting it</button><button>Add a note</button><div class="sep"></div><button class="danger">Remove from day</button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">cvInputRow — coach</div><div class="cvInputRow"><input placeholder="e.g. 30 min, dumbbells only" /><button class="cvSend" aria-label="Send">↑</button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">cvInputRow — disabled while replying</div><div class="cvInputRow"><input placeholder="Thinking…" disabled /><button class="cvSend" aria-label="Send" disabled>↑</button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">goalRow</div><div class="goalRow"><span class="nm">Bench Press to 225</span><button class="photoX">Edit</button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">sChart — sparkline</div><div class="ovCard"><div class="ovNum">128</div><div class="ovLbl">Sessions</div><svg class="sChart" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,20 20,14 40,16 60,8 80,10 100,4" fill="none" stroke="currentColor" stroke-width="2"/><circle class="sPoint" cx="100" cy="4" r="2.5"/></svg></div></div>
+    <div class="cs-cell"><div class="cs-lbl">ex — collapsed</div><div class="ex collapsed"><div class="exHead"><div class="exName"><span class="nameTxt">Barbell Row</span></div></div><div class="exMeta"><span>accessory</span></div><div class="collapsedNote">2 of 3 sets logged · tap the eye to expand</div><div class="exActions"></div><div class="pills"></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">ex — drag ghost (mid-drag)</div><div class="ex drag-ghost"><div class="exHead"><div class="exName"><span class="nameTxt">Back Squat</span></div></div><div class="exMeta"><span>compound</span></div><div class="exActions"></div><div class="pills"></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">pill — shimmer (just logged)</div><div class="pill done shimmer"><span class="pillIdx">I</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><span class="pillStatus">done</span></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">noteCard — entering / leaving</div><div class="noteBar"><div class="noteSlot"><div class="noteCard note-gold entering"><span class="noteDot"></span><span class="noteEmo">★</span><span class="noteTxt">Entering</span></div></div><div class="noteDiv"></div><div class="noteSlot"><div class="noteCard note-plain leaving"><span class="noteDot"></span><span class="noteEmo">·</span><span class="noteTxt">Leaving</span></div></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">freshbtn — armed</div><button class="freshbtn arm">Tap again to wipe</button></div>
+    <div class="cs-cell"><div class="cs-lbl">celebrate — new best</div><div class="celebrate" style="position:relative;inset:auto;min-height:150px"><div class="burst"><div class="bstar">★</div><div class="ch1">New best</div><div class="ch2">Bench Press — 195 × 5</div><div class="tap">tap to close</div></div></div></div>
   </div>
 </section>
 

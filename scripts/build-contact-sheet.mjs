@@ -189,7 +189,9 @@ export function contactSheet(css = tileCss()) {
 </head>
 <body>
 <div id="vt-backdrop" aria-hidden="true">
-  <div class="wb-atmosphere"></div><div class="wb-mist"></div><div class="wb-particles"></div>
+  <div class="wb-atmosphere"></div>
+  <div class="wb-mountains"><svg viewBox="0 0 1600 420" preserveAspectRatio="none"><path d="M0,300 L320,180 L680,210 L1100,180 L1600,220 L1600,420 L0,420 Z" fill="#0d1a17"/></svg></div>
+  <div class="wb-mist"></div><div class="wb-particles"></div>
 </div>
 <div class="cs-page">
   <h1 class="cs-title">Train — contact sheet</h1>
@@ -257,7 +259,7 @@ ${sec('input', '4 · Input', 'The set-row variant is the one that matters: large
     ${cell('pillInput small', dropRow())}
     ${cell('pillInput empty', '<span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="" placeholder="0" aria-label="Weight" /></span>')}
     ${cell('pillInput disabled', '<span class="pillValue"><input class="pillInput w" type="number" value="185" disabled aria-label="Weight" /></span>')}
-    ${cell('wInput', '<span class="field"><input class="wInput" type="number" inputmode="decimal" step="0.5" value="185" /><span class="wUnit">lb</span></span>')}
+    ${cell('wInput + field label', '<div class="field"><span class="lbl">Weight</span><input class="wInput" type="number" inputmode="decimal" step="0.5" value="185" /><span class="wUnit">lb</span></div>')}
     ${cell('wcIn', '<div class="wcAdd"><input class="wcIn" placeholder="Add item" /><button class="wcAddBtn">+</button></div>')}
     ${cell('searchRow', '<div class="searchRow"><input placeholder="e.g. Zercher squat, 5k run" autocomplete="off" /></div>')}
   </div>
@@ -334,7 +336,7 @@ ${sec('checklist', '9b · Warm-up checklist', 'Ticked mid-session. Neither contr
     <div class="wcBody open"><div class="wcBodyInner">
       <div class="wcItem">
         <button class="wcCheck on" aria-pressed="true"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <span class="wcTxt done">Five minutes on the bike</span>
+        <span class="wcTxt done"><svg class="wcScribble" viewBox="0 0 340 32" preserveAspectRatio="none"><path class="wcScribblePath" d="M4 18 C 80 10, 160 24, 336 14" fill="none" stroke-width="2" stroke-linecap="round"/></svg>Five minutes on the bike</span>
         <button class="wcX" aria-label="Remove">×</button>
       </div>
       <div class="wcItem">
@@ -352,6 +354,28 @@ ${sec('sheet', '10 · Sheet', 'Four stacked in one scroll, no tab bar. They must
     <div class="sheet"><div class="eyebrow">Short-term goal</div>
       <div style="margin-top:14px"><button class="goalPill empty">Set a short-term goal (optional)</button></div></div>
     <div class="sheet"><div class="eyebrow">Progress photos</div><p class="emptyHist">No progress photos yet.</p></div>
+  </div>
+`)}
+
+${sec('chrome', '10b · Header, menu, coach and overlays', 'Surfaces that live outside the session sheet, plus the transient states JS applies mid-animation.', `
+  <div class="cs-stack">
+    ${cell('topSticker + noteBar', '<header class="topSticker"><div class="stickerGreet">Welcome Piglet</div><div class="noteBar"><div class="noteSlot">' + noteCard('mint', '✓', 'Three weeks running at 4+ sessions.') + '</div></div></header>')}
+    ${cell('menuPop — the card overflow menu', '<div class="menuPop">'
+      + '<button class="deloadRow on" role="switch" aria-checked="true"><span class="menuRowLabel">Deload active</span><span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">⬇️</span></span></span></button>'
+      + '<button>This hurts — stop suggesting it</button>'
+      + '<button>Add a note</button>'
+      + '<div class="sep"></div>'
+      + '<button class="danger">Remove from day</button></div>')}
+    ${cell('cvInputRow — coach', '<div class="cvInputRow"><input placeholder="e.g. 30 min, dumbbells only" /><button class="cvSend" aria-label="Send">↑</button></div>')}
+    ${cell('cvInputRow — disabled while replying', '<div class="cvInputRow"><input placeholder="Thinking…" disabled /><button class="cvSend" aria-label="Send" disabled>↑</button></div>')}
+    ${cell('goalRow', '<div class="goalRow"><span class="nm">Bench Press to 225</span><button class="photoX">Edit</button></div>')}
+    ${cell('sChart — sparkline', '<div class="ovCard"><div class="ovNum">128</div><div class="ovLbl">Sessions</div><svg class="sChart" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,20 20,14 40,16 60,8 80,10 100,4" fill="none" stroke="currentColor" stroke-width="2"/><circle class="sPoint" cx="100" cy="4" r="2.5"/></svg></div>')}
+    ${cell('ex — collapsed', '<div class="ex collapsed"><div class="exHead"><div class="exName"><span class="nameTxt">Barbell Row</span></div></div><div class="exMeta"><span>accessory</span></div><div class="collapsedNote">2 of 3 sets logged · tap the eye to expand</div><div class="exActions"></div><div class="pills"></div></div>')}
+    ${cell('ex — drag ghost (mid-drag)', '<div class="ex drag-ghost"><div class="exHead"><div class="exName"><span class="nameTxt">Back Squat</span></div></div><div class="exMeta"><span>compound</span></div><div class="exActions"></div><div class="pills"></div></div>')}
+    ${cell('pill — shimmer (just logged)', '<div class="pill done shimmer"><span class="pillIdx">I</span><span class="pillValue">' + inputs() + '</span><span class="pillSpacer"></span><div class="pillActions"><span class="pillStatus">done</span></div></div>')}
+    ${cell('noteCard — entering / leaving', '<div class="noteBar"><div class="noteSlot">' + noteCard('gold', '★', 'Entering') .replace('noteCard note-gold','noteCard note-gold entering') + '</div><div class="noteDiv"></div><div class="noteSlot">' + noteCard('plain', '·', 'Leaving').replace('noteCard note-plain','noteCard note-plain leaving') + '</div></div>')}
+    ${cell('freshbtn — armed', '<button class="freshbtn arm">Tap again to wipe</button>')}
+    ${cell('celebrate — new best', '<div class="celebrate" style="position:relative;inset:auto;min-height:150px"><div class="burst"><div class="bstar">★</div><div class="ch1">New best</div><div class="ch2">Bench Press — 195 × 5</div><div class="tap">tap to close</div></div></div>')}
   </div>
 `)}
 
