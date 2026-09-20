@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
-  doseVerdicts, doseNote, weeklyPercent,
-  MIN_TRAINED_WEEKS, MIN_DOSE_RATIO, DOSE_BLOCK_WEEKS,
+  doseVerdicts, doseResolutions, doseResolutionNote, weeklyPercent,
+  MIN_TRAINED_WEEKS, MIN_DOSE_RATIO, DOSE_BLOCK_WEEKS, RESOLUTION_TARGET,
   type DoseContext,
 } from '../../lib/train/dose'
 import { indexFrom } from '../../lib/train/analysis'
 import { collectSignals } from '../../lib/train/insight'
+import { surface, SURFACEABLE } from '../../lib/train/shadow'
+import { seededRandom } from '../../lib/train/resample'
 import type { HistoryEntry } from '../../lib/train/sets'
 
 /**
@@ -150,8 +152,15 @@ describe('the effect is outside the null — more volume really did more', () =>
 })
 
 describe('silence is the default', () => {
-  it('says nothing on a thin history', () => {
-    expect(chestOf(ctx(bench(() => 0.004, { weeks: MIN_TRAINED_WEEKS - 1 })))).toBeUndefined()
+  it('logs a thin history as unaskable rather than skipping it', () => {
+    /* Logged, not skipped, the same way transfer logs its untestable
+       pairs. An absent row cannot say whether a muscle was quiet or
+       merely never asked, and the resolution report is built from the
+       row — so it has to exist before the history is long enough for a
+       verdict. */
+    const v = chestOf(ctx(bench(() => 0.004, { weeks: MIN_TRAINED_WEEKS - 1 })))!
+    expect(v.status).toBe('thin_history')
+    expect(v.would).toBe(false)
   })
 
   it('says nothing when the two doses are barely different', () => {
@@ -221,13 +230,31 @@ describe('shadow mode — it computes and says nothing', () => {
     expect(chestOf(live())!.would).toBe(true)
   })
 
-  it('surfaces nothing to the athlete', () => {
-    expect(doseNote(live())).toBeNull()
+  it('cannot be surfaced, even with its own flag forced on', () => {
+    /* THE LOAD-BEARING TEST. The verdict is an equivalence claim, and
+       the calibration says it cannot tell a true ratio of 1.0 from 1.25
+       at any sample size a person will produce. It carried its own bound
+       for that reason — and a bound is a caveat, which readers discount.
+       The action this headline invites is cutting a third of somebody's
+       training.
+
+       So it is not gated on a flag. It is off the SURFACEABLE list, and
+       flipping the flag does nothing. */
+    const verdict = chestOf(live())!
+    expect(verdict.would).toBe(true)
+    expect(surface(verdict)).toBeNull()
+    expect(surface(verdict, { minimum_effective_dose: true })).toBeNull()
   })
 
-  it('surfaces it under the flag, and only under the flag', () => {
-    expect(doseNote(live(), { minimum_effective_dose: true })).toContain('6')
-    expect(doseNote(live(), { minimum_effective_dose: false })).toBeNull()
+  it('is still computed and still logged', () => {
+    /* Shadow mode's whole argument is that months of logged verdicts
+       turn guessed gates into tuned ones. Refusing to SAY it is not a
+       reason to stop measuring it — and it is what would justify
+       revisiting the decision later, on evidence. */
+    const v = chestOf(live())!
+    expect(v.status).toBe('equivalent')
+    expect(v.text).toContain('the same')
+    expect(v.detectable).toBeGreaterThan(0)
   })
 
   it('never reaches the post-session insight', () => {
@@ -245,6 +272,14 @@ describe('shadow mode — it computes and says nothing', () => {
     expect(signals.length).toBeGreaterThan(0)
   })
 
+  it('is not on the list of verdicts that may ever be surfaced', () => {
+    expect(SURFACEABLE).not.toContain('minimum_effective_dose')
+    /* The control: the list is not simply empty — transfer IS on it, so
+       the exclusion above is a decision about this finding rather than a
+       switch nobody wired. */
+    expect(SURFACEABLE).toContain('transfer_between_lifts')
+  })
+
   it('is never called from the tile', () => {
     /* The engine gate is one flag; this is the other half of the claim —
        no UI reaches for it at all, so turning it on is a deliberate act
@@ -256,7 +291,7 @@ describe('shadow mode — it computes and says nothing', () => {
        that can never be true. What matters is whether the tile's own
        code reaches for it. */
     const own = tile.split('<!-- TRAIN-ENGINE:END -->')[1] || ''
-    expect(own).not.toContain('doseNote')
+    expect(own).not.toContain('doseVerdicts')
     /* The control: the tile's own code DOES call the engine, so the
        absence above is a decision rather than an empty haystack. */
     expect(own).toContain('TrainEngine.')
@@ -342,12 +377,15 @@ describe('the boundaries themselves', () => {
   it('speaks at exactly the minimum number of trained weeks', () => {
     /* The first week has no week before it, so it carries no progression
        observation — MIN_TRAINED_WEEKS rows needs one more week of log. */
-    expect(chestOf(ctx(bench((w) => 0.004 + wobble(w), { weeks: MIN_TRAINED_WEEKS + 1 })))!
-      .inputs.weeks).toBe(MIN_TRAINED_WEEKS)
+    const v = chestOf(ctx(bench((w) => 0.004 + wobble(w), { weeks: MIN_TRAINED_WEEKS + 1 })))!
+    expect(v.inputs.weeks).toBe(MIN_TRAINED_WEEKS)
+    expect(v.status).not.toBe('thin_history')
   })
 
-  it('stays silent one week below it', () => {
-    expect(chestOf(ctx(bench((w) => 0.004 + wobble(w), { weeks: MIN_TRAINED_WEEKS })))).toBeUndefined()
+  it('will not speak one week below it', () => {
+    const v = chestOf(ctx(bench((w) => 0.004 + wobble(w), { weeks: MIN_TRAINED_WEEKS })))!
+    expect(v.status).toBe('thin_history')
+    expect(v.would).toBe(false)
   })
 
   it('speaks at exactly the minimum dose ratio', () => {
@@ -507,5 +545,225 @@ describe('the rate a sentence quotes', () => {
 
   it('keeps the sign', () => {
     expect(weeklyPercent(-0.004)).toBe('-0.4%')
+  })
+})
+
+/**
+ * What dose actually says, which is nothing about what it found.
+ *
+ * The verdict was bounded out loud — "the same, to within the 0.03% a
+ * week your log can resolve" — and a bound is a caveat. Readers take the
+ * headline and discount the qualifier, and the headline here invites
+ * cutting a third of somebody's training on a claim the calibration says
+ * cannot be supported at 1.25x.
+ *
+ * A statement about RESOLUTION is unactionable in that direction.
+ */
+describe('the resolution report', () => {
+  /**
+   * A history with REALISTIC noise, which the rest of this file does not
+   * have.
+   *
+   * `wobble` is a tiny deterministic ripple, and a log that clean is
+   * already precise enough to resolve a quarter of the athlete's rate at
+   * forty-five weeks — so the resolution report correctly had nothing to
+   * say and every test below failed. Real progression wanders: this is
+   * the AR(1) drift the calibration in docs/train-verification.md was
+   * measured against, at the same scale.
+   */
+  const drift = (() => {
+    const rand = seededRandom(17)
+    const out: number[] = []
+    let x = 0
+    for (let i = 0; i < 300; i++) {
+      x = 0.75 * x + (rand() - 0.5) * 2 * 0.003
+      out.push(x)
+    }
+    return out
+  })()
+  const noisy = (weeks: number) => ctx(bench((w) => 0.004 + drift[w], { weeks }))
+
+  const underPowered = () => noisy(45)
+  const resolutionOf = (c: DoseContext) => doseResolutions(c).find((r) => r.muscle === 'chest')
+
+  it('reports on a muscle whose question is still open', () => {
+    expect(resolutionOf(underPowered())).toBeTruthy()
+  })
+
+  it('never claims the doses were equivalent', () => {
+    const text = resolutionOf(underPowered())!.text
+    expect(text).not.toMatch(/the same|no difference|equivalent|made no difference/i)
+  })
+
+  it('never reads as permission to train less', () => {
+    const text = resolutionOf(underPowered())!.text
+    expect(text).not.toMatch(/you (should|could|can) (cut|drop|reduce)|train less|enough sets/i)
+  })
+
+  it('says the question is open rather than answered in the negative', () => {
+    expect(resolutionOf(underPowered())!.text).toMatch(/open question, not a no/i)
+  })
+
+  it('names both volumes and what the log can resolve', () => {
+    const r = resolutionOf(underPowered())!
+    const text = r.text
+    expect(text).toContain(String(r.lowVolume))
+    expect(text).toContain(String(r.highVolume))
+    expect(text).toContain(weeklyPercent(r.detectable))
+    expect(text).toContain(weeklyPercent(r.weeklyProgression))
+  })
+
+  it('says how much more history it would take', () => {
+    const r = resolutionOf(underPowered())!
+    expect(r.weeksNeeded).toBeGreaterThan(0)
+    expect(r.text).toContain(`${r.weeksNeeded} more weeks`)
+  })
+
+  it('asks for less history the longer the log already is', () => {
+    /* The band narrows with weeks, so the remaining wait has to shrink.
+       A projection that grew with more data would be reading noise. */
+    const shorter = resolutionOf(noisy(45))!
+    const longer = resolutionOf(noisy(120))!
+    expect(longer.weeksNeeded).toBeLessThan(shorter.weeksNeeded)
+  })
+
+  it('quotes a wait longer than an inverse-square-root would', () => {
+    /* Measured at weeks^-0.42, not weeks^-0.5, because autocorrelation
+       makes effective sample size grow slower than the calendar. Assuming
+       the textbook exponent understates the wait, which tells somebody an
+       answer is closer than it is. */
+    const r = resolutionOf(underPowered())!
+    const ratio = r.detectable / (r.weeklyProgression / RESOLUTION_TARGET)
+    const sqrtEstimate = r.weeks * ratio ** 2 - r.weeks
+    expect(r.weeksNeeded).toBeGreaterThan(sqrtEstimate)
+  })
+
+  it('says nothing about a muscle whose volumes are barely different', () => {
+    /* Volume that varies, but not enough to be called two doses — so
+       there is no pending question to be under-powered about.
+
+       Deliberately NOT a constant volume: with every week identical the
+       split is degenerate and no verdict is created at all, so the
+       'volume_too_similar' path is never reached and a test using it
+       would pass without exercising anything. */
+    const narrow: HistoryEntry[] = []
+    let weight = 100
+    for (let w = 0; w < 60; w++) {
+      weight *= 1 + 0.004 + drift[w]
+      const sets = isHighWeek(w) ? 5 : 4
+      for (const offset of [0, 3]) {
+        const kg = Math.round(weight * 100) / 100
+        narrow.push({ date: day((60 - 1 - w) * 7 + offset), kg, sets: Array.from({ length: sets }, () => ({ w: kg, r: 5 })) })
+      }
+    }
+    expect(chestOf(ctx(narrow))!.status).toBe('volume_too_similar')
+    expect(resolutionOf(ctx(narrow))).toBeUndefined()
+    /* The control: genuinely varied volume over the same span DOES
+       produce one. */
+    expect(resolutionOf(noisy(60))).toBeTruthy()
+  })
+
+  it('says nothing about a muscle that is not progressing at all', () => {
+    /* No rate to measure a difference against, and dividing by it would
+       project an infinite wait. */
+    const stalled = ctx(bench(() => 0, { weeks: 60 }))
+    expect(chestOf(stalled)).toBeTruthy()
+    expect(resolutionOf(stalled)).toBeUndefined()
+  })
+
+  it('speaks EARLY, before there is enough history for a verdict', () => {
+    /* Twenty-eight weeks is below the verdict minimum but well above
+       what a resample needs, so the band is real and the projection is
+       meaningful. This is the most useful time to hear it: the question
+       is open, and here is roughly what would close it. */
+    const early = ctx(bench((w) => 0.004 + drift[w], { weeks: MIN_TRAINED_WEEKS - 4 }))
+    expect(chestOf(early)!.status).toBe('thin_history')
+    expect(resolutionOf(early)!.weeksNeeded).toBeGreaterThan(0)
+  })
+
+  it('says nothing when there was not even enough history to measure a band', () => {
+    /* Twelve weeks gives three blocks, below what a permutation test
+       needs, so no band was ever measured — and a projection needs a
+       measurement of how precise the log is NOW to project from. */
+    const tiny = ctx(bench((w) => 0.004 + drift[w], { weeks: 12 }))
+    expect(chestOf(tiny)!.detectable).toBe(0)
+    expect(resolutionOf(tiny)).toBeUndefined()
+  })
+
+  it('gives two equally distant muscles a stable order', () => {
+    /* Identical histories on two lifts, so the projected waits tie.
+       The order comes from the verdicts, which are already sorted by
+       muscle, plus a stable sort — there is deliberately no tiebreak
+       here, because one could never change an answer. */
+    const shared = bench((w) => 0.004 + drift[w], { weeks: 45 })
+    const rows = doseResolutions({
+      history: { bench: shared, squat: shared.map((e) => ({ ...e })) },
+      index: indexFrom({
+        bench: { primary: [{ muscle: 'chest', share: 1 }] },
+        squat: { primary: [{ muscle: 'quads', share: 1 }] },
+      }),
+      now: NOW, seed: 7,
+    })
+    expect(rows).toHaveLength(2)
+    expect(rows[0].weeksNeeded).toBe(rows[1].weeksNeeded)
+    expect(rows[0].muscle).toBe('chest')
+    expect(rows[1].muscle).toBe('quads')
+  })
+
+  it('says nothing once the log is already fine enough', () => {
+    /* There is nothing safe left to add: what it FOUND is the verdict,
+       and the verdict is deliberately unsurfaceable. The row stays in the
+       shadow log for a person to weigh.
+
+       The quiet fixture the rest of this file uses is exactly this case —
+       a log clean enough to resolve a quarter of the athlete's rate
+       inside a year. */
+    const resolved = ctx(bench((w) => 0.004 + wobble(w), { weeks: 45 }))
+    const verdict = chestOf(resolved)!
+    expect(verdict.detectable).toBeLessThanOrEqual(
+      (verdict.inputs.weeklyProgression as number) / RESOLUTION_TARGET,
+    )
+    expect(resolutionOf(resolved)).toBeUndefined()
+  })
+
+  it('says nothing on an empty history', () => {
+    expect(doseResolutions(ctx([], { history: {} }))).toEqual([])
+  })
+})
+
+describe('the resolution report is the safe read, and still off', () => {
+  const drift = (() => {
+    const rand = seededRandom(17)
+    const out: number[] = []
+    let x = 0
+    for (let i = 0; i < 300; i++) {
+      x = 0.75 * x + (rand() - 0.5) * 2 * 0.003
+      out.push(x)
+    }
+    return out
+  })()
+  const underPowered = () => ctx(bench((w) => 0.004 + drift[w], { weeks: 45 }))
+
+  it('surfaces nothing today', () => {
+    expect(doseResolutionNote(underPowered())).toBeNull()
+  })
+
+  it('surfaces under its own flag, and only its own', () => {
+    expect(doseResolutionNote(underPowered(), { dose_resolution: true })).toContain('more weeks')
+    expect(doseResolutionNote(underPowered(), { minimum_effective_dose: true })).toBeNull()
+  })
+
+  it('carries no verdict even when switched on', () => {
+    /* The point of the whole change: turning this on is safe, because
+       there is no claim in it to be wrong about. */
+    const live = doseResolutionNote(underPowered(), { dose_resolution: true })!
+    expect(live).not.toMatch(/the same|no difference|equivalent/i)
+  })
+
+  it('leads with the muscle closest to being answerable', () => {
+    const rows = doseResolutions(underPowered())
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i - 1].weeksNeeded).toBeLessThanOrEqual(rows[i].weeksNeeded)
+    }
   })
 })

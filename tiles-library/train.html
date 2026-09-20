@@ -302,6 +302,7 @@ var TrainEngine = (() => {
   __export(index_exports, {
     AMRAP_MAX_MULTIPLIER: () => AMRAP_MAX_MULTIPLIER,
     AMRAP_OVER: () => AMRAP_OVER,
+    BAND_EXPONENT: () => BAND_EXPONENT,
     CATALOG: () => CATALOG,
     CATALOG_BY_ID: () => CATALOG_BY_ID,
     DEFAULT_BAR_LB: () => DEFAULT_BAR_LB,
@@ -356,6 +357,7 @@ var TrainEngine = (() => {
     RATIO_BAND: () => RATIO_BAND,
     RECENT_HEAVY_SETS: () => RECENT_HEAVY_SETS,
     RECOVERY_FLOOR: () => RECOVERY_FLOOR,
+    RESOLUTION_TARGET: () => RESOLUTION_TARGET,
     REST_ADVICE_COOLDOWN_DAYS: () => REST_ADVICE_COOLDOWN_DAYS,
     REST_COMPRESSION: () => REST_COMPRESSION,
     REST_FLOOR: () => REST_FLOOR,
@@ -367,6 +369,7 @@ var TrainEngine = (() => {
     SNAPSHOT_VERSION: () => SNAPSHOT_VERSION,
     STALE_WEEKS: () => STALE_WEEKS,
     STATIC_WEEKS: () => STATIC_WEEKS,
+    SURFACEABLE: () => SURFACEABLE,
     SWAP_WEIGHTS: () => SWAP_WEIGHTS,
     SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
     TRANSFER_BLOCK_WEEKS: () => TRANSFER_BLOCK_WEEKS,
@@ -415,7 +418,8 @@ var TrainEngine = (() => {
     detectPlateau: () => detectPlateau,
     detectSource: () => detectSource,
     distribute: () => distribute,
-    doseNote: () => doseNote,
+    doseResolutionNote: () => doseResolutionNote,
+    doseResolutions: () => doseResolutions,
     doseVerdicts: () => doseVerdicts,
     e1rmSeries: () => e1rmSeries,
     emptyLog: () => emptyLog,
@@ -1579,8 +1583,10 @@ var TrainEngine = (() => {
   // lib/train/shadow.ts
   var SHADOW_FEATURES = {
     minimum_effective_dose: false,
-    transfer_between_lifts: false
+    transfer_between_lifts: false,
+    dose_resolution: false
   };
+  var SURFACEABLE = ["transfer_between_lifts"];
   var MAX_LOG_ENTRIES = 1e3;
   var emptyLog = () => ({ entries: [] });
   function isLive(feature, overrides) {
@@ -1589,6 +1595,7 @@ var TrainEngine = (() => {
   }
   function surface(verdict, overrides) {
     if (!verdict || !verdict.would) return null;
+    if (!SURFACEABLE.includes(verdict.feature)) return null;
     if (!isLive(verdict.feature, overrides)) return null;
     return verdict.text;
   }
@@ -2528,6 +2535,8 @@ var TrainEngine = (() => {
   var DOSE_BLOCK_WEEKS = 4;
   var MIN_TRAINED_WEEKS = 32;
   var POWER_MARGIN = 3;
+  var BAND_EXPONENT = 0.42;
+  var RESOLUTION_TARGET = 4;
   var MIN_DOSE_RATIO = 1.4;
   var mean2 = (x) => x.length ? x.reduce((a, b) => a + b, 0) / x.length : 0;
   var round5 = significant;
@@ -2617,7 +2626,6 @@ var TrainEngine = (() => {
     const out = [];
     for (const [muscle, rows] of weeklyRows(ctx)) {
       const weeks = [...rows.keys()].sort((a, b) => b - a);
-      if (weeks.length < MIN_TRAINED_WEEKS) continue;
       const series = weeks.map((w) => rows.get(w).progression);
       const labels = weeks.map((w) => rows.get(w).sets);
       const split = splitByDose(series, labels);
@@ -2635,6 +2643,7 @@ var TrainEngine = (() => {
       const overall = mean2(series);
       const enoughSeparation = highVolume / lowVolume >= MIN_DOSE_RATIO;
       const couldHaveSeen = result.detectable < overall / POWER_MARGIN;
+      const status = !result.usable || weeks.length < MIN_TRAINED_WEEKS ? "thin_history" : !enoughSeparation ? "volume_too_similar" : result.outside ? "difference_detected" : !couldHaveSeen ? "under_powered" : "equivalent";
       const from = shiftDaysBack(ctx.now, weeks[0] * 7);
       const confounds = confoundsFor2(ctx, from, today);
       const tail = confounds.length ? ` Worth knowing: ${confounds.join("; ")}.` : "";
@@ -2645,7 +2654,9 @@ var TrainEngine = (() => {
            otherwise write three near-identical rows and fill the log four
            times as fast for no extra answer. */
         date: weekStartOf(ctx.now),
-        would: result.usable && !result.outside && enoughSeparation && couldHaveSeen,
+        would: status === "equivalent",
+        status,
+        weeks: weeks.length,
         /* A co-occurrence in their own log, with both numbers and the rate
            attached. It does not tell anybody to train less, because this
            engine has no way to know that — two volumes and one outcome is
@@ -2690,6 +2701,33 @@ var TrainEngine = (() => {
     }
     return out.sort((a, b) => a.subject.localeCompare(b.subject));
   }
+  function doseResolutions(ctx) {
+    const out = [];
+    for (const v of doseVerdicts(ctx)) {
+      if (v.status === "volume_too_similar") continue;
+      const detectable = v.detectable;
+      const progression = Number(v.inputs.weeklyProgression) || 0;
+      if (progression <= 0) continue;
+      const target = progression / RESOLUTION_TARGET;
+      const weeksNeeded = Math.ceil((v.weeks * (detectable / target) ** (1 / BAND_EXPONENT) - v.weeks) / 2) * 2;
+      if (weeksNeeded <= 0) continue;
+      const label2 = v.subject.replace(/_/g, " ");
+      out.push({
+        muscle: v.subject,
+        lowVolume: Number(v.inputs.lowVolume),
+        highVolume: Number(v.inputs.highVolume),
+        weeks: v.weeks,
+        detectable,
+        weeklyProgression: progression,
+        weeksNeeded,
+        /* Power, in plain words. No verdict, no direction, nothing that
+           reads as permission to train less — and an explicit statement
+           that the question is open rather than answered in the negative. */
+        text: `${label2}: ${v.weeks} weeks split between ${v.inputs.lowVolume} and ${v.inputs.highVolume} hard sets a week. Your log can tell apart differences in progression down to about ${pct(detectable)} a week, against the ${pct(progression)} a week you are actually gaining \u2014 not fine enough to say whether the extra sets did anything. Roughly ${weeksNeeded} more weeks of volume varying like this would get there. Until then it is an open question, not a no.`
+      });
+    }
+    return out.sort((a, b) => a.weeksNeeded - b.weeksNeeded);
+  }
   function recordDose(log, ctx) {
     let written = 0;
     for (const verdict of doseVerdicts(ctx)) {
@@ -2697,9 +2735,9 @@ var TrainEngine = (() => {
     }
     return written;
   }
-  function doseNote(ctx, overrides) {
-    const best = [...doseVerdicts(ctx)].filter((v) => v.would).sort((a, b) => Math.abs(a.effect) / a.detectable - Math.abs(b.effect) / b.detectable)[0];
-    return surface(best, overrides);
+  function doseResolutionNote(ctx, overrides) {
+    if (!isLive("dose_resolution", overrides)) return null;
+    return doseResolutions(ctx)[0]?.text ?? null;
   }
 
   // lib/train/fitting.ts
@@ -6537,6 +6575,18 @@ async function buildInsightContext(session){
     now: Date.now(),
   });
   if(systemic) lines.push('LOAD: ' + systemic);
+  /* What the log can and cannot tell apart about volume — never what it
+     found. The equivalence verdict is deliberately unsurfaceable (see
+     SURFACEABLE in shadow.ts); this says only how precise the record is
+     and what would make the question answerable, which is true, useful,
+     and nothing anybody cuts training over. Off today; the flag is in
+     shadow.ts and turning it on is safe. */
+  const resolution = TrainEngine.doseResolutionNote({
+    history: STATE.history||{},
+    index: TrainEngine.indexFrom(STATE.customLib||{}),
+    now: Date.now(),
+  });
+  if(resolution) lines.push('RESOLUTION: ' + resolution);
 
   const rec = noteRecovery(await readRecovery());
   /* Only a connected read with data feeds the deload diagnosis. The other

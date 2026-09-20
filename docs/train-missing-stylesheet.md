@@ -47,6 +47,13 @@ to resample were measured against simulated histories where the truth is
 known — see `docs/train-verification.md` for the tables, and
 `tests/train/calibration.test.ts`, which keeps them executable.
 
+**Dose never surfaces a verdict.** Its equivalence claim cannot be
+supported at a true ratio of 1.25x at any realistic sample size, and a
+self-stated bound is a caveat readers discount — so it is off
+`SURFACEABLE` entirely rather than behind a flag. It reports resolution
+instead: what the log can tell apart, and how much more history would
+close the gap. See docs/train-verification.md.
+
 Both also ship in **shadow mode**: they compute from the first session and
 surface nothing. Every verdict is stored with its inputs, its resampled
 null and the date; `node scripts/shadow-review.mjs` and the tile's

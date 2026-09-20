@@ -44,7 +44,7 @@
 import { attribute, type ExerciseIndex, type History } from './analysis'
 import { weekIndexer, weeklyRelativeChange } from './liftweeks'
 import { blockPermutationTest, significant, DEFAULT_ITERATIONS, DEFAULT_MARGIN } from './resample'
-import { recordVerdict, surface, type ShadowLog, type ShadowOverrides, type ShadowVerdict } from './shadow'
+import { isLive, recordVerdict, type ShadowLog, type ShadowOverrides, type ShadowVerdict } from './shadow'
 import { dateKey, shiftDaysBack, weekStartOf } from './windows'
 import type { Muscle } from './muscles'
 
@@ -118,6 +118,41 @@ export const MIN_TRAINED_WEEKS = 32
 export const POWER_MARGIN = 3
 
 /**
+ * TUNING TARGET, measured. How fast the resolution band narrows.
+ *
+ * `detectable` falls roughly as weeks^-0.42. NOT the inverse square root
+ * a textbook would assume: fitted across simulated histories of 39 to
+ * 239 weeks, the exponent came out at -0.417, because autocorrelation
+ * makes the effective sample size grow more slowly than the calendar
+ * does.
+ *
+ *   weeks    39      59      79     119     159     239
+ *   band   2.2e-3  1.8e-3  1.6e-3  1.4e-3  1.3e-3  1.0e-3
+ *
+ * It matters which is used. Assuming inverse-square-root understates how
+ * long the wait is — the harmful direction for a projection, because it
+ * tells somebody an answer is closer than it is.
+ */
+export const BAND_EXPONENT = 0.42
+
+/**
+ * TUNING TARGET, and derived rather than chosen.
+ *
+ * The projection is quoted against a difference of a QUARTER of the
+ * athlete's own progression rate, because that is the difference the
+ * calibration identified as invisible: at a true ratio of 1.25x the
+ * verdict's rates are indistinguishable from the equal case at every
+ * sample size a person will produce.
+ *
+ * It is a reference, not a judgement. Saying "this is what it would take
+ * to resolve a difference of this size" is a fact about statistical
+ * power; saying "a difference of this size matters" would be a normative
+ * claim about a stranger's training, which is what the whole resampling
+ * design exists to avoid making.
+ */
+export const RESOLUTION_TARGET = 4
+
+/**
  * TUNING TARGET. How much bigger the high dose must be.
  *
  * The one genuinely arbitrary number that survived, and it is a
@@ -153,10 +188,25 @@ export interface DoseContext {
   blockWeeks?: number
 }
 
+export type DoseStatus =
+  /** The gap sat inside the null AND a difference would have shown. */
+  | 'equivalent'
+  /** A real difference between the doses was detected. */
+  | 'difference_detected'
+  /** No difference found, but none could have been. The common case. */
+  | 'under_powered'
+  /** The two volumes are too alike to be called two doses. */
+  | 'volume_too_similar'
+  /** Not enough trained weeks yet. */
+  | 'thin_history'
+
 export interface DoseVerdict extends ShadowVerdict {
   feature: 'minimum_effective_dose'
   /** The smallest difference this test could have seen. */
   detectable: number
+  /** Why it came out the way it did. Logged; never surfaced. */
+  status: DoseStatus
+  weeks: number
 }
 
 const mean = (x: number[]) => (x.length ? x.reduce((a, b) => a + b, 0) / x.length : 0)
@@ -343,8 +393,11 @@ export function doseVerdicts(ctx: DoseContext): DoseVerdict[] {
 
   for (const [muscle, rows] of weeklyRows(ctx)) {
     const weeks = [...rows.keys()].sort((a, b) => b - a) // oldest first
-    if (weeks.length < MIN_TRAINED_WEEKS) continue
-
+    /* Logged, not skipped, once there is enough to resample at all.
+       A pair of volumes nobody could yet compare is the difference
+       between "no difference" and "not enough history to ask", and it is
+       also what the resolution report is built from — so the row has to
+       exist before the history is long enough for a verdict. */
     const series = weeks.map((w) => (rows.get(w) as WeekRow).progression)
     const labels = weeks.map((w) => (rows.get(w) as WeekRow).sets)
 
@@ -384,6 +437,17 @@ export function doseVerdicts(ctx: DoseContext): DoseVerdict[] {
      */
     const couldHaveSeen = result.detectable < overall / POWER_MARGIN
 
+    /* One place decides, and the log records which reason applied. An
+       absent row and a quiet row answer different questions, and after a
+       year the only question worth putting to this log is which of these
+       the silence was. */
+    const status: DoseStatus =
+      !result.usable || weeks.length < MIN_TRAINED_WEEKS ? 'thin_history'
+      : !enoughSeparation ? 'volume_too_similar'
+      : result.outside ? 'difference_detected'
+      : !couldHaveSeen ? 'under_powered'
+      : 'equivalent'
+
     /* Calendar days, not milliseconds. Eighty weeks back crosses the
        clock change twice, and the millisecond version lands the window
        boundary on the wrong date — which showed up as a deload dated
@@ -399,7 +463,9 @@ export function doseVerdicts(ctx: DoseContext): DoseVerdict[] {
          otherwise write three near-identical rows and fill the log four
          times as fast for no extra answer. */
       date: weekStartOf(ctx.now),
-      would: result.usable && !result.outside && enoughSeparation && couldHaveSeen,
+      would: status === 'equivalent',
+      status,
+      weeks: weeks.length,
       /* A co-occurrence in their own log, with both numbers and the rate
          attached. It does not tell anybody to train less, because this
          engine has no way to know that — two volumes and one outcome is
@@ -443,12 +509,100 @@ export function doseVerdicts(ctx: DoseContext): DoseVerdict[] {
   return out.sort((a, b) => a.subject.localeCompare(b.subject))
 }
 
+export interface DoseResolution {
+  muscle: Muscle
+  lowVolume: number
+  highVolume: number
+  weeks: number
+  /** The smallest difference in weekly progression the log can tell apart. */
+  detectable: number
+  /** The athlete's own weekly rate, which is the scale that matters. */
+  weeklyProgression: number
+  /**
+   * Extra weeks of varied volume before a quarter-sized difference could
+   * be resolved. Always positive — a row with nothing left to wait for
+   * is not reported at all.
+   */
+  weeksNeeded: number
+  text: string
+}
+
 /**
- * The only read.
+ * What the log can and cannot tell apart — and nothing about what it
+ * found.
  *
- * Null while the feature is shadowed, which is today and every day until
- * a flag in shadow.ts flips. Everything above still runs.
+ * THIS IS THE ONLY THING DOSE SAYS TO ANYBODY, and the reasoning is in
+ * shadow.ts beside SURFACEABLE. The verdict was bounded out loud — "the
+ * same, to within the 0.03% a week your log can resolve" — and a bound
+ * is a caveat. People read headlines and discount qualifiers, and the
+ * headline here invites cutting a third of their training on a claim the
+ * calibration says cannot be supported.
+ *
+ * A statement about RESOLUTION is unactionable in that direction. "Your
+ * log cannot yet tell whether the extra sets did anything, and here is
+ * what it would take" is true, is useful, and nobody drops volume on it.
  */
+export function doseResolutions(ctx: DoseContext): DoseResolution[] {
+  const out: DoseResolution[] = []
+
+  for (const v of doseVerdicts(ctx)) {
+    /* Nothing to be under-powered ABOUT unless two real doses exist.
+       A muscle trained at one volume forever has no pending question. */
+    if (v.status === 'volume_too_similar') continue
+
+    const detectable = v.detectable
+    const progression = Number(v.inputs.weeklyProgression) || 0
+    /* Somebody who is not progressing has no rate to measure a
+       difference against, and dividing by it would project an infinite
+       wait. There is no companion `detectable <= 0` check: a row with no
+       band came from a resample that never ran, and it falls out of the
+       projection below as nothing left to wait for. */
+    if (progression <= 0) continue
+
+    const target = progression / RESOLUTION_TARGET
+    /* Inverted from band ∝ weeks^-BAND_EXPONENT, so weeks scale as the
+       band ratio raised to 1/BAND_EXPONENT — about 2.4, not the 2 an
+       inverse-square-root would give. Rounded UP to a fortnight: an
+       estimate that runs short tells somebody an answer is closer than it
+       is, which is the direction worth being wrong in slowly. */
+    const weeksNeeded =
+      Math.ceil((v.weeks * ((detectable / target) ** (1 / BAND_EXPONENT)) - v.weeks) / 2) * 2
+
+    /* Nothing left to wait for, and nothing safe left to say. What it
+       FOUND is the verdict, which is deliberately unsurfaceable; the row
+       sits in the shadow log for a person to weigh. One condition rather
+       than two — "the band is already fine enough" and "the projected
+       wait is zero" are the same fact, and stating it twice meant neither
+       could be shown to matter. */
+    /* `<=` rather than `<` because a row saying "0 more weeks" is a
+       nonsense row. The two differ only when the band lands exactly on
+       the target, which floating-point equality makes unreachable, so
+       mutation testing reports the flip as a survivor forever. */
+    if (weeksNeeded <= 0) continue
+
+    const label = v.subject.replace(/_/g, ' ')
+    out.push({
+      muscle: v.subject as Muscle,
+      lowVolume: Number(v.inputs.lowVolume),
+      highVolume: Number(v.inputs.highVolume),
+      weeks: v.weeks,
+      detectable,
+      weeklyProgression: progression,
+      weeksNeeded,
+      /* Power, in plain words. No verdict, no direction, nothing that
+         reads as permission to train less — and an explicit statement
+         that the question is open rather than answered in the negative. */
+      text: `${label}: ${v.weeks} weeks split between ${v.inputs.lowVolume} and ${v.inputs.highVolume} hard sets a week. Your log can tell apart differences in progression down to about ${pct(detectable)} a week, against the ${pct(progression)} a week you are actually gaining — not fine enough to say whether the extra sets did anything. Roughly ${weeksNeeded} more weeks of volume varying like this would get there. Until then it is an open question, not a no.`,
+    })
+  }
+
+  /* Soonest answerable first. No muscle tiebreak: doseVerdicts already
+     returns its rows sorted by subject and Array.sort is stable, so a
+     tiebreak here could never change an order — it was masked by the
+     sort upstream and could not be shown to do anything. */
+  return out.sort((a, b) => a.weeksNeeded - b.weeksNeeded)
+}
+
 /**
  * Compute every verdict and write it down. Surfaces nothing.
  *
@@ -466,18 +620,20 @@ export function recordDose(log: ShadowLog, ctx: DoseContext): number {
   return written
 }
 
-export function doseNote(ctx: DoseContext, overrides?: ShadowOverrides): string | null {
-  /* The clearest one: furthest inside the null relative to what the test
-     could resolve, which is the verdict with the most evidence behind its
-     claim of no difference. No empty-list guard — sorting nothing gives
-     undefined, and surface(undefined) is already null, so a check here
-     could never change an answer.
-
-     No `|| 1` on the divisor either: a fired verdict has passed
-     `detectable < overall` with overall positive, so detectable is
-     positive by construction. */
-  const best = [...doseVerdicts(ctx)]
-    .filter((v) => v.would)
-    .sort((a, b) => Math.abs(a.effect) / a.detectable - Math.abs(b.effect) / b.detectable)[0]
-  return surface(best, overrides)
+/**
+ * The one read, and it is a statement about precision.
+ *
+ * Null while shadowed, which is today. The difference from every other
+ * read in this engine is that switching THIS one on is safe: there is no
+ * claim in it to be wrong about, only a description of what the
+ * athlete's own log can currently resolve.
+ *
+ * The muscle closest to being answerable comes first — that is the one
+ * where waiting is worth anything.
+ */
+export function doseResolutionNote(ctx: DoseContext, overrides?: ShadowOverrides): string | null {
+  if (!isLive('dose_resolution', overrides)) return null
+  /* No empty-list guard: indexing nothing gives undefined, and the
+     optional chain already answers null. */
+  return doseResolutions(ctx)[0]?.text ?? null
 }

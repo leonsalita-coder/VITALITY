@@ -36,10 +36,36 @@
 export const SHADOW_FEATURES = {
   minimum_effective_dose: false,
   transfer_between_lifts: false,
+  dose_resolution: false,
 } as const
 
 export type ShadowFeature = keyof typeof SHADOW_FEATURES
 export type ShadowOverrides = Partial<Record<ShadowFeature, boolean>>
+
+/**
+ * Features whose VERDICT may ever become a sentence an athlete reads.
+ *
+ * minimum_effective_dose is deliberately absent, and this is the load-
+ * bearing line rather than a preference.
+ *
+ * Its verdict is an equivalence claim — "you progressed the same on 12
+ * sets as on 18" — and the calibration says it cannot tell a true ratio
+ * of 1.0 from 1.25 at any sample size a real person will produce. The
+ * sentence carried its own bound for that reason, and a bound is a
+ * caveat: people read the headline and discount the qualifier, and the
+ * action this particular headline invites is cutting a third of their
+ * training. A verdict whose correctness depends on the reader honouring
+ * a caveat is not a verdict worth shipping.
+ *
+ * So dose reports RESOLUTION instead — what its log can and cannot tell
+ * apart, and what would make the question answerable. That is true,
+ * useful, and unactionable in the dangerous direction. The verdict is
+ * still computed and still logged, so the shadow log can answer later
+ * whether the band ever narrows; putting it back is a deliberate
+ * decision made on that evidence, and it starts here.
+ */
+export const SURFACEABLE: ShadowFeature[] = ['transfer_between_lifts']
+
 
 export interface ShadowVerdict {
   feature: ShadowFeature
@@ -104,6 +130,10 @@ export function surface(
   overrides?: ShadowOverrides,
 ): string | null {
   if (!verdict || !verdict.would) return null
+  /* Checked BEFORE the flag, and that order is the point: a feature left
+     off this list cannot be switched on by flipping its flag, which is
+     what makes the exclusion above a guarantee rather than a default. */
+  if (!SURFACEABLE.includes(verdict.feature)) return null
   if (!isLive(verdict.feature, overrides)) return null
   return verdict.text
 }

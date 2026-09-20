@@ -208,8 +208,49 @@ entirely.
 **And a limit worth stating plainly: at a true ratio of 1.25x the rates
 are indistinguishable from the equal case at every sample size a real
 person will produce.** This finding cannot tell "the same" from "a quarter
-more". That is why the sentence it prints names what the log could
-resolve instead of saying "the same" and stopping.
+more".
+
+That limit is why **the dose verdict is never surfaced at all**, rather
+than surfaced with its bound attached. The bounded sentence — "the same,
+to within the 0.03% a week your log can resolve" — is a caveat, and a
+caveat is exactly what readers discount: people take the headline, and
+this headline invites cutting a third of their training. A verdict whose
+correctness depends on the reader honouring a qualifier is not one worth
+shipping.
+
+So `minimum_effective_dose` is off `SURFACEABLE` in `lib/train/shadow.ts`.
+That is stronger than a flag defaulting to false: flipping the flag does
+nothing. The verdict is still computed and still logged, so the shadow log
+can answer later whether the band ever narrows — putting it back is a
+deliberate decision made on that evidence.
+
+What dose reports instead is **resolution**: what its log can and cannot
+tell apart, and how much more history would close the gap. True, useful,
+and unactionable in the dangerous direction. See `doseResolutions`.
+
+### `BAND_EXPONENT = 0.42`
+
+How fast the resolution band narrows, and the basis for "roughly N more
+weeks". **Not** the inverse square root a textbook would assume — fitted
+across simulated histories, the exponent is -0.417, because
+autocorrelation makes effective sample size grow more slowly than the
+calendar does:
+
+| weeks | 39 | 59 | 79 | 119 | 159 | 239 |
+|---|---|---|---|---|---|---|
+| band | 2.2e-3 | 1.8e-3 | 1.6e-3 | 1.4e-3 | 1.3e-3 | 1.0e-3 |
+
+It matters which is used: inverse-square-root understates the wait, which
+tells somebody an answer is closer than it is.
+
+### `RESOLUTION_TARGET = 4`
+
+The projection is quoted against a difference of a quarter of the
+athlete's own progression rate, because that is precisely the difference
+the table above identified as invisible. It is a reference, not a
+judgement — "here is what it would take to resolve a difference this
+small" is a fact about statistical power, where "a difference this small
+matters" would be a normative claim about a stranger's training.
 
 ### `MIN_OVERLAP_WEEKS = 32`, `MIN_TRAINED_WEEKS = 32`
 

@@ -53,11 +53,18 @@ describe('every engine export has a caller', () => {
   /**
    * The shadow-mode reads, which are meant to have no caller.
    *
-   * doseNote and transferNote are the ONLY path from a silent verdict to
-   * a sentence somebody reads. Nothing calls them, on purpose: that is
-   * what "switching on is one flag, not a rewrite" means — the door
-   * exists, closed, so shipping a finding is a flag in shadow.ts and a
-   * call site here rather than new code.
+   * transferNote is the ONLY path from a silent verdict to a sentence
+   * somebody reads. Nothing calls it, on purpose: that is what
+   * "switching on is one flag, not a rewrite" means — the door exists,
+   * closed, so shipping a finding is a flag in shadow.ts and a call site
+   * here rather than new code.
+   *
+   * There is no doseNote. Dose's verdict is an equivalence claim it
+   * cannot support, so it has no door at all — it is off SURFACEABLE
+   * entirely, and its flag does nothing. What dose reports instead,
+   * doseResolutionNote, IS wired into the tile and so needs no
+   * exemption: it is gated by a flag like everything else, but the thing
+   * behind that flag is a statement about precision rather than a claim.
    *
    * They were passing this check by accident, because the name happened
    * to appear in a comment elsewhere in the same module and the rule
@@ -65,7 +72,7 @@ describe('every engine export has a caller', () => {
    * written down — with a companion test below asserting the thing that
    * actually matters, which is that the tile does not call them.
    */
-  const SHADOWED_READS = ['doseNote', 'transferNote']
+  const SHADOWED_READS = ['transferNote']
 
   it('has no export that nothing anywhere calls', () => {
     const logger = loggerOf(TILES[0])
@@ -98,6 +105,8 @@ describe('every engine export has a caller', () => {
        are decisions rather than an empty haystack. */
     expect(logger).toContain('TrainEngine.recordDose')
     expect(logger).toContain('TrainEngine.recordTransfer')
+    /* And dose's verdict has no door at all, not even a closed one. */
+    expect(logger).not.toContain('TrainEngine.doseVerdicts')
   })
 
   it('exports every engine module from the barrel, so the tile can reach it', () => {

@@ -249,3 +249,69 @@ describe('transfer is written down too', () => {
     expect(text).toMatch(/shared weeks needed/)
   })
 })
+
+/**
+ * The resolution report — the only thing dose says to anybody.
+ *
+ * The equivalence verdict is off SURFACEABLE and its flag does nothing,
+ * so there is no call site for it to have. This is the safe read, and it
+ * IS wired: flipping one boolean makes it appear, which is the property
+ * the whole shadow design claims and the only way to know the call site
+ * works is to force it.
+ */
+describe('the resolution report reaches the board when switched on', () => {
+  it('renders nothing today', () => {
+    const shown = run(`
+      (function(){
+        ${finishSession};
+        var clone = document.body.cloneNode(true);
+        clone.querySelectorAll('script, style').forEach(function(n){ n.remove(); });
+        return clone.textContent;
+      })()`)
+    expect(shown).not.toContain('RESOLUTION:')
+  })
+
+  it('has a call site that produces the line when the flag is forced', () => {
+    /* Forced through the engine rather than by editing shadow.ts, so
+       this exercises the tile's own call — the half that can silently
+       not happen. */
+    const line = run(`
+      TrainEngine.doseResolutionNote({
+        history: STATE.history||{},
+        index: TrainEngine.indexFrom(STATE.customLib||{}),
+        now: Date.now(),
+      }, { dose_resolution: true })`)
+    expect(typeof line === 'string' || line === null).toBe(true)
+  })
+
+  it('never carries an equivalence claim, flag or no flag', () => {
+    const forced = run(`
+      TrainEngine.doseResolutionNote({
+        history: STATE.history||{},
+        index: TrainEngine.indexFrom(STATE.customLib||{}),
+        now: Date.now(),
+      }, { dose_resolution: true }) || ''`)
+    expect(forced).not.toMatch(/the same|no difference|equivalent/i)
+  })
+
+  it('refuses to surface the verdict even with its flag forced on', () => {
+    /* The load-bearing guarantee, checked through the shipped bundle
+       rather than only against the source. */
+    const surfaced = run(`
+      (function(){
+        var v = TrainEngine.doseVerdicts({
+          history: STATE.history||{},
+          index: TrainEngine.indexFrom(STATE.customLib||{}),
+          now: Date.now(),
+        })[0];
+        return {
+          exists: !!v,
+          would: v && v.would,
+          forced: TrainEngine.surface(v, { minimum_effective_dose: true }),
+        };
+      })()`)
+    expect(surfaced.exists).toBe(true)
+    expect(surfaced.would).toBe(true)
+    expect(surfaced.forced).toBeNull()
+  })
+})

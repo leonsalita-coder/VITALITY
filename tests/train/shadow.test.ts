@@ -5,12 +5,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   SHADOW_FEATURES, isLive, surface, recordVerdict, reviewLines, emptyLog,
-  MAX_LOG_ENTRIES, type ShadowVerdict, type ShadowLog,
+  MAX_LOG_ENTRIES, SURFACEABLE, type ShadowVerdict, type ShadowLog,
 } from '../../lib/train/shadow'
 
+/**
+ * A surfaceable verdict, by default.
+ *
+ * This used to default to `minimum_effective_dose`, which is now off the
+ * SURFACEABLE list entirely and can never become a sentence — so every
+ * test of the flag mechanism was quietly testing the refusal instead.
+ * The refusal has its own group below.
+ */
 function verdict(over: Partial<ShadowVerdict> = {}): ShadowVerdict {
   return {
-    feature: 'minimum_effective_dose',
+    feature: 'transfer_between_lifts',
     subject: 'chest',
     date: '2026-03-01',
     would: true,
@@ -45,21 +53,58 @@ describe('everything ships silent', () => {
 
 describe('switching on is one flag', () => {
   it('returns the text when the feature is enabled', () => {
-    const live = surface(verdict(), { minimum_effective_dose: true })
+    const live = surface(verdict(), { transfer_between_lifts: true })
     expect(live).toContain('12 sets a week as on 18')
   })
 
   it('still says nothing when the statistics did not clear', () => {
-    expect(surface(verdict({ would: false }), { minimum_effective_dose: true })).toBeNull()
+    expect(surface(verdict({ would: false }), { transfer_between_lifts: true })).toBeNull()
   })
 
   it('enabling one feature does not enable the other', () => {
-    const other = verdict({ feature: 'transfer_between_lifts' })
-    expect(surface(other, { minimum_effective_dose: true })).toBeNull()
+    expect(surface(verdict(), { dose_resolution: true })).toBeNull()
     /* The control: the same verdict DOES surface under its own flag, so
        the null above is the flag doing its job rather than the verdict
        being unsurfaceable for some unrelated reason. */
-    expect(surface(other, { transfer_between_lifts: true })).toContain('12 sets')
+    expect(surface(verdict(), { transfer_between_lifts: true })).toContain('12 sets')
+  })
+})
+
+describe('a verdict off the surfaceable list has no flag to flip', () => {
+  /**
+   * The load-bearing guarantee, and the reason it is not a flag.
+   *
+   * Dose's verdict is an equivalence claim — "you progressed the same on
+   * 12 sets as on 18" — and the calibration says it cannot tell a true
+   * ratio of 1.0 from 1.25 at any sample size a real person produces. It
+   * carried its own bound for that reason, and a bound is a caveat:
+   * readers take the headline and discount the qualifier, and this
+   * headline invites cutting a third of somebody's training.
+   *
+   * A default can be changed by accident. Being off the list cannot.
+   */
+  const dose = () => verdict({ feature: 'minimum_effective_dose' })
+
+  it('is not on the list', () => {
+    expect(SURFACEABLE).not.toContain('minimum_effective_dose')
+  })
+
+  it('stays null with its flag forced on', () => {
+    expect(surface(dose(), { minimum_effective_dose: true })).toBeNull()
+  })
+
+  it('stays null with every flag forced on', () => {
+    const all = Object.fromEntries(
+      Object.keys(SHADOW_FEATURES).map((k) => [k, true]),
+    ) as Record<string, boolean>
+    expect(surface(dose(), all)).toBeNull()
+    /* The control: a surfaceable verdict DOES come through that same
+       call, so the nulls above are the list rather than a broken read. */
+    expect(surface(verdict(), all)).toBeTruthy()
+  })
+
+  it('leaves the list non-empty, so exclusion is a decision', () => {
+    expect(SURFACEABLE.length).toBeGreaterThan(0)
   })
 })
 
@@ -147,7 +192,10 @@ describe('the log keeps the evidence, not just the answer', () => {
 
 describe('the review', () => {
   const log: ShadowLog = emptyLog()
-  recordVerdict(log, verdict())
+  /* A dose verdict, which the review still shows in full even though it
+     can never be surfaced — the log IS the evidence for deciding whether
+     that should ever change. */
+  recordVerdict(log, verdict({ feature: 'minimum_effective_dose' }))
   recordVerdict(log, verdict({
     feature: 'transfer_between_lifts', subject: 'front_squat->back_squat',
     date: '2026-04-02', would: false, p: 0.31,
