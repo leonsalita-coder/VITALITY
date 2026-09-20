@@ -49,6 +49,9 @@
     /* --danger: the lightened --fail the August port carried as a raw
        hex in .pbtn.danger and .menuPop button.danger. Same value, named. */
     --danger:#f4a09c;
+    /* A pale mint, the far stop of the gradient on a live deload row.
+       Recovered with its exact August value rather than approximated. */
+    --signal-bright:#d7fbe9;
     /* ---- type ----------------------------------------------------------
        Eight roles, named for what they are rather than how big they are.
        There were nineteen sizes between 8px and 27px, which is nineteen
@@ -154,8 +157,12 @@
   .weeklyReview .wrLine.mu { color:var(--muted); font-weight:500; }
 
   /* progress charts — minimal, reusing the existing bar and plot surfaces */
-  .sChart { position:relative; width:100%; aspect-ratio:16/9; }
-  .sPoint { position:absolute; width:9px; height:9px; margin:-4px 0 0 -4px; padding:0;
+  /* A sparkline is small by definition. aspect-ratio:16/9 at card width
+     made it a panel over a hundred pixels tall inside a card whose number
+     is the point. The padding leaves room for the last dot, which sits on
+     the right edge and was half outside its own box. */
+  .sChart { position:relative; width:100%; height:38px; max-height:38px; margin-top:10px; padding-right:5px; }
+  .sPoint { position:absolute; width:5px; height:5px; margin:-2px 0 0 -2px; opacity:.55; padding:0;
     border-radius:50%; border:none; background:var(--signal); }
   .sPoint:active { transform:scale(1.5); }
   .mbFill.ok, .mbFill.band-in { background:var(--signal); }
@@ -602,6 +609,118 @@
      Scoped to .pill, so drop rows keep their own smaller fields. Those
      are a secondary surface and are not sized here. */
   .pill .pillInput { height:44px; }
+
+  /* ---- pass 1: elements that were rendering wrong ---------------------
+     Sixty rules, recovered from 731e891. Every one of these classes was
+     outside all the lists so far, so nothing had been extracted for them
+     and they rendered as raw text or as white system controls on a dark
+     ground: card meta running together as one string, the name welded to
+     its info affordance, cue pills, muscle bands with no bar at all, the
+     grip / eye / pin / overflow row, the whole card menu, the goal pill,
+     the search field, and the celebration. */
+  .menuPop button.deloadRow { justify-content:space-between; }
+  .menuRowLabel { flex:1; }
+  .exHead { display:flex; align-items:center; gap:9px; }
+  .grip { flex:none; width:20px; height:26px; display:grid; place-items:center; color:rgba(255,255,255,.2); cursor:grab; touch-action:none; background:none; border:none; padding:0; }
+  .grip:hover { color:var(--muted); }
+  .grip.dragging { cursor:grabbing; }
+  .grip svg { width:14px; height:14px; fill:currentColor; }
+  .exEye { flex:none; display:inline-flex; align-items:center; justify-content:center; background:none; border:none; cursor:pointer; color:var(--muted); width:26px; height:26px; transition:color var(--d2); }
+  .exEye:hover { color:var(--signal); }
+  .exEye svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:1.5; }
+  .exName { font-family:var(--sans); font-weight:700; font-size:var(--fs-subhead); line-height:1.2; letter-spacing:-0.015em; color:var(--text); flex:1; min-width:0; border:none; background:none; text-align:left; cursor:pointer; padding:0; display:inline-flex; align-items:baseline; gap:7px; word-break:break-word; }
+  .exName:hover .nameTxt { text-decoration:underline; text-decoration-color:rgba(110,231,183,.5); text-underline-offset:3px; }
+  .exInfo { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; font-family:var(--sans); font-size:var(--fs-micro); font-weight:800; color:var(--signal); background:rgba(110,231,183,.06); border:1px solid rgba(110,231,183,.25); border-radius:50%; line-height:1; align-self:center; flex:none; letter-spacing:var(--ls-micro); }
+  .pinBtn { flex:none; background:none; border:none; cursor:pointer; color:rgba(255,255,255,.2); font-size:var(--fs-subhead); line-height:1; padding:4px; transition:color var(--d2), transform var(--d1) var(--spring); font-weight:var(--fw-subhead); }
+  .pinBtn:hover { color:var(--muted); }
+  .pinBtn:active { transform:scale(.85); }
+  .pinBtn.on { color:var(--gold); }
+  .menuBtn { flex:none; background:none; border:none; cursor:pointer; color:var(--muted); padding:5px 6px; border-radius:8px; transition:color var(--d2), background var(--d2), transform var(--d1) var(--spring); }
+  .menuBtn:hover { color:var(--text); background:var(--e3); }
+  .menuBtn:active { transform:scale(.88); }
+  .menuBtn svg { width:18px; height:18px; fill:currentColor; }
+  .exMeta { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding-left:29px; margin-top:11px; line-height:var(--lh-micro); }
+  .metaSep { opacity:.4; }
+  .exNote { padding-left:29px; margin-top:9px; font-size:var(--fs-caption); color:var(--muted-2); display:flex; gap:7px; align-items:baseline; line-height:var(--lh-caption); font-weight:var(--fw-caption); }
+  .exNote .ndot { color:var(--signal); }
+  .deloadTag { color:var(--muted-2); border:1px solid var(--hair-strong); border-radius:4px; padding:1px 6px; font-size:var(--fs-micro); letter-spacing:.1em; line-height:var(--lh-micro); font-weight:var(--fw-micro); }
+  .groupTag { color:var(--signal); border:1px solid rgba(110,231,183,.3); border-radius:4px; padding:1px 6px; font-size:var(--fs-micro); letter-spacing:.08em; text-transform:uppercase; line-height:var(--lh-micro); font-weight:var(--fw-micro); }
+  .goalPill { width:100%; text-align:left; background:var(--e2); border:1px solid var(--hair); color:var(--text); border-radius:var(--r-md); padding:15px 16px; font-family:var(--sans); font-size:var(--fs-body); font-weight:500; cursor:pointer; transition:border-color var(--d2), background var(--d2); line-height:var(--lh-body); }
+  .goalPill:hover { border-color:rgba(110,231,183,.35); background:rgba(110,231,183,.03); }
+  .goalPill.empty { color:var(--muted); font-weight:400; }
+  .muscleBars { display:flex; flex-direction:column; gap:11px; padding:4px 2px; }
+  .mbRow { display:flex; align-items:center; gap:10px; }
+  .mbLbl { width:88px; flex:none; font-size:var(--fs-label); color:var(--muted-2); text-transform:capitalize; line-height:var(--lh-label); font-weight:var(--fw-label); }
+  .mbTrack { flex:1; height:9px; border-radius:999px; background:rgba(255,255,255,.05); overflow:hidden; }
+  .mbFill { height:100%; background:linear-gradient(90deg, var(--signal), var(--signal-bright)); border-radius:999px; box-shadow:0 0 8px rgba(110,231,183,.28); transition:width var(--d5) var(--ease-out); }
+  .mbVal { width:56px; flex:none; text-align:right; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro); }
+  .formMuscles { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.08em; text-transform:uppercase; line-height:var(--lh-micro); font-weight:var(--fw-micro); }
+  .formMuscles .primary { color:var(--signal); }
+  .formMuscles .secondary { color:var(--muted-2); }
+  .formCues { display:flex; gap:9px; flex-wrap:wrap; margin-top:20px; }
+  .cuePill { border:1px solid var(--hair-strong); border-radius:999px; padding:8px 15px; color:var(--muted-2); font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-caption); }
+  .searchRow { display:flex; align-items:center; gap:10px; border:1px solid var(--hair-strong); border-radius:12px; padding:11px 13px; background:var(--e1); }
+  .searchRow svg { width:16px; height:16px; fill:none; stroke:var(--muted); stroke-width:1.6; flex:none; }
+  .searchRow input { flex:1; background:none; border:none; outline:none; color:var(--text); font:inherit; font-size:var(--fs-body); line-height:var(--lh-body); font-weight:var(--fw-body); }
+  .menuPop { position:absolute; z-index:70; min-width:184px; background:var(--e3); border:1px solid var(--hair-strong); border-radius:13px; padding:6px; box-shadow:0 18px 50px rgba(0,0,0,.6); transform-origin:top right; opacity:0; filter:blur(10px); transform:translateY(-5px) scale(.95); animation:menuDrop .5s var(--spring) forwards; }
+  .menuPop button { display:flex; align-items:center; gap:11px; width:100%; background:none; border:none; color:var(--text); font:inherit; font-size:var(--fs-body); padding:11px 12px; border-radius:9px; cursor:pointer; text-align:left; transition:background var(--d2), transform var(--d1) var(--spring); animation:menuItemIn .4s var(--ease-out) backwards; line-height:var(--lh-body); font-weight:var(--fw-body); }
+  .menuPop button:hover { background:var(--e4); }
+  .menuPop button:active { transform:scale(.96); }
+  .menuPop button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  .menuPop .sep { height:1px; background:var(--hair); margin:4px 2px; }
+  .celebrate { position:fixed; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.8); opacity:0; pointer-events:none; transition:opacity var(--d3); padding:24px; }
+  .celebrate.on { opacity:1; pointer-events:auto; }
+  .celebrate .burst { text-align:center; max-width:360px; transform:scale(.7); transition:transform var(--d4) var(--spring); }
+  .celebrate.on .burst { transform:scale(1); }
+  .celebrate .bstar { width:70px; height:70px; margin:0 auto; }
+  .celebrate .bstar svg { width:100%; height:100%; fill:var(--gold); filter:drop-shadow(0 0 22px rgba(245,166,35,.5)); }
+  .celebrate .ch1 { font-family:var(--sans); font-weight:800; font-size:var(--fs-hero); letter-spacing:-0.015em; margin-top:16px; color:var(--gold); line-height:var(--lh-hero); }
+  .celebrate .ch2 { font-size:var(--fs-body); font-weight:500; margin-top:10px; line-height:1.55; }
+  .celebrate .ch2 .goal { color:var(--gold); font-weight:700; }
+  .celebrate .tap { color:var(--muted); font-size:var(--fs-label); margin-top:20px; line-height:var(--lh-label); font-weight:var(--fw-label); }
+
+  /* keyframes the card menu animates */
+  @keyframes menuDrop { to { opacity:1; filter:blur(0px); transform:translateY(0) scale(1); } }
+  @keyframes menuItemIn { from { opacity:0; filter:blur(8px); transform:translateX(8px) scale(.96); } }
+
+  /* ---- pass 1: the rest ------------------------------------------------
+     Nothing here had an August version to recover; these classes were all
+     added after the deletion. */
+
+  /* The most recent point is the one being read; the rest are context. */
+  .sPoint:last-of-type { width:7px; height:7px; margin:-3px 0 0 -3px; opacity:1; }
+
+  /* The tick was painted whether or not the item was ticked, so every
+     checklist row read as done and the header's count disagreed with what
+     was on screen. The count was right. */
+  .wcCheck .wcCheckMark { opacity:0; transform:scale(.7); transition:opacity var(--d1) var(--ease-out), transform var(--d1) var(--spring); }
+  .wcCheck.on .wcCheckMark { opacity:1; transform:scale(1); }
+
+  /* The strike ran the full width of the row because .wcTxt is flex:1 and
+     the scribble is 100% of it. The text shrinks to its own width now and
+     the remove button is pushed over by a margin instead. */
+  .wcTxt { flex:0 1 auto; margin-right:auto; }
+  .wcX { margin-left:0; }
+
+  /* A logged set's fields are fixed, and looked exactly like editable
+     ones. Not colour alone: the value dims AND the field loses its
+     interactive affordances. */
+  .pillInput:disabled { opacity:.55; cursor:default; -webkit-text-fill-color:currentColor; }
+  .pill.done .pillInput:disabled, .pill.failed .pillInput:disabled { opacity:.7; }
+
+  /* A disabled Save kept the signal fill and still read as the thing to
+     press. Disabled loses the fill entirely: border only, muted text. */
+  .pbtn:disabled, .pbtn.save:disabled {
+    background:none; border-color:var(--hair-strong); color:var(--muted-2);
+    box-shadow:none; opacity:1; cursor:default;
+  }
+
+  /* The switch has to survive greyscale, so position does the work and
+     colour only reinforces it: the track changes weight as well as hue,
+     and the thumb moves the full width of it. */
+  .bouncyTrack { border:1px solid var(--hair); }
+  #moonbtn.on .bouncyTrack, .deloadRow.on .bouncyTrack { border-width:2px; }
+  #moonbtn .bouncyThumb, .deloadRow .bouncyThumb { box-shadow:0 2px 6px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.18); }
 </style>
 <style>
   .cs-page { max-width:1100px; margin:0 auto; padding:32px 20px 120px; }
@@ -623,6 +742,10 @@
   .cs-box { border:1px solid var(--hair); border-radius:8px; padding:16px; }
   .cs-kbd { font:500 11px/1 var(--mono); border:1px solid var(--hair-strong); border-radius:4px;
             padding:3px 5px; color:var(--text); }
+  /* A transformed ancestor makes position:fixed resolve against it, so an
+     overlay can be shown in place instead of taking over the page. */
+  .cs-stage { position:relative; transform:translateZ(0); height:340px; overflow:hidden;
+              border:1px solid var(--hair); border-radius:8px; }
 </style>
 </head>
 <body>
@@ -639,7 +762,7 @@
   real. Hover them; press <span class="cs-kbd">Tab</span> to walk focus through the page.</p>
 
 <section class="cs-sec" id="tokens"><h2>1 · Tokens</h2><p class="cs-note">Everything below resolves from this block. A light mode should be a swap here and nothing else.</p>
-  <div class="cs-stack"><div class="cs-cell"><div class="cs-lbl">elevation</div><div class="cs-grid"><div class="cs-cell"><div class="cs-lbl">--e0</div><div class="cs-swatch" style="background:var(--e0)"></div></div><div class="cs-cell"><div class="cs-lbl">--e1</div><div class="cs-swatch" style="background:var(--e1)"></div></div><div class="cs-cell"><div class="cs-lbl">--e2</div><div class="cs-swatch" style="background:var(--e2)"></div></div><div class="cs-cell"><div class="cs-lbl">--e3</div><div class="cs-swatch" style="background:var(--e3)"></div></div><div class="cs-cell"><div class="cs-lbl">--e4</div><div class="cs-swatch" style="background:var(--e4)"></div></div><div class="cs-cell"><div class="cs-lbl">--hair</div><div class="cs-swatch" style="background:var(--hair)"></div></div><div class="cs-cell"><div class="cs-lbl">--hair-strong</div><div class="cs-swatch" style="background:var(--hair-strong)"></div></div></div></div><div class="cs-cell"><div class="cs-lbl">signal</div><div class="cs-grid"><div class="cs-cell"><div class="cs-lbl">--signal</div><div class="cs-swatch" style="background:var(--signal)"></div></div><div class="cs-cell"><div class="cs-lbl">--signal-ink</div><div class="cs-swatch" style="background:var(--signal-ink)"></div></div><div class="cs-cell"><div class="cs-lbl">--gold</div><div class="cs-swatch" style="background:var(--gold)"></div></div><div class="cs-cell"><div class="cs-lbl">--fail</div><div class="cs-swatch" style="background:var(--fail)"></div></div></div></div><div class="cs-cell"><div class="cs-lbl">text</div><div class="cs-grid"><div class="cs-cell"><div class="cs-lbl">--text</div><div class="cs-swatch" style="background:var(--text)"></div></div><div class="cs-cell"><div class="cs-lbl">--muted</div><div class="cs-swatch" style="background:var(--muted)"></div></div><div class="cs-cell"><div class="cs-lbl">--muted-2</div><div class="cs-swatch" style="background:var(--muted-2)"></div></div></div></div></div>
+  <div class="cs-lbl" style="margin-top:22px">elevation</div><div class="cs-grid"><div class="cs-cell"><div class="cs-lbl">--e0</div><div class="cs-swatch" style="background:var(--e0)"></div></div><div class="cs-cell"><div class="cs-lbl">--e1</div><div class="cs-swatch" style="background:var(--e1)"></div></div><div class="cs-cell"><div class="cs-lbl">--e2</div><div class="cs-swatch" style="background:var(--e2)"></div></div><div class="cs-cell"><div class="cs-lbl">--e3</div><div class="cs-swatch" style="background:var(--e3)"></div></div><div class="cs-cell"><div class="cs-lbl">--e4</div><div class="cs-swatch" style="background:var(--e4)"></div></div><div class="cs-cell"><div class="cs-lbl">--hair</div><div class="cs-swatch" style="background:var(--hair)"></div></div><div class="cs-cell"><div class="cs-lbl">--hair-strong</div><div class="cs-swatch" style="background:var(--hair-strong)"></div></div></div><div class="cs-lbl" style="margin-top:22px">signal</div><div class="cs-grid"><div class="cs-cell"><div class="cs-lbl">--signal</div><div class="cs-swatch" style="background:var(--signal)"></div></div><div class="cs-cell"><div class="cs-lbl">--signal-ink</div><div class="cs-swatch" style="background:var(--signal-ink)"></div></div><div class="cs-cell"><div class="cs-lbl">--gold</div><div class="cs-swatch" style="background:var(--gold)"></div></div><div class="cs-cell"><div class="cs-lbl">--fail</div><div class="cs-swatch" style="background:var(--fail)"></div></div></div><div class="cs-lbl" style="margin-top:22px">text</div><div class="cs-grid"><div class="cs-cell"><div class="cs-lbl">--text</div><div class="cs-swatch" style="background:var(--text)"></div></div><div class="cs-cell"><div class="cs-lbl">--muted</div><div class="cs-swatch" style="background:var(--muted)"></div></div><div class="cs-cell"><div class="cs-lbl">--muted-2</div><div class="cs-swatch" style="background:var(--muted-2)"></div></div></div>
   <div class="cs-cell" style="margin-top:22px"><div class="cs-lbl">spacing ladder</div>
     <div class="cs-stack"><div class="cs-cell"><div class="cs-lbl">--sp1</div><div class="cs-ruler" style="width:var(--sp1)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp2</div><div class="cs-ruler" style="width:var(--sp2)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp3</div><div class="cs-ruler" style="width:var(--sp3)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp4</div><div class="cs-ruler" style="width:var(--sp4)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp5</div><div class="cs-ruler" style="width:var(--sp5)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp6</div><div class="cs-ruler" style="width:var(--sp6)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp7</div><div class="cs-ruler" style="width:var(--sp7)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp8</div><div class="cs-ruler" style="width:var(--sp8)"></div></div><div class="cs-cell"><div class="cs-lbl">--sp9</div><div class="cs-ruler" style="width:var(--sp9)"></div></div></div>
   </div>
@@ -706,9 +829,9 @@
 <section class="cs-sec" id="switch"><h2>5 · Switch</h2><p class="cs-note">role="switch" with aria-checked. On and off must differ without relying on colour.</p>
   <div class="cs-grid">
     <div class="cs-cell"><div class="cs-lbl">off</div><div class="bouncyRow"><span class="bouncyLabel">Rest day</span><button class="bouncyToggle" role="switch" aria-checked="false" title="Mark today a rest day"><span class="bouncyTrack"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div></div>
-    <div class="cs-cell"><div class="cs-lbl">on</div><div class="bouncyRow"><span class="bouncyLabel on">Rest day</span><button class="bouncyToggle" role="switch" aria-checked="true" title="Mark today a rest day"><span class="bouncyTrack"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div></div>
-    <div class="cs-cell"><div class="cs-lbl">mini — off</div><div class="bouncyRow"><span class="bouncyLabel">Rest day</span><button class="bouncyToggle" role="switch" aria-checked="false" title="Mark today a rest day"><span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div></div>
-    <div class="cs-cell"><div class="cs-lbl">mini — on</div><div class="bouncyRow"><span class="bouncyLabel on">Rest day</span><button class="bouncyToggle" role="switch" aria-checked="true" title="Mark today a rest day"><span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">on — live (#moonbtn)</div><div class="bouncyRow on"><span class="bouncyLabel on">Rest day</span><button class="bouncyToggle on" id="moonbtn" role="switch" aria-checked="true" title="Mark today a rest day"><span class="bouncyTrack"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">mini — off</div><div class="deloadRow"><span class="bouncyLabel">Deload this lift</span><button class="bouncyToggle" role="switch" aria-checked="false" title="Mark today a rest day"><span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">mini — on</div><div class="deloadRow on"><span class="bouncyLabel on">Deload this lift</span><button class="bouncyToggle on" role="switch" aria-checked="true" title="Mark today a rest day"><span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div></div>
   </div>
 </section>
 
@@ -772,7 +895,7 @@
 
 <section class="cs-sec" id="checklist"><h2>9b · Warm-up checklist</h2><p class="cs-note">Ticked mid-session. Neither control was styled in August or now.</p>
   <div class="wcSection">
-    <button class="wcHead"><span class="wcCaret">▾</span><span class="wcTitle">Warm-up</span><span class="wcCount">1/3</span></button>
+    <button class="wcHead"><span class="wcCaret">▾</span><span class="wcTitle">Warm-up</span><span class="wcCount">1/2</span></button>
     <div class="wcBody open"><div class="wcBodyInner">
       <div class="wcItem">
         <button class="wcCheck on" aria-pressed="true"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -804,13 +927,14 @@
     <div class="cs-cell"><div class="cs-lbl">cvInputRow — coach</div><div class="cvInputRow"><input placeholder="e.g. 30 min, dumbbells only" /><button class="cvSend" aria-label="Send">↑</button></div></div>
     <div class="cs-cell"><div class="cs-lbl">cvInputRow — disabled while replying</div><div class="cvInputRow"><input placeholder="Thinking…" disabled /><button class="cvSend" aria-label="Send" disabled>↑</button></div></div>
     <div class="cs-cell"><div class="cs-lbl">goalRow</div><div class="goalRow"><span class="nm">Bench Press to 225</span><button class="photoX">Edit</button></div></div>
-    <div class="cs-cell"><div class="cs-lbl">sChart — sparkline</div><div class="ovCard"><div class="ovNum">128</div><div class="ovLbl">Sessions</div><svg class="sChart" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,20 20,14 40,16 60,8 80,10 100,4" fill="none" stroke="currentColor" stroke-width="2"/><circle class="sPoint" cx="100" cy="4" r="2.5"/></svg></div></div>
+    <div class="cs-cell"><div class="cs-lbl">sChart — sparkline</div><div class="ovCard"><div class="ovNum">128</div><div class="ovLbl">Sessions</div><div class="sChart"><button class="sPoint" style="left:0%;top:82%" title="week 1"></button><button class="sPoint" style="left:11%;top:66%" title="week 2"></button><button class="sPoint" style="left:22%;top:71%" title="week 3"></button><button class="sPoint" style="left:33%;top:48%" title="week 4"></button><button class="sPoint" style="left:44%;top:55%" title="week 5"></button><button class="sPoint" style="left:55%;top:34%" title="week 6"></button><button class="sPoint" style="left:66%;top:40%" title="week 7"></button><button class="sPoint" style="left:77%;top:22%" title="week 8"></button><button class="sPoint" style="left:88%;top:28%" title="week 9"></button><button class="sPoint" style="left:99%;top:10%" title="week 10"></button></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">ex — collapsed</div><div class="ex collapsed"><div class="exHead"><div class="exName"><span class="nameTxt">Barbell Row</span></div></div><div class="exMeta"><span>accessory</span></div><div class="collapsedNote">2 of 3 sets logged · tap the eye to expand</div><div class="exActions"></div><div class="pills"></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">ex — being dragged</div><div class="ex dragging"><div class="exHead"><div class="exName"><span class="nameTxt">Barbell Curl</span></div></div><div class="exMeta"><span>accessory</span></div><div class="exActions"></div><div class="pills"></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">ex — drag ghost (mid-drag)</div><div class="ex drag-ghost"><div class="exHead"><div class="exName"><span class="nameTxt">Back Squat</span></div></div><div class="exMeta"><span>compound</span></div><div class="exActions"></div><div class="pills"></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">pill — shimmer (just logged)</div><div class="pill done shimmer"><span class="pillIdx">I</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><span class="pillStatus">done</span></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">noteCard — entering / leaving</div><div class="noteBar"><div class="noteSlot"><div class="noteCard note-gold entering"><span class="noteDot"></span><span class="noteEmo">★</span><span class="noteTxt">Entering</span></div></div><div class="noteDiv"></div><div class="noteSlot"><div class="noteCard note-plain leaving"><span class="noteDot"></span><span class="noteEmo">·</span><span class="noteTxt">Leaving</span></div></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">freshbtn — armed</div><button class="freshbtn arm">Tap again to wipe</button></div>
-    <div class="cs-cell"><div class="cs-lbl">celebrate — new best</div><div class="celebrate" style="position:relative;inset:auto;min-height:150px"><div class="burst"><div class="bstar">★</div><div class="ch1">New best</div><div class="ch2">Bench Press — 195 × 5</div><div class="tap">tap to close</div></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">celebrate — new best</div><div class="cs-stage"><div class="celebrate on"><div class="burst"><div class="bstar"><svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.1 6.6 .9-4.8 4.6 1.2 6.6L12 18.5 6.1 20.8l1.2-6.6L2.5 9.6l6.6-.9z"/></svg></div><div class="ch1">New best</div><div class="ch2">Bench Press — <span class="goal">195 × 5</span></div><div class="tap">tap to close</div></div></div></div></div>
   </div>
 </section>
 

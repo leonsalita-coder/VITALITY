@@ -62,6 +62,10 @@ const SHEET_CSS = `
   .cs-box { border:1px solid var(--hair); border-radius:8px; padding:16px; }
   .cs-kbd { font:500 11px/1 var(--mono); border:1px solid var(--hair-strong); border-radius:4px;
             padding:3px 5px; color:var(--text); }
+  /* A transformed ancestor makes position:fixed resolve against it, so an
+     overlay can be shown in place instead of taking over the page. */
+  .cs-stage { position:relative; transform:translateZ(0); height:340px; overflow:hidden;
+              border:1px solid var(--hair); border-radius:8px; }
 `
 
 const TOKEN_GROUPS = [
@@ -123,9 +127,15 @@ const dropRow = () =>
   + `<input class="pillInput r small" type="number" inputmode="numeric" value="8" aria-label="Drop reps" />`
   + `<button class="dropX" aria-label="Remove drop">×</button></div></div>`
 
-const switchHtml = (on, mini = false) =>
-  `<div class="bouncyRow"><span class="bouncyLabel${on ? ' on' : ''}">Rest day</span>`
-  + `<button class="bouncyToggle" role="switch" aria-checked="${on}" title="Mark today a rest day">`
+/* The on-state rules are scoped to #moonbtn and .deloadRow — a bare
+   .bouncyToggle matches neither, so the sheet showed a switch whose two
+   states were identical and it read as a design fault rather than a
+   fixture one. The id is unique per page, so only the live one carries
+   it and the others use the .deloadRow scope the card menu uses. */
+const switchHtml = (on, mini = false, live = false) =>
+  `<div class="${mini ? 'deloadRow' : 'bouncyRow'}${on ? ' on' : ''}">`
+  + `<span class="bouncyLabel${on ? ' on' : ''}">${mini ? 'Deload this lift' : 'Rest day'}</span>`
+  + `<button class="bouncyToggle${on ? ' on' : ''}"${live ? ' id="moonbtn"' : ''} role="switch" aria-checked="${on}" title="Mark today a rest day">`
   + `<span class="bouncyTrack${mini ? ' mini' : ''}"><span class="bouncyThumb"><span class="bouncyDot">🌙</span></span></span></button></div>`
 
 const stepper = (value) =>
@@ -171,10 +181,14 @@ const liftCard = (edit) =>
  * ---------------------------------------------------------------- */
 
 export function contactSheet(css = tileCss()) {
+  /* Flat: a label row, then a grid of swatches. The first version nested
+     a .cs-grid inside a .cs-cell inside a .cs-stack, and the nesting
+     overlapped one of the labels. */
   const tokenSwatches = TOKEN_GROUPS.map(([group, names]) =>
-    `<div class="cs-cell"><div class="cs-lbl">${group}</div><div class="cs-grid">`
+    `<div class="cs-lbl" style="margin-top:22px">${group}</div>`
+    + `<div class="cs-grid">`
     + names.map((n) => cell(n, `<div class="cs-swatch" style="background:var(${n})"></div>`)).join('')
-    + `</div></div>`).join('')
+    + `</div>`).join('')
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -201,7 +215,7 @@ export function contactSheet(css = tileCss()) {
   real. Hover them; press <span class="cs-kbd">Tab</span> to walk focus through the page.</p>
 
 ${sec('tokens', '1 · Tokens', 'Everything below resolves from this block. A light mode should be a swap here and nothing else.', `
-  <div class="cs-stack">${tokenSwatches}</div>
+  ${tokenSwatches}
   <div class="cs-cell" style="margin-top:22px"><div class="cs-lbl">spacing ladder</div>
     <div class="cs-stack">${SPACING.map((n) => `<div class="cs-cell"><div class="cs-lbl">${n}</div><div class="cs-ruler" style="width:var(${n})"></div></div>`).join('')}</div>
   </div>
@@ -268,7 +282,7 @@ ${sec('input', '4 · Input', 'The set-row variant is the one that matters: large
 ${sec('switch', '5 · Switch', 'role="switch" with aria-checked. On and off must differ without relying on colour.', `
   <div class="cs-grid">
     ${cell('off', switchHtml(false))}
-    ${cell('on', switchHtml(true))}
+    ${cell('on — live (#moonbtn)', switchHtml(true, false, true))}
     ${cell('mini — off', switchHtml(false, true))}
     ${cell('mini — on', switchHtml(true, true))}
   </div>
@@ -332,7 +346,7 @@ ${sec('card', '9 · Card', 'One elevation and radius system, not six.', `
 
 ${sec('checklist', '9b · Warm-up checklist', 'Ticked mid-session. Neither control was styled in August or now.', `
   <div class="wcSection">
-    <button class="wcHead"><span class="wcCaret">▾</span><span class="wcTitle">Warm-up</span><span class="wcCount">1/3</span></button>
+    <button class="wcHead"><span class="wcCaret">▾</span><span class="wcTitle">Warm-up</span><span class="wcCount">1/2</span></button>
     <div class="wcBody open"><div class="wcBodyInner">
       <div class="wcItem">
         <button class="wcCheck on" aria-pressed="true"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -369,13 +383,24 @@ ${sec('chrome', '10b · Header, menu, coach and overlays', 'Surfaces that live o
     ${cell('cvInputRow — coach', '<div class="cvInputRow"><input placeholder="e.g. 30 min, dumbbells only" /><button class="cvSend" aria-label="Send">↑</button></div>')}
     ${cell('cvInputRow — disabled while replying', '<div class="cvInputRow"><input placeholder="Thinking…" disabled /><button class="cvSend" aria-label="Send" disabled>↑</button></div>')}
     ${cell('goalRow', '<div class="goalRow"><span class="nm">Bench Press to 225</span><button class="photoX">Edit</button></div>')}
-    ${cell('sChart — sparkline', '<div class="ovCard"><div class="ovNum">128</div><div class="ovLbl">Sessions</div><svg class="sChart" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,20 20,14 40,16 60,8 80,10 100,4" fill="none" stroke="currentColor" stroke-width="2"/><circle class="sPoint" cx="100" cy="4" r="2.5"/></svg></div>')}
+    ${cell('sChart — sparkline', '<div class="ovCard"><div class="ovNum">128</div><div class="ovLbl">Sessions</div>'
+      + '<div class="sChart">'
+      + [82, 66, 71, 48, 55, 34, 40, 22, 28, 10].map((top, i) =>
+          `<button class="sPoint" style="left:${i * 11}%;top:${top}%" title="week ${i + 1}"></button>`).join('')
+      + '</div></div>')}
     ${cell('ex — collapsed', '<div class="ex collapsed"><div class="exHead"><div class="exName"><span class="nameTxt">Barbell Row</span></div></div><div class="exMeta"><span>accessory</span></div><div class="collapsedNote">2 of 3 sets logged · tap the eye to expand</div><div class="exActions"></div><div class="pills"></div></div>')}
+    ${cell('ex — being dragged', '<div class="ex dragging"><div class="exHead"><div class="exName"><span class="nameTxt">Barbell Curl</span></div></div><div class="exMeta"><span>accessory</span></div><div class="exActions"></div><div class="pills"></div></div>')}
     ${cell('ex — drag ghost (mid-drag)', '<div class="ex drag-ghost"><div class="exHead"><div class="exName"><span class="nameTxt">Back Squat</span></div></div><div class="exMeta"><span>compound</span></div><div class="exActions"></div><div class="pills"></div></div>')}
     ${cell('pill — shimmer (just logged)', '<div class="pill done shimmer"><span class="pillIdx">I</span><span class="pillValue">' + inputs() + '</span><span class="pillSpacer"></span><div class="pillActions"><span class="pillStatus">done</span></div></div>')}
     ${cell('noteCard — entering / leaving', '<div class="noteBar"><div class="noteSlot">' + noteCard('gold', '★', 'Entering') .replace('noteCard note-gold','noteCard note-gold entering') + '</div><div class="noteDiv"></div><div class="noteSlot">' + noteCard('plain', '·', 'Leaving').replace('noteCard note-plain','noteCard note-plain leaving') + '</div></div>')}
     ${cell('freshbtn — armed', '<button class="freshbtn arm">Tap again to wipe</button>')}
-    ${cell('celebrate — new best', '<div class="celebrate" style="position:relative;inset:auto;min-height:150px"><div class="burst"><div class="bstar">★</div><div class="ch1">New best</div><div class="ch2">Bench Press — 195 × 5</div><div class="tap">tap to close</div></div></div>')}
+    ${cell('celebrate — new best', '<div class="cs-stage">'
+      + '<div class="celebrate on"><div class="burst">'
+      + '<div class="bstar"><svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.1 6.6 .9-4.8 4.6 1.2 6.6L12 18.5 6.1 20.8l1.2-6.6L2.5 9.6l6.6-.9z"/></svg></div>'
+      + '<div class="ch1">New best</div>'
+      + '<div class="ch2">Bench Press — <span class="goal">195 × 5</span></div>'
+      + '<div class="tap">tap to close</div>'
+      + '</div></div></div>')}
   </div>
 `)}
 

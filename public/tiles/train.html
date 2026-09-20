@@ -49,6 +49,9 @@
     /* --danger: the lightened --fail the August port carried as a raw
        hex in .pbtn.danger and .menuPop button.danger. Same value, named. */
     --danger:#f4a09c;
+    /* A pale mint, the far stop of the gradient on a live deload row.
+       Recovered with its exact August value rather than approximated. */
+    --signal-bright:#d7fbe9;
     /* ---- type ----------------------------------------------------------
        Eight roles, named for what they are rather than how big they are.
        There were nineteen sizes between 8px and 27px, which is nineteen
@@ -154,8 +157,12 @@
   .weeklyReview .wrLine.mu { color:var(--muted); font-weight:500; }
 
   /* progress charts — minimal, reusing the existing bar and plot surfaces */
-  .sChart { position:relative; width:100%; aspect-ratio:16/9; }
-  .sPoint { position:absolute; width:9px; height:9px; margin:-4px 0 0 -4px; padding:0;
+  /* A sparkline is small by definition. aspect-ratio:16/9 at card width
+     made it a panel over a hundred pixels tall inside a card whose number
+     is the point. The padding leaves room for the last dot, which sits on
+     the right edge and was half outside its own box. */
+  .sChart { position:relative; width:100%; height:38px; max-height:38px; margin-top:10px; padding-right:5px; }
+  .sPoint { position:absolute; width:5px; height:5px; margin:-2px 0 0 -2px; opacity:.55; padding:0;
     border-radius:50%; border:none; background:var(--signal); }
   .sPoint:active { transform:scale(1.5); }
   .mbFill.ok, .mbFill.band-in { background:var(--signal); }
@@ -602,6 +609,118 @@
      Scoped to .pill, so drop rows keep their own smaller fields. Those
      are a secondary surface and are not sized here. */
   .pill .pillInput { height:44px; }
+
+  /* ---- pass 1: elements that were rendering wrong ---------------------
+     Sixty rules, recovered from 731e891. Every one of these classes was
+     outside all the lists so far, so nothing had been extracted for them
+     and they rendered as raw text or as white system controls on a dark
+     ground: card meta running together as one string, the name welded to
+     its info affordance, cue pills, muscle bands with no bar at all, the
+     grip / eye / pin / overflow row, the whole card menu, the goal pill,
+     the search field, and the celebration. */
+  .menuPop button.deloadRow { justify-content:space-between; }
+  .menuRowLabel { flex:1; }
+  .exHead { display:flex; align-items:center; gap:9px; }
+  .grip { flex:none; width:20px; height:26px; display:grid; place-items:center; color:rgba(255,255,255,.2); cursor:grab; touch-action:none; background:none; border:none; padding:0; }
+  .grip:hover { color:var(--muted); }
+  .grip.dragging { cursor:grabbing; }
+  .grip svg { width:14px; height:14px; fill:currentColor; }
+  .exEye { flex:none; display:inline-flex; align-items:center; justify-content:center; background:none; border:none; cursor:pointer; color:var(--muted); width:26px; height:26px; transition:color var(--d2); }
+  .exEye:hover { color:var(--signal); }
+  .exEye svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:1.5; }
+  .exName { font-family:var(--sans); font-weight:700; font-size:var(--fs-subhead); line-height:1.2; letter-spacing:-0.015em; color:var(--text); flex:1; min-width:0; border:none; background:none; text-align:left; cursor:pointer; padding:0; display:inline-flex; align-items:baseline; gap:7px; word-break:break-word; }
+  .exName:hover .nameTxt { text-decoration:underline; text-decoration-color:rgba(110,231,183,.5); text-underline-offset:3px; }
+  .exInfo { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; font-family:var(--sans); font-size:var(--fs-micro); font-weight:800; color:var(--signal); background:rgba(110,231,183,.06); border:1px solid rgba(110,231,183,.25); border-radius:50%; line-height:1; align-self:center; flex:none; letter-spacing:var(--ls-micro); }
+  .pinBtn { flex:none; background:none; border:none; cursor:pointer; color:rgba(255,255,255,.2); font-size:var(--fs-subhead); line-height:1; padding:4px; transition:color var(--d2), transform var(--d1) var(--spring); font-weight:var(--fw-subhead); }
+  .pinBtn:hover { color:var(--muted); }
+  .pinBtn:active { transform:scale(.85); }
+  .pinBtn.on { color:var(--gold); }
+  .menuBtn { flex:none; background:none; border:none; cursor:pointer; color:var(--muted); padding:5px 6px; border-radius:8px; transition:color var(--d2), background var(--d2), transform var(--d1) var(--spring); }
+  .menuBtn:hover { color:var(--text); background:var(--e3); }
+  .menuBtn:active { transform:scale(.88); }
+  .menuBtn svg { width:18px; height:18px; fill:currentColor; }
+  .exMeta { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding-left:29px; margin-top:11px; line-height:var(--lh-micro); }
+  .metaSep { opacity:.4; }
+  .exNote { padding-left:29px; margin-top:9px; font-size:var(--fs-caption); color:var(--muted-2); display:flex; gap:7px; align-items:baseline; line-height:var(--lh-caption); font-weight:var(--fw-caption); }
+  .exNote .ndot { color:var(--signal); }
+  .deloadTag { color:var(--muted-2); border:1px solid var(--hair-strong); border-radius:4px; padding:1px 6px; font-size:var(--fs-micro); letter-spacing:.1em; line-height:var(--lh-micro); font-weight:var(--fw-micro); }
+  .groupTag { color:var(--signal); border:1px solid rgba(110,231,183,.3); border-radius:4px; padding:1px 6px; font-size:var(--fs-micro); letter-spacing:.08em; text-transform:uppercase; line-height:var(--lh-micro); font-weight:var(--fw-micro); }
+  .goalPill { width:100%; text-align:left; background:var(--e2); border:1px solid var(--hair); color:var(--text); border-radius:var(--r-md); padding:15px 16px; font-family:var(--sans); font-size:var(--fs-body); font-weight:500; cursor:pointer; transition:border-color var(--d2), background var(--d2); line-height:var(--lh-body); }
+  .goalPill:hover { border-color:rgba(110,231,183,.35); background:rgba(110,231,183,.03); }
+  .goalPill.empty { color:var(--muted); font-weight:400; }
+  .muscleBars { display:flex; flex-direction:column; gap:11px; padding:4px 2px; }
+  .mbRow { display:flex; align-items:center; gap:10px; }
+  .mbLbl { width:88px; flex:none; font-size:var(--fs-label); color:var(--muted-2); text-transform:capitalize; line-height:var(--lh-label); font-weight:var(--fw-label); }
+  .mbTrack { flex:1; height:9px; border-radius:999px; background:rgba(255,255,255,.05); overflow:hidden; }
+  .mbFill { height:100%; background:linear-gradient(90deg, var(--signal), var(--signal-bright)); border-radius:999px; box-shadow:0 0 8px rgba(110,231,183,.28); transition:width var(--d5) var(--ease-out); }
+  .mbVal { width:56px; flex:none; text-align:right; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro); }
+  .formMuscles { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.08em; text-transform:uppercase; line-height:var(--lh-micro); font-weight:var(--fw-micro); }
+  .formMuscles .primary { color:var(--signal); }
+  .formMuscles .secondary { color:var(--muted-2); }
+  .formCues { display:flex; gap:9px; flex-wrap:wrap; margin-top:20px; }
+  .cuePill { border:1px solid var(--hair-strong); border-radius:999px; padding:8px 15px; color:var(--muted-2); font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-caption); }
+  .searchRow { display:flex; align-items:center; gap:10px; border:1px solid var(--hair-strong); border-radius:12px; padding:11px 13px; background:var(--e1); }
+  .searchRow svg { width:16px; height:16px; fill:none; stroke:var(--muted); stroke-width:1.6; flex:none; }
+  .searchRow input { flex:1; background:none; border:none; outline:none; color:var(--text); font:inherit; font-size:var(--fs-body); line-height:var(--lh-body); font-weight:var(--fw-body); }
+  .menuPop { position:absolute; z-index:70; min-width:184px; background:var(--e3); border:1px solid var(--hair-strong); border-radius:13px; padding:6px; box-shadow:0 18px 50px rgba(0,0,0,.6); transform-origin:top right; opacity:0; filter:blur(10px); transform:translateY(-5px) scale(.95); animation:menuDrop .5s var(--spring) forwards; }
+  .menuPop button { display:flex; align-items:center; gap:11px; width:100%; background:none; border:none; color:var(--text); font:inherit; font-size:var(--fs-body); padding:11px 12px; border-radius:9px; cursor:pointer; text-align:left; transition:background var(--d2), transform var(--d1) var(--spring); animation:menuItemIn .4s var(--ease-out) backwards; line-height:var(--lh-body); font-weight:var(--fw-body); }
+  .menuPop button:hover { background:var(--e4); }
+  .menuPop button:active { transform:scale(.96); }
+  .menuPop button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  .menuPop .sep { height:1px; background:var(--hair); margin:4px 2px; }
+  .celebrate { position:fixed; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.8); opacity:0; pointer-events:none; transition:opacity var(--d3); padding:24px; }
+  .celebrate.on { opacity:1; pointer-events:auto; }
+  .celebrate .burst { text-align:center; max-width:360px; transform:scale(.7); transition:transform var(--d4) var(--spring); }
+  .celebrate.on .burst { transform:scale(1); }
+  .celebrate .bstar { width:70px; height:70px; margin:0 auto; }
+  .celebrate .bstar svg { width:100%; height:100%; fill:var(--gold); filter:drop-shadow(0 0 22px rgba(245,166,35,.5)); }
+  .celebrate .ch1 { font-family:var(--sans); font-weight:800; font-size:var(--fs-hero); letter-spacing:-0.015em; margin-top:16px; color:var(--gold); line-height:var(--lh-hero); }
+  .celebrate .ch2 { font-size:var(--fs-body); font-weight:500; margin-top:10px; line-height:1.55; }
+  .celebrate .ch2 .goal { color:var(--gold); font-weight:700; }
+  .celebrate .tap { color:var(--muted); font-size:var(--fs-label); margin-top:20px; line-height:var(--lh-label); font-weight:var(--fw-label); }
+
+  /* keyframes the card menu animates */
+  @keyframes menuDrop { to { opacity:1; filter:blur(0px); transform:translateY(0) scale(1); } }
+  @keyframes menuItemIn { from { opacity:0; filter:blur(8px); transform:translateX(8px) scale(.96); } }
+
+  /* ---- pass 1: the rest ------------------------------------------------
+     Nothing here had an August version to recover; these classes were all
+     added after the deletion. */
+
+  /* The most recent point is the one being read; the rest are context. */
+  .sPoint:last-of-type { width:7px; height:7px; margin:-3px 0 0 -3px; opacity:1; }
+
+  /* The tick was painted whether or not the item was ticked, so every
+     checklist row read as done and the header's count disagreed with what
+     was on screen. The count was right. */
+  .wcCheck .wcCheckMark { opacity:0; transform:scale(.7); transition:opacity var(--d1) var(--ease-out), transform var(--d1) var(--spring); }
+  .wcCheck.on .wcCheckMark { opacity:1; transform:scale(1); }
+
+  /* The strike ran the full width of the row because .wcTxt is flex:1 and
+     the scribble is 100% of it. The text shrinks to its own width now and
+     the remove button is pushed over by a margin instead. */
+  .wcTxt { flex:0 1 auto; margin-right:auto; }
+  .wcX { margin-left:0; }
+
+  /* A logged set's fields are fixed, and looked exactly like editable
+     ones. Not colour alone: the value dims AND the field loses its
+     interactive affordances. */
+  .pillInput:disabled { opacity:.55; cursor:default; -webkit-text-fill-color:currentColor; }
+  .pill.done .pillInput:disabled, .pill.failed .pillInput:disabled { opacity:.7; }
+
+  /* A disabled Save kept the signal fill and still read as the thing to
+     press. Disabled loses the fill entirely: border only, muted text. */
+  .pbtn:disabled, .pbtn.save:disabled {
+    background:none; border-color:var(--hair-strong); color:var(--muted-2);
+    box-shadow:none; opacity:1; cursor:default;
+  }
+
+  /* The switch has to survive greyscale, so position does the work and
+     colour only reinforces it: the track changes weight as well as hue,
+     and the thumb moves the full width of it. */
+  .bouncyTrack { border:1px solid var(--hair); }
+  #moonbtn.on .bouncyTrack, .deloadRow.on .bouncyTrack { border-width:2px; }
+  #moonbtn .bouncyThumb, .deloadRow .bouncyThumb { box-shadow:0 2px 6px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.18); }
 </style>
 </head>
 <body>
