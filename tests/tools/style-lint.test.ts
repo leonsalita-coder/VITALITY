@@ -32,12 +32,19 @@ describe('values outside the token block', () => {
     expect(BASELINE).toBeGreaterThanOrEqual(0)
   })
 
-  it('carries no px font size in the stylesheet', () => {
-    /* Also absolute now. All 74 went onto the --fs-* scale; what remains
-       in the baseline is inline style attributes in dialog markup, which
-       are markup rather than stylesheet and were not in this pass. */
-    const { rules } = splitCss(readFileSync(TILE, 'utf8'))
+  it('carries no px font size anywhere, stylesheet or markup', () => {
+    /* The baseline is zero. Every size in the tile — including the ten
+       that lived in inline style attributes inside dialog markup — is on
+       the eight-role ramp. */
+    const source = readFileSync(TILE, 'utf8')
+    const { rules } = splitCss(source)
     expect(rules.match(/font-size\s*:\s*[0-9.]+px/g)).toBeNull()
+    const inline = inlineStyles(source).flatMap((d: string) => d.match(/font-size:[0-9.]+px/g) || [])
+    expect(inline).toEqual([])
+  })
+
+  it('has a baseline of zero', () => {
+    expect(BASELINE).toBe(0)
   })
 
   it('leaves no token referenced but undefined', () => {
@@ -78,12 +85,46 @@ describe('values outside the token block', () => {
   })
 })
 
+describe('the type ramp', () => {
+  const tokens = () => splitCss(readFileSync(TILE, 'utf8')).tokens
+  const ROLES = ['micro', 'label', 'caption', 'body', 'subhead', 'title', 'display', 'hero']
+
+  it('names every role, and nothing by its size', () => {
+    /* A scale named by its numbers is still nineteen decisions with
+       better spelling. */
+    for (const r of ROLES) expect(tokens(), r).toContain(`--fs-${r}:`)
+    expect(tokens()).not.toMatch(/--fs-\d/)
+  })
+
+  it('carries a line height and a weight for each role', () => {
+    for (const r of ROLES) {
+      expect(tokens(), r).toContain(`--lh-${r}:`)
+      expect(tokens(), r).toContain(`--fw-${r}:`)
+    }
+  })
+
+  it('has a floor of 11px', () => {
+    /* 8px text on a dimmed screen at arm's length in a gym is
+       decoration, not information. */
+    const sizes = [...tokens().matchAll(/--fs-\w+:\s*([\d.]+)px/g)].map((m) => parseFloat(m[1]))
+    expect(sizes).toHaveLength(8)
+    expect(Math.min(...sizes)).toBe(11)
+  })
+
+  it('uses only role tokens for size in the stylesheet', () => {
+    const { rules } = splitCss(readFileSync(TILE, 'utf8'))
+    const used = [...rules.matchAll(/font-size\s*:\s*var\(--fs-([\w-]+)\)/g)].map((m) => m[1])
+    expect(used.length).toBeGreaterThan(30)
+    expect([...new Set(used)].filter((u) => !ROLES.includes(u))).toEqual([])
+  })
+})
+
 describe('the token block', () => {
   const tokens = () => splitCss(readFileSync(TILE, 'utf8')).tokens
 
   it('exists and defines the palette', () => {
     for (const t of ['--e0', '--text', '--muted', '--signal', '--sans', '--mono', '--sp4', '--r-md',
-                     '--mint', '--bg', '--muted-strong', '--danger', '--fs-12', '--fs-19']) {
+                     '--mint', '--bg', '--muted-strong', '--danger']) {
       expect(tokens(), t).toContain(t)
     }
   })

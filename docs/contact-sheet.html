@@ -50,12 +50,25 @@
        hex in .pbtn.danger and .menuPop button.danger. Same value, named. */
     --danger:#f4a09c;
     /* ---- type ----------------------------------------------------------
-       Extracted from the 19 sizes actually in use, NOT rationalised into
-       a ramp. Collapsing near-neighbours (8/8.5, 10/10.5, 12/12.5,
-       14/14.5/15) would be a restyle, and this pass is a recovery — the
-       candidates are named in the commit so the decision stays open.
-       Named by value so no ordering is implied. */
-    --fs-8:8px; --fs-8-5:8.5px; --fs-9-5:9.5px; --fs-10:10px; --fs-10-5:10.5px; --fs-11:11px; --fs-11-5:11.5px; --fs-12:12px; --fs-12-5:12.5px; --fs-13:13px; --fs-14:14px; --fs-14-5:14.5px; --fs-15:15px; --fs-16:16px; --fs-17:17px; --fs-19:19px; --fs-20:20px; --fs-22:22px; --fs-27:27px;
+       Eight roles, named for what they are rather than how big they are.
+       There were nineteen sizes between 8px and 27px, which is nineteen
+       decisions nobody made; and the floor is 11px, because 8px text on a
+       dimmed screen at arm's length in a gym is decoration, not
+       information.
+
+       Weight and line-height here are DEFAULTS. A rule that declares its
+       own keeps it — .finishBtn is body and declares 700, and forcing the
+       role's 400 onto the primary action would be the ramp overruling a
+       deliberate choice. Seventeen such rules exist and are listed in the
+       commit. */
+    --fs-micro:11px; --lh-micro:14px; --fw-micro:600; --ls-micro:.04em;
+    --fs-label:12px; --lh-label:16px; --fw-label:600;
+    --fs-caption:13px; --lh-caption:18px; --fw-caption:500;
+    --fs-body:15px; --lh-body:22px; --fw-body:400;
+    --fs-subhead:17px; --lh-subhead:23px; --fw-subhead:600;
+    --fs-title:20px; --lh-title:26px; --fw-title:700;
+    --fs-display:22px; --lh-display:27px; --fw-display:800; --ls-display:-.02em;
+    --fs-hero:27px; --lh-hero:31px; --fw-hero:800; --ls-hero:-.02em;
   }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   ::selection { background:var(--signal); color:var(--signal-ink); }
@@ -93,15 +106,15 @@
      real, day-dependent callouts (rest day, streak, a nudge, a PR),
      color-coded by what kind of note it is. First rebuilt piece. ==== */
   .topSticker { padding:calc(16px + env(safe-area-inset-top)) var(--sp5) 0; }
-  .stickerGreet { font-family:var(--sans); font-weight:800; font-size:var(--fs-22); letter-spacing:-0.02em; color:var(--text); margin-bottom:11px; }
+  .stickerGreet { font-family:var(--sans); font-weight:800; font-size:var(--fs-display); letter-spacing:-0.02em; color:var(--text); margin-bottom:11px; line-height:var(--lh-display);}
   .noteBar { display:flex; align-items:stretch; gap:0; background:var(--e2); border:1px solid var(--hair); border-radius:var(--r-lg); padding:10px 2px; box-shadow:0 14px 30px -20px rgba(0,0,0,.7); }
   .noteSlot { flex:1; min-width:0; height:16px; position:relative; overflow:hidden; perspective:220px; }
   .noteDiv { width:1px; flex:none; background:var(--hair-strong); margin:1px 0; }
-  .noteCard { position:absolute; inset:0 7px; display:flex; align-items:center; gap:4px; font-family:var(--sans); font-size:var(--fs-10-5); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); transform-origin:50% 0%; transform:translateY(0) rotateX(0deg); opacity:1; transition:transform .48s var(--ease-momentum), opacity .38s var(--ease-momentum); }
+  .noteCard { position:absolute; inset:0 7px; display:flex; align-items:center; gap:4px; font-family:var(--sans); font-size:var(--fs-micro); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); transform-origin:50% 0%; transform:translateY(0) rotateX(0deg); opacity:1; transition:transform .48s var(--ease-momentum), opacity .38s var(--ease-momentum); line-height:var(--lh-micro); letter-spacing:var(--ls-micro);}
   .noteCard.entering { transform:translateY(65%) rotateX(75deg); opacity:0; }
   .noteCard.leaving { transform:translateY(-65%) rotateX(-75deg); opacity:0; }
   .noteDot { flex:none; width:4px; height:4px; border-radius:50%; background:currentColor; }
-  .noteEmo { flex:none; font-size:var(--fs-10-5); line-height:1; }
+  .noteEmo { flex:none; font-size:var(--fs-micro); line-height:1; font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);}
   .noteTxt { min-width:0; overflow:hidden; text-overflow:ellipsis; color:currentColor; }
   .note-mint { color:var(--signal); }
   .note-gold { color:var(--gold); }
@@ -112,20 +125,20 @@
      explanation and not a call to action. Only a layoff or a deload earns
      colour, since those are the two the lifter would otherwise misread as
      the app losing their progress. */
-  .pillWhy { margin:5px 0 0 34px; font-size:var(--fs-11); line-height:1.35; font-family:var(--sans); color:var(--muted); letter-spacing:.005em; }
+  .pillWhy { margin:5px 0 0 34px; font-size:var(--fs-micro); line-height:1.35; font-family:var(--sans); color:var(--muted); letter-spacing:.005em; font-weight:var(--fw-micro);}
   .pillWhy.why-clean { color:var(--signal); }
   .pillWhy.why-layoff, .pillWhy.why-deload { color:var(--gold); }
 
   /* readiness — stated as fact before the session, not offered as a choice */
   .readinessNote { margin:var(--sp3) var(--sp5) 0; padding:10px var(--sp4);
     border-radius:var(--r-md); background:var(--e2); border:1px solid var(--hair);
-    font-size:var(--fs-12); font-weight:600; line-height:1.4; color:var(--muted); }
+    font-size:var(--fs-label); font-weight:600; line-height:1.4; color:var(--muted); }
   .readinessNote.verdict-rest_advised { color:var(--fail); border-color:rgba(239,111,106,.3); }
   .weeklyReview { margin:var(--sp3) var(--sp5) 0; padding:12px var(--sp4);
     border-radius:var(--r-md); background:var(--e1); border:1px solid var(--hair); }
-  .weeklyReview .wrHead { font-size:var(--fs-10); font-weight:700; letter-spacing:.09em;
-    text-transform:uppercase; color:var(--muted-2); margin-bottom:6px; }
-  .weeklyReview .wrLine { font-size:var(--fs-12); font-weight:600; line-height:1.45; color:var(--text); }
+  .weeklyReview .wrHead { font-size:var(--fs-micro); font-weight:700; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--muted-2); margin-bottom:6px; line-height:var(--lh-micro);}
+  .weeklyReview .wrLine { font-size:var(--fs-label); font-weight:600; line-height:1.45; color:var(--text); }
   .weeklyReview .wrLine.mu { color:var(--muted); font-weight:500; }
 
   /* progress charts — minimal, reusing the existing bar and plot surfaces */
@@ -142,16 +155,16 @@
      and it should never compete with "Hit it". */
   .pillWarm { flex:none; width:22px; height:22px; border-radius:7px;
     border:1px solid var(--hair-strong); background:transparent; color:var(--muted-2);
-    font-family:var(--mono); font-size:var(--fs-11); font-weight:700; line-height:1;
-    transition:background var(--d1) var(--ease-out), color var(--d1) var(--ease-out); }
+    font-family:var(--mono); font-size:var(--fs-micro); font-weight:700; line-height:1;
+    transition:background var(--d1) var(--ease-out), color var(--d1) var(--ease-out); letter-spacing:var(--ls-micro);}
   .pillWarm.on { background:var(--e4); color:var(--text); }
   .pill.warmup { opacity:.55; }
   /* a weight or rep record: a dot, not a takeover */
   .pillPrDot { display:inline-block; width:5px; height:5px; border-radius:50%;
     background:var(--gold); margin-right:5px; vertical-align:middle; }
   /* the near-miss cue, before the set */
-  .pillNear { font-size:var(--fs-10-5); font-weight:600; color:var(--gold); margin-right:8px;
-    white-space:nowrap; }
+  .pillNear { font-size:var(--fs-micro); font-weight:600; color:var(--gold); margin-right:8px;
+    white-space:nowrap; line-height:var(--lh-micro); letter-spacing:var(--ls-micro);}
 
   /* ==== REST BAR — an instrument face, not a toast. It sits inside the
      lift card while the clock runs: a ring that drains, a mono readout,
@@ -170,17 +183,17 @@
   .restbar .restRingFill { fill:none; stroke:var(--signal); stroke-width:3; stroke-linecap:round;
     transition:stroke-dashoffset var(--d1) linear, stroke var(--d2) var(--ease-out); }
   .restbar .restTime { font-family:var(--mono); font-variant-numeric:tabular-nums;
-    font-size:var(--fs-17); font-weight:600; letter-spacing:-.01em; color:var(--text); min-width:52px; }
+    font-size:var(--fs-subhead); font-weight:600; letter-spacing:-.01em; color:var(--text); min-width:52px; line-height:var(--lh-subhead);}
   .restbar .restLabel { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    font-size:var(--fs-11); font-weight:600; color:var(--muted); letter-spacing:.01em; }
+    font-size:var(--fs-micro); font-weight:600; color:var(--muted); letter-spacing:.01em; line-height:var(--lh-micro);}
   .restbar .restStep { flex:none; padding:7px 9px; border-radius:var(--r-sm);
     border:1px solid var(--hair-strong); background:transparent; color:var(--muted);
-    font-family:var(--mono); font-size:var(--fs-11); font-weight:600;
-    transition:background var(--d1) var(--ease-out), color var(--d1) var(--ease-out); }
+    font-family:var(--mono); font-size:var(--fs-micro); font-weight:600;
+    transition:background var(--d1) var(--ease-out), color var(--d1) var(--ease-out); line-height:var(--lh-micro); letter-spacing:var(--ls-micro);}
   .restbar .restStep:active { background:var(--e4); color:var(--text); transform:scale(.94); }
   .restbar .restX { flex:none; width:24px; height:24px; border-radius:50%;
     border:1px solid var(--hair); background:transparent; color:var(--muted-2);
-    font-size:var(--fs-14); line-height:1; }
+    font-size:var(--fs-body); line-height:1; font-weight:var(--fw-body);}
   .restbar .restX:active { color:var(--text); }
   /* overtime — the rest is over and the number is now counting up */
   .restbar.over { border-color:rgba(245,166,35,.32); background:linear-gradient(var(--e2),var(--e2)) padding-box; }
@@ -207,12 +220,12 @@
      ================================================================= */
 
   /* 1 · popup shell — 11 rules */
-  .eyebrow { font-family:var(--mono); text-transform:uppercase; letter-spacing:.16em; font-size:var(--fs-10-5); font-weight:600; color:var(--muted); }
+  .eyebrow { font-family:var(--mono); text-transform:uppercase; letter-spacing:.16em; font-size:var(--fs-micro); font-weight:600; color:var(--muted); line-height:var(--lh-micro);}
   .scrim { position:fixed; inset:0; z-index:60; display:flex; align-items:flex-start; justify-content:center; padding:max(20px, env(safe-area-inset-top)) 14px 40px; overflow-y:auto; background:rgba(0,0,0,.5); backdrop-filter:blur(0px); opacity:0; animation:scrimIn var(--d3) var(--ease-momentum) forwards; }
   .pop { width:100%; max-width:520px; margin:auto; background:var(--e2); border:1px solid var(--hair-strong); border-radius:var(--r-lg); padding:24px 22px 26px; position:relative; box-shadow:0 40px 100px rgba(0,0,0,.65); opacity:0; transform:translateY(10px) scale(.97); animation:popIn var(--d4) var(--ease-momentum) forwards; }
   .pop::before { content:''; position:absolute; left:16px; right:16px; top:0; height:1px; background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent); }
   .popHead { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-  .popTitle { font-family:var(--sans); font-weight:800; font-size:var(--fs-27); line-height:1.05; letter-spacing:-0.025em; margin-top:6px; }
+  .popTitle { font-family:var(--sans); font-weight:800; font-size:var(--fs-hero); line-height:1.05; letter-spacing:-0.025em; margin-top:6px; }
   .popX { background:none; border:none; color:var(--muted); cursor:pointer; padding:4px; flex:none; transition:color var(--d2), transform var(--d1) var(--spring); }
   .popX svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; }
   .popX:hover { color:var(--text); }
@@ -222,25 +235,25 @@
   /* 2 · button — 35 rules */
   .wcAddBtn { background:var(--signal); color:var(--signal-ink); border:none; border-radius:10px; padding:0 15px; font-weight:700; cursor:pointer; transition:transform var(--d1) var(--spring); }
   .wcAddBtn:active { transform:scale(.94); }
-  .actionPill { display:inline-flex; align-items:center; gap:6px; padding:7px 13px; font-size:var(--fs-12); font-weight:500; color:var(--muted-2); background:var(--e3); border:1px solid var(--hair); border-radius:var(--r-pill); cursor:pointer; white-space:nowrap; transition:color var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), background var(--d2) var(--ease-out), transform var(--d1) var(--spring); }
+  .actionPill { display:inline-flex; align-items:center; gap:6px; padding:7px 13px; font-size:var(--fs-label); font-weight:500; color:var(--muted-2); background:var(--e3); border:1px solid var(--hair); border-radius:var(--r-pill); cursor:pointer; white-space:nowrap; transition:color var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), background var(--d2) var(--ease-out), transform var(--d1) var(--spring); line-height:var(--lh-label);}
   .actionPill:hover { color:var(--signal); border-color:rgba(110,231,183,.35); }
   .actionPill:active { transform:scale(.95); }
   .actionPill svg { width:13px; height:13px; stroke:currentColor; fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
-  .actionPill .pl { font-family:var(--sans); letter-spacing:.01em; font-size:var(--fs-12-5); }
-  .finishBtn { width:100%; border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:6px; transform-origin:bottom; border-radius:var(--r-md); padding:14px 16px 12px; font-family:var(--sans); font-size:var(--fs-15); font-weight:700; cursor:pointer; background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,0) 46%), var(--signal); color:var(--signal-ink); box-shadow:0 14px 34px -14px rgba(110,231,183,.55); transition:transform var(--d1) var(--spring), box-shadow var(--d2) var(--ease-out), opacity var(--d2), background var(--d2), border-bottom-width var(--d1) var(--spring); }
+  .actionPill .pl { font-family:var(--sans); letter-spacing:.01em; font-size:var(--fs-label); line-height:var(--lh-label); font-weight:var(--fw-label);}
+  .finishBtn { width:100%; border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:6px; transform-origin:bottom; border-radius:var(--r-md); padding:14px 16px 12px; font-family:var(--sans); font-size:var(--fs-body); font-weight:700; cursor:pointer; background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,0) 46%), var(--signal); color:var(--signal-ink); box-shadow:0 14px 34px -14px rgba(110,231,183,.55); transition:transform var(--d1) var(--spring), box-shadow var(--d2) var(--ease-out), opacity var(--d2), background var(--d2), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-body);}
   .finishBtn:hover:not(:disabled) { box-shadow:0 18px 42px -12px rgba(110,231,183,.65); transform:translateY(-1px); }
   .finishBtn:active:not(:disabled) { transform:scaleY(.96) translateY(2px); border-bottom-width:2px; }
   .finishBtn:disabled { opacity:.35; cursor:default; box-shadow:none; }
   .finishBtn.locked { background:rgba(110,231,183,.1); color:var(--signal); border:1px solid rgba(110,231,183,.4); box-shadow:none; }
-  .freshbtn { display:block; margin:14px auto 0; background:none; border:2px solid transparent; border-bottom-width:3px; transform-origin:bottom; color:var(--muted); font-family:var(--sans); font-size:var(--fs-12-5); font-weight:500; cursor:pointer; padding:7px 12px 5px; border-radius:9px; transition:color var(--d2), border-color var(--d2), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .freshbtn { display:block; margin:14px auto 0; background:none; border:2px solid transparent; border-bottom-width:3px; transform-origin:bottom; color:var(--muted); font-family:var(--sans); font-size:var(--fs-label); font-weight:500; cursor:pointer; padding:7px 12px 5px; border-radius:9px; transition:color var(--d2), border-color var(--d2), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-label);}
   .freshbtn:hover { color:var(--text); }
   .freshbtn.arm { color:var(--fail); font-weight:600; border-color:color-mix(in srgb, var(--fail) 45%, transparent); }
   .freshbtn:active { transform:scaleY(.93) translateY(1px); border-bottom-width:1px; }
-  .photoX { background:none; border:none; color:var(--muted); font-size:var(--fs-17); cursor:pointer; padding:2px 6px; line-height:1; transition:color var(--d2), transform var(--d1) var(--spring); }
+  .photoX { background:none; border:none; color:var(--muted); font-size:var(--fs-subhead); cursor:pointer; padding:2px 6px; line-height:1; transition:color var(--d2), transform var(--d1) var(--spring); font-weight:var(--fw-subhead);}
   .photoX:hover { color:var(--fail); }
   .photoX:active { transform:scale(.82); }
   .goalRow .photoX { position:absolute; right:0; top:8px; }
-  .pbtn { flex:1; border:2px solid transparent; border-bottom-width:4px; transform-origin:bottom; border-radius:var(--r-md); padding:12px 14px 10px; font-family:var(--sans); font-size:var(--fs-14-5); font-weight:700; cursor:pointer; transition:transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .pbtn { flex:1; border:2px solid transparent; border-bottom-width:4px; transform-origin:bottom; border-radius:var(--r-md); padding:12px 14px 10px; font-family:var(--sans); font-size:var(--fs-body); font-weight:700; cursor:pointer; transition:transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-body);}
   .pbtn:active { transform:scaleY(.94) translateY(1px); border-bottom-width:2px; }
   .pbtn.save { background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,0) 46%), var(--signal); border-color:color-mix(in srgb, var(--signal) 60%, black); color:var(--signal-ink); box-shadow:0 10px 26px -14px rgba(110,231,183,.5); }
   .pbtn.save:hover:not(:disabled) { box-shadow:0 14px 34px -12px rgba(110,231,183,.6); }
@@ -261,7 +274,7 @@
   .cvSend svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 
   /* 3 · input — 21 rules */
-  .wcIn { flex:1; background:var(--e2); border:1px solid var(--hair); border-radius:10px; color:var(--text); font:inherit; font-size:var(--fs-13); padding:9px 11px; transition:border-color var(--d2); }
+  .wcIn { flex:1; background:var(--e2); border:1px solid var(--hair); border-radius:10px; color:var(--text); font:inherit; font-size:var(--fs-caption); padding:9px 11px; transition:border-color var(--d2); line-height:var(--lh-caption); font-weight:var(--fw-caption);}
   .wcIn:focus { outline:none; border-color:var(--signal); }
   .pillInput { background:transparent; border:none; outline:none; color:inherit; font:inherit; font-weight:700; font-variant-numeric:tabular-nums; text-align:center; -moz-appearance:textfield; appearance:textfield; min-width:2.4ch; width:4.2ch; padding:0 1px; border-bottom:1px solid transparent; transition:border-color var(--d2), color var(--d2); }
   .pillInput.r { width:2.6ch; }
@@ -273,19 +286,19 @@
   .pill.done .pillValue, .pill.done .pillInput { color:var(--signal-ink); }
   .field { display:flex; align-items:center; justify-content:space-between; padding:16px 0; border-bottom:1px solid var(--hair); }
   .field:last-of-type { border-bottom:none; }
-  .field .lbl { color:var(--muted-2); font-size:var(--fs-14); font-weight:500; display:flex; align-items:center; gap:10px; }
+  .field .lbl { color:var(--muted-2); font-size:var(--fs-body); font-weight:500; display:flex; align-items:center; gap:10px; line-height:var(--lh-body);}
   .field .lbl svg { width:18px; height:18px; fill:none; stroke:var(--muted); stroke-width:1.5; }
-  .wInput { font-family:var(--mono); font-weight:600; font-size:var(--fs-19); width:90px; text-align:right; background:none; border:none; color:inherit; border-bottom:1px solid transparent; -moz-appearance:textfield; appearance:textfield; }
+  .wInput { font-family:var(--mono); font-weight:600; font-size:var(--fs-title); width:90px; text-align:right; background:none; border:none; color:inherit; border-bottom:1px solid transparent; -moz-appearance:textfield; appearance:textfield; line-height:var(--lh-title);}
   .wInput:focus { outline:none; border-bottom-color:var(--signal); color:var(--signal); }
   .wInput::-webkit-outer-spin-button, .wInput::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
-  .wUnit { color:var(--muted); font-size:var(--fs-14); margin-left:6px; }
+  .wUnit { color:var(--muted); font-size:var(--fs-body); margin-left:6px; line-height:var(--lh-body); font-weight:var(--fw-body);}
   .cvInputRow { display:flex; align-items:center; gap:10px; margin:10px 16px calc(16px + env(safe-area-inset-bottom)); flex:none; background:var(--e3); border:1px solid var(--hair-strong); border-radius:999px; padding:6px 6px 6px 16px; transition:border-color var(--d2) var(--ease-out); }
   .cvInputRow:focus-within { border-color:var(--signal); }
-  .cvInputRow input { flex:1; background:none; border:none; outline:none; color:var(--text); font:inherit; font-size:var(--fs-14-5); padding:8px 0; }
+  .cvInputRow input { flex:1; background:none; border:none; outline:none; color:var(--text); font:inherit; font-size:var(--fs-body); padding:8px 0; line-height:var(--lh-body); font-weight:var(--fw-body);}
 
   /* 4 · switch — 16 rules */
   .bouncyRow { display:flex; align-items:center; gap:8px; align-self:center; margin-bottom:3px; }
-  .bouncyLabel { font-size:var(--fs-12); font-weight:500; color:var(--muted); transition:color var(--d2) var(--ease-out); }
+  .bouncyLabel { font-size:var(--fs-label); font-weight:500; color:var(--muted); transition:color var(--d2) var(--ease-out); line-height:var(--lh-label);}
   .bouncyLabel.on { color:var(--text); }
   .bouncyToggle { background:none; border:none; padding:0; cursor:pointer; -webkit-tap-highlight-color:transparent; }
   .bouncyTrack { display:flex; align-items:center; width:46px; height:26px; border-radius:999px; padding:3px; background:var(--e2); border:1px solid var(--hair-strong); box-sizing:border-box; transition:background var(--d3) var(--ease-out), border-color var(--d3) var(--ease-out); }
@@ -294,44 +307,44 @@
   #moonbtn.on .bouncyThumb { transform:translateX(20px) scale(1); }
   #moonbtn:active:not(.on) .bouncyThumb { transform:translateX(0) scale(.82); transition-duration:.15s; }
   #moonbtn.on:active .bouncyThumb { transform:translateX(20px) scale(.82); transition-duration:.15s; }
-  .bouncyDot { font-size:var(--fs-11); line-height:1; }
+  .bouncyDot { font-size:var(--fs-micro); line-height:1; font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);}
   .bouncyTrack.mini { width:32px; height:18px; padding:2px; }
   .bouncyTrack.mini .bouncyThumb { width:14px; height:14px; }
   .deloadRow.on .bouncyTrack { background:var(--signal); border-color:color-mix(in srgb, var(--signal) 55%, black); }
   .deloadRow.on .bouncyThumb { transform:translateX(14px); }
-  .deloadRow .bouncyDot { font-size:var(--fs-8); }
+  .deloadRow .bouncyDot { font-size:var(--fs-micro); line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);}
 
   /* 5 · stepper — 6 rules */
   .stepper { display:flex; align-items:center; gap:14px; }
-  .step { width:36px; height:36px; border-radius:10px; border:1px solid var(--hair-strong); background:var(--e1); color:var(--text); font-size:var(--fs-20); line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform var(--d1) var(--spring), border-color var(--d2); }
+  .step { width:36px; height:36px; border-radius:10px; border:1px solid var(--hair-strong); background:var(--e1); color:var(--text); font-size:var(--fs-title); line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform var(--d1) var(--spring), border-color var(--d2); font-weight:var(--fw-title);}
   .step:hover { border-color:var(--signal); }
   .step:active { transform:scale(.9); }
   .step.minus { color:var(--muted); }
-  .stepVal { min-width:58px; text-align:center; font-family:var(--mono); font-size:var(--fs-19); font-variant-numeric:tabular-nums; font-weight:600; }
+  .stepVal { min-width:58px; text-align:center; font-family:var(--mono); font-size:var(--fs-title); font-variant-numeric:tabular-nums; font-weight:600; line-height:var(--lh-title);}
 
   /* 6 · selectable row — 8 rules */
   .delta-cap .mu { color:var(--muted); }
   .swapItem { display:flex; align-items:center; gap:12px; padding:13px 14px; border:1px solid var(--hair); border-radius:13px; background:var(--e1); cursor:pointer; text-align:left; transition:border-color var(--d2) var(--ease-out), transform var(--d2) var(--ease-out); width:100%; color:inherit; }
   .swapItem:hover { border-color:rgba(110,231,183,.35); transform:translateY(-1px); }
-  .swapItem .nm { font-family:var(--sans); font-weight:600; font-size:var(--fs-15); }
-  .swapItem .mu { font-family:var(--mono); font-size:var(--fs-9-5); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-top:3px; }
+  .swapItem .nm { font-family:var(--sans); font-weight:600; font-size:var(--fs-body); line-height:var(--lh-body);}
+  .swapItem .mu { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-top:3px; line-height:var(--lh-micro); font-weight:var(--fw-micro);}
 
   /* 7 · chip — 9 rules */
-  .chip { flex:none; padding:8px 16px 6px; border-radius:999px; border:2px solid var(--hair); border-bottom-width:3px; transform-origin:bottom; background:var(--e2); color:var(--muted-2); font:inherit; font-size:var(--fs-13); font-weight:600; cursor:pointer; white-space:nowrap; transition:border-color var(--d2) var(--ease-out), background var(--d2) var(--ease-out), color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .chip { flex:none; padding:8px 16px 6px; border-radius:999px; border:2px solid var(--hair); border-bottom-width:3px; transform-origin:bottom; background:var(--e2); color:var(--muted-2); font:inherit; font-size:var(--fs-caption); font-weight:600; cursor:pointer; white-space:nowrap; transition:border-color var(--d2) var(--ease-out), background var(--d2) var(--ease-out), color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-caption);}
   .chip:hover { border-color:var(--hair-strong); color:var(--text); }
   .chip:active { transform:scaleY(.92) translateY(1px); border-bottom-width:1px; }
   .chip.on { border-color:color-mix(in srgb, var(--signal) 55%, black); background:var(--signal); color:var(--signal-ink); }
   .range { position:relative; display:flex; gap:3px; justify-content:center; background:var(--e1); border:1px solid var(--hair); border-radius:12px; padding:4px; margin:20px auto 0; width:fit-content; }
   .rangeInd { position:absolute; top:4px; bottom:4px; left:0; width:0; background:var(--signal); border-radius:9px; z-index:1; }
-  .range button { position:relative; z-index:2; background:none; border:none; color:var(--muted); font-family:var(--sans); font-size:var(--fs-13); font-weight:600; padding:8px 14px; border-radius:9px; cursor:pointer; transform-origin:bottom; transition:color var(--d2), transform var(--d1) var(--spring); }
+  .range button { position:relative; z-index:2; background:none; border:none; color:var(--muted); font-family:var(--sans); font-size:var(--fs-caption); font-weight:600; padding:8px 14px; border-radius:9px; cursor:pointer; transform-origin:bottom; transition:color var(--d2), transform var(--d1) var(--spring); line-height:var(--lh-caption);}
   .range button.on { color:var(--signal-ink); }
   .range button:active { transform:scaleY(.9); }
 
   /* 8 · card — 21 rules */
   .miniCard { background:var(--e2); border-radius:var(--r-md); padding:13px 12px; }
-  .miniCard b { display:block; font-family:var(--sans); font-weight:800; font-size:var(--fs-19); letter-spacing:-.02em; color:var(--signal); }
+  .miniCard b { display:block; font-family:var(--sans); font-weight:800; font-size:var(--fs-title); letter-spacing:-.02em; color:var(--signal); line-height:var(--lh-title);}
   .miniCard b.gold { color:var(--gold); }
-  .miniCard span { display:block; font-family:var(--mono); font-size:var(--fs-8-5); letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-top:4px; }
+  .miniCard span { display:block; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-top:4px; line-height:var(--lh-micro); font-weight:var(--fw-micro);}
   .ex { position:relative; background:var(--e2); border:1px solid transparent; border-radius:var(--r-md); padding:18px 16px 20px; transition:background var(--d2) var(--ease-out); }
   .ex::after { content:''; position:absolute; inset:0; border-radius:var(--r-md); background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%), rgba(110,231,183,.08), transparent 65%); opacity:0; transition:opacity var(--d3) var(--ease-out); pointer-events:none; }
   .ex:hover::after { opacity:1; }
@@ -381,26 +394,26 @@
   .pill { display:flex; align-items:center; gap:11px; padding:12px 14px 12px 16px; border-radius:12px; border:1px solid var(--hair); border-left:2px solid var(--hair-strong); background:var(--e3); position:relative; overflow:hidden; transition:background var(--d3) var(--ease-out), border-color var(--d3) var(--ease-out), box-shadow var(--d3) var(--ease-out); }
   .pill.tappable { cursor:pointer; }
   .pill.tappable:hover { background:var(--e4); }
-  .pillIdx { font-family:var(--mono); font-size:var(--fs-11); color:var(--muted); width:14px; flex:none; }
-  .pillValue { font-family:var(--mono); font-size:var(--fs-16); letter-spacing:-0.01em; font-weight:600; display:inline-flex; align-items:baseline; }
+  .pillIdx { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); width:14px; flex:none; line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);}
+  .pillValue { font-family:var(--mono); font-size:var(--fs-subhead); letter-spacing:-0.01em; font-weight:600; display:inline-flex; align-items:baseline; line-height:var(--lh-subhead);}
   .pillTimes { color:var(--muted); margin:0 6px; font-weight:400; }
   .pillUnit { color:var(--muted); font-family:var(--sans); font-size:.62em; margin-left:3px; letter-spacing:.02em; font-variant-numeric:normal; text-transform:uppercase; }
   .pillPerHand { margin-left:1px; font-size:.85em; opacity:.7; }
   .pillSpacer { flex:1; }
   .pillActions { display:inline-flex; align-items:center; gap:10px; }
-  .pillHit { background:var(--signal); color:var(--signal-ink); border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:4px; transform-origin:bottom; font-family:var(--sans); font-weight:700; font-size:var(--fs-12-5); border-radius:var(--r-pill); padding:6px 13px 5px; cursor:pointer; white-space:nowrap; transition:transform var(--d1) var(--spring), box-shadow var(--d2), border-bottom-width var(--d1) var(--spring); box-shadow:0 4px 14px -6px rgba(110,231,183,.6); }
+  .pillHit { background:var(--signal); color:var(--signal-ink); border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:4px; transform-origin:bottom; font-family:var(--sans); font-weight:700; font-size:var(--fs-label); border-radius:var(--r-pill); padding:6px 13px 5px; cursor:pointer; white-space:nowrap; transition:transform var(--d1) var(--spring), box-shadow var(--d2), border-bottom-width var(--d1) var(--spring); box-shadow:0 4px 14px -6px rgba(110,231,183,.6); line-height:var(--lh-label);}
   .pillHit:hover { box-shadow:0 6px 18px -6px rgba(110,231,183,.75); }
   .pillHit:active { transform:scaleY(.92) translateY(1px); border-bottom-width:2px; }
-  .pillMiss { background:none; border:none; font-family:var(--sans); font-size:var(--fs-12-5); font-weight:500; color:var(--muted); cursor:pointer; padding:6px; transition:color var(--d2); }
+  .pillMiss { background:none; border:none; font-family:var(--sans); font-size:var(--fs-label); font-weight:500; color:var(--muted); cursor:pointer; padding:6px; transition:color var(--d2); line-height:var(--lh-label);}
   .pillMiss:hover { color:var(--fail); }
-  .pillStatus { font-family:var(--mono); font-size:var(--fs-12-5); cursor:default; color:var(--muted); }
-  .pillDrop { background:none; border:1px solid var(--hair-strong); font-family:var(--sans); font-size:var(--fs-11-5); font-weight:500; color:var(--signal); cursor:pointer; padding:5px 9px; border-radius:var(--r-pill); white-space:nowrap; transition:border-color var(--d2), background var(--d2); }
+  .pillStatus { font-family:var(--mono); font-size:var(--fs-label); cursor:default; color:var(--muted); line-height:var(--lh-label); font-weight:var(--fw-label);}
+  .pillDrop { background:none; border:1px solid var(--hair-strong); font-family:var(--sans); font-size:var(--fs-label); font-weight:500; color:var(--signal); cursor:pointer; padding:5px 9px; border-radius:var(--r-pill); white-space:nowrap; transition:border-color var(--d2), background var(--d2); line-height:var(--lh-label);}
   .pillDrop:hover { background:rgba(110,231,183,.08); border-color:rgba(110,231,183,.4); }
   .pillWrap { display:flex; flex-direction:column; gap:6px; }
   .drops:empty { display:none; }
-  .dropRow { display:flex; align-items:center; gap:9px; padding:9px 14px 9px 28px; margin-left:8px; border-left:2px solid var(--hair-strong); font-size:var(--fs-13); }
-  .dropArrow { color:var(--muted); font-size:var(--fs-12); }
-  .dropX { background:none; border:none; color:var(--muted); font-size:var(--fs-15); cursor:pointer; padding:2px 4px; margin-left:auto; transition:color var(--d2), transform var(--d1) var(--spring); }
+  .dropRow { display:flex; align-items:center; gap:9px; padding:9px 14px 9px 28px; margin-left:8px; border-left:2px solid var(--hair-strong); font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-caption);}
+  .dropArrow { color:var(--muted); font-size:var(--fs-label); line-height:var(--lh-label); font-weight:var(--fw-label);}
+  .dropX { background:none; border:none; color:var(--muted); font-size:var(--fs-body); cursor:pointer; padding:2px 4px; margin-left:auto; transition:color var(--d2), transform var(--d1) var(--spring); line-height:var(--lh-body); font-weight:var(--fw-body);}
   .dropX:hover { color:var(--fail); }
   .dropX:active { transform:scale(.82); }
   .pillReset { background:none; border:none; cursor:pointer; padding:6px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; color:var(--muted); opacity:.7; transition:opacity var(--d2), background var(--d2), transform var(--d1) var(--spring); }
@@ -466,8 +479,23 @@
   .actionPill { position:relative; }
   .actionPill::before { content:''; position:absolute; inset:-7px 0; }
   .pillActions { gap:14px; }
-  .pillWarm { position:relative; width:30px; height:30px; font-size:var(--fs-11-5); }
-  .pillWarm::before { content:''; position:absolute; inset:-7px; }
+  /* Every control in the row, one rule. The group is a flex row with a
+     14px gap, so extending each child 7px on each side consumes exactly
+     half the gap either way: adjacent hit areas meet edge to edge and
+     never overlap. A tap between Hit it and Miss resolves to a logged set
+     or a recorded failure, which is the worst ambiguity in the product,
+     so this one is arithmetic rather than judgement.
+
+     The height is fixed at 44 and centred, independent of each button's
+     painted height — .pillHit paints 30, .pillMiss 27, .pillDrop 25.8 and
+     .pillReset 31.2, and all four get the same target. .pillWarm keeps
+     its 30x30 painted box and reaches 44x44 the same way. */
+  .pillActions > button { position:relative; }
+  .pillActions > button::before {
+    content:''; position:absolute; left:-7px; right:-7px;
+    top:50%; height:44px; transform:translateY(-50%);
+  }
+  .pillWarm { position:relative; width:30px; height:30px; }
 
   /* ---- states --------------------------------------------------------
      The switch had no hover at all. Disabled is added only where the tile
@@ -480,6 +508,72 @@
   #moonbtn.on:hover .bouncyThumb { transform:translateX(20px) scale(1.06); }
   .cvInputRow input:disabled { opacity:.5; cursor:not-allowed; }
   .cvInputRow:has(input:disabled) { opacity:.7; }
+
+  /* ---- the rest to 44 ------------------------------------------------
+     Painted boxes unchanged; the hit area is padded out around them. Each
+     expansion is sized against the gap it sits in, so nothing overlaps a
+     neighbouring target:
+       .step      stepper gap 14 -> 7 each side; 38+14 = 52 wide, 44 tall
+       .chip      chipRow gap 8  -> 4 each side; 33.6 -> 44 tall
+       .pbtn      43.4 -> 44, a block button with nothing beside it
+       .freshbtn  31 -> 44 tall, full-width row
+       .cvSend    40x36 -> 44x44, alone in .cvInputRow
+       .pillReset / .pillDrop are inside .pillActions and already covered
+       .bouncyToggle wraps a 46x26 track with no padding of its own
+       .wcCheck / .wcX had no rules at all, in August or now */
+  .step, .chip, .range button, .freshbtn, .cvSend, .bouncyToggle, .wcCheck, .wcX { position:relative; }
+  .step::before   { content:''; position:absolute; left:-7px; right:-7px; top:50%; height:44px; transform:translateY(-50%); }
+  .chip::before,
+  .range button::before { content:''; position:absolute; left:-4px; right:-4px; top:50%; height:44px; transform:translateY(-50%); }
+  .freshbtn::before { content:''; position:absolute; inset:-7px 0; }
+  .cvSend { min-width:44px; min-height:44px; }
+  .bouncyToggle::before { content:''; position:absolute; left:0; right:0; top:50%; height:44px; transform:translateY(-50%); }
+  .pbtn { min-height:44px; }
+  .wcAddBtn { min-height:44px; }
+
+  /* ---- warm-up / cool-down checklist ---------------------------------
+     RECOVERED, correcting a mistake. These were reported as "never
+     styled, in August or now" and rewritten from scratch. August had all
+     of them — .wcCheck at 21x21, .wcX at 16px, plus .wcItem, .wcTxt and
+     the scribble that strikes a ticked item through. They were simply
+     absent from every class list so far, so they were never extracted,
+     and a measurement that could not find them in the contact sheet was
+     read as confirmation. Invented rules replaced with the real ones. */
+  .wcCheck { flex:none; width:21px; height:21px; border-radius:6px; border:1px solid var(--hair-strong); background:var(--e2); color:var(--signal); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform var(--d1) var(--spring), background var(--d2), border-color var(--d2); }
+  .wcCheck:hover { transform:scale(1.08); border-color:var(--muted); }
+  .wcCheck:active { transform:scale(.86); }
+  .wcCheck.on { background:var(--signal); border-color:var(--signal); color:var(--signal-ink); }
+  .wcX { flex:none; background:none; border:none; color:var(--muted); font-size:var(--fs-subhead); cursor:pointer; padding:2px 4px; transition:color var(--d2); line-height:var(--lh-subhead); font-weight:var(--fw-subhead); }
+  .wcX:hover { color:var(--fail); }
+  .wcSection { margin-top:16px; }
+  .wcSection:empty { display:none; }
+  .wcHead { width:100%; display:flex; align-items:center; gap:8px; background:var(--e2); border:1px solid var(--hair); border-radius:12px; padding:11px 14px; cursor:pointer; color:var(--muted-2); font:inherit; transition:border-color var(--d2), background var(--d2); }
+  .wcHead:hover { border-color:var(--hair-strong); }
+  .wcCaret { color:var(--signal); font-size:var(--fs-micro); width:10px; line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro); }
+  .wcTitle { font-size:var(--fs-label); font-weight:600; letter-spacing:.04em; color:var(--muted); line-height:var(--lh-label); }
+  .wcCount { margin-left:auto; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted-2); line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro); }
+  .wcBody { display:grid; grid-template-rows:0fr; transition:grid-template-rows var(--d4) var(--ease-momentum); }
+  .wcBody.open { grid-template-rows:1fr; }
+  .wcBodyInner { overflow:hidden; min-height:0; padding:14px 4px 2px; opacity:0; transition:opacity var(--d3) var(--ease-out); }
+  .wcBody.open .wcBodyInner { opacity:1; transition-delay:.1s; }
+  .wcItem { display:flex; align-items:center; gap:10px; padding:8px 2px; }
+  .wcCheck:active { transform:scale(.86); }
+  .wcCheckMark { width:12px; height:12px; flex:none; }
+  .wcTxt { position:relative; flex:1; font-size:var(--fs-caption); color:var(--text); line-height:var(--lh-caption); font-weight:var(--fw-caption); }
+  .wcTxt.done { color:var(--muted); }
+  .wcScribble { position:absolute; left:-3px; right:-3px; top:52%; transform:translateY(-55%); height:12px; width:calc(100% + 6px); overflow:visible; pointer-events:none; }
+  .wcScribblePath { stroke:var(--muted); }
+  .wcAdd { display:flex; gap:8px; margin-top:8px; }
+
+  /* 44 on both controls. The checklist is ticked mid-session; .wcItem
+     has a 10px gap, so 5px each side keeps neighbouring targets from
+     overlapping, and the height is pinned rather than added so the
+     21x21 box and the 16px glyph both reach the same target. */
+  .wcCheck, .wcX { position:relative; }
+  .wcCheck::before, .wcX::before {
+    content:''; position:absolute; left:-5px; right:-5px;
+    top:50%; height:44px; transform:translateY(-50%);
+  }
 </style>
 <style>
   .cs-page { max-width:1100px; margin:0 auto; padding:32px 20px 120px; }
@@ -643,6 +737,25 @@
       <div class="noteSlot"><div class="noteCard note-plain"><span class="noteDot"></span><span class="noteEmo">·</span><span class="noteTxt">Chest took 26 hard sets this week.</span></div></div>
     </div>
     <div class="noteBar" style="margin-top:10px"><div class="noteSlot"><div class="noteCard note-fail"><span class="noteDot"></span><span class="noteEmo">!</span><span class="noteTxt">Squat has been flat at 275 for four sessions.</span></div></div></div>
+  </div>
+</section>
+
+<section class="cs-sec" id="checklist"><h2>9b · Warm-up checklist</h2><p class="cs-note">Ticked mid-session. Neither control was styled in August or now.</p>
+  <div class="wcSection">
+    <button class="wcHead"><span class="wcCaret">▾</span><span class="wcTitle">Warm-up</span><span class="wcCount">1/3</span></button>
+    <div class="wcBody open"><div class="wcBodyInner">
+      <div class="wcItem">
+        <button class="wcCheck on" aria-pressed="true"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <span class="wcTxt done">Five minutes on the bike</span>
+        <button class="wcX" aria-label="Remove">×</button>
+      </div>
+      <div class="wcItem">
+        <button class="wcCheck" aria-pressed="false"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <span class="wcTxt">Band pull-aparts, two sets</span>
+        <button class="wcX" aria-label="Remove">×</button>
+      </div>
+      <div class="wcAdd"><input class="wcIn" placeholder="Add item" /><button class="wcAddBtn">+</button></div>
+    </div></div>
   </div>
 </section>
 

@@ -14,6 +14,12 @@
  * box from width/height, min-width/min-height, padding, border and the
  * line box, and adds any hit area a ::before/::after extends it by.
  *
+ * MATCHING IS REAL, not textual. It loads the contact sheet in jsdom and
+ * asks each element `matches(selector)`. String matching could not see
+ * that `.pillActions > button::before` reaches `.pillWarm`, and reported
+ * a control with a 44px target as 30. The contact sheet renders every
+ * primitive in context, which is exactly the DOM this needs.
+ *
  * IT IS DERIVED FROM DECLARATIONS, NOT RENDERED. There is no headless
  * browser here, so nothing below accounts for flexbox stretching, text
  * measurement, or a parent that constrains the child. Where a number
@@ -26,6 +32,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { JSDOM } from 'jsdom'
 
 const TILE = 'public/tiles/train.html'
 /** Apple HIG and WCAG 2.5.5 both land here. */
@@ -86,39 +93,40 @@ const px = (v) => {
   return m ? parseFloat(m[1]) : null
 }
 
-/**
- * Does this rule target the element itself?
- *
- * Deliberately narrow: the bare selector, or the selector with a state or
- * compound class attached. A descendant rule like `.pill.done .pillReset`
- * is counted too, because it does reach the element — but only its box
- * properties are read, and no attempt is made to model which state the
- * element is actually in.
- */
-function matches(prelude, sel) {
-  const name = sel.slice(1)
-  return prelude.split(',').some((part) => {
-    const p = part.trim()
-    const last = p.split(/\s+|>/).filter(Boolean).pop() || ''
-    if (!last.includes(sel)) return false
-    const after = last.slice(last.indexOf(sel) + sel.length)
-    return /^([.:#[][\w\-[\]="'():.,\s]*)?$/.test(after) && !/^[\w-]/.test(after)
-      || after === '' || after.startsWith(':') || after.startsWith('.') || after.startsWith('[')
-  }) && new RegExp(`\\.${name}(?![\\w-])`).test(prelude)
+const SHEET = 'docs/contact-sheet.html'
+
+/** One element per target, taken from the contact sheet. */
+function sample(sel) {
+  const dom = sample.dom || (sample.dom = new JSDOM(readFileSync(SHEET, 'utf8')))
+  return dom.window.document.querySelector(sel)
 }
 
+/**
+ * Every declaration that reaches this element, in source order.
+ *
+ * Source order only — no specificity weighting. Every rule here is a
+ * class or element selector at comparable weight, and where two disagree
+ * the later one is the one that was written to win.
+ */
 function declared(css, tok, sel, pseudo = '') {
-  const want = pseudo ? sel + pseudo : sel
+  const el = sample(sel)
+  if (!el) return null
   const box = {}
+  let hit = false
   for (const { prelude, body } of rules(css)) {
-    const hasPseudo = /::(before|after)/.test(prelude)
-    if (pseudo ? !prelude.includes(pseudo) : hasPseudo) continue
-    if (!matches(prelude.replace(/::(before|after)/g, ''), sel)) continue
-    for (const m of body.matchAll(/([a-z-]+)\s*:\s*([^;]+)/g)) {
-      box[m[1]] = resolve(m[2], tok)
+    for (const part of prelude.split(',')) {
+      const raw = part.trim()
+      const hasPseudo = /::(before|after)/.test(raw)
+      if (pseudo ? !raw.includes(pseudo) : hasPseudo) continue
+      const plain = raw.replace(/::(before|after)/g, '').trim()
+      let ok = false
+      try { ok = el.matches(plain) } catch { ok = false }
+      if (!ok) continue
+      hit = true
+      for (const m of body.matchAll(/([a-z-]+)\s*:\s*([^;]+)/g)) box[m[1]] = resolve(m[2], tok)
     }
   }
-  return Object.keys(box).length ? box : null
+  return hit ? box : null
 }
 
 const pad = (box, side) => {
@@ -138,18 +146,33 @@ const borderW = (box) => {
   return px(b) ?? 0
 }
 
-/** How far a ::before/::after extends past the border box, per axis. */
+/**
+ * What a ::before/::after does to the hit area.
+ *
+ * Two shapes are in use and both are read here:
+ *   additive  negative inset/top/bottom/left/right, growing the box
+ *   absolute  an explicit height with top:50% and translateY(-50%),
+ *             which pins the target at that height whatever the box does
+ * The second is how the set row gets a uniform 44 across five controls
+ * with five different painted heights.
+ */
 function outset(box) {
-  if (!box) return { y: 0, x: 0 }
+  if (!box) return { y: 0, x: 0, fixedY: null, fixedX: null }
   const vals = (box.inset || '').split(/\s+/).map(px)
   let top = 0, side = 0
   if (vals.length === 1 && vals[0] != null) { top = side = -vals[0] }
   else if (vals.length >= 2) { top = -(vals[0] ?? 0); side = -(vals[1] ?? 0) }
-  for (const [k, sign] of [['top', 'y'], ['bottom', 'y'], ['left', 'x'], ['right', 'x']]) {
+  for (const [k, axis] of [['top', 'y'], ['bottom', 'y'], ['left', 'x'], ['right', 'x']]) {
     const v = px(box[k])
-    if (v != null && v < 0) { if (sign === 'y') top = Math.max(top, -v); else side = Math.max(side, -v) }
+    if (v != null && v < 0) { if (axis === 'y') top = Math.max(top, -v); else side = Math.max(side, -v) }
   }
-  return { y: Math.max(0, top) * 2, x: Math.max(0, side) * 2 }
+  const centred = /translateY\(-50%\)/.test(box.transform || '') && (box.top || '').trim() === '50%'
+  return {
+    y: Math.max(0, top) * 2,
+    x: Math.max(0, side) * 2,
+    fixedY: centred ? px(box.height) : null,
+    fixedX: px(box.width),
+  }
 }
 
 export function measure(source = readFileSync(TILE, 'utf8')) {
@@ -167,13 +190,17 @@ export function measure(source = readFileSync(TILE, 'utf8')) {
     const boxW = w != null ? Math.max(px(box['min-width']) ?? 0, w + bw * 2) : (px(box['min-width']) ?? null)
     const before = outset(declared(css, tok, sel, '::before'))
     const after = outset(declared(css, tok, sel, '::after'))
-    const grow = { y: Math.max(before.y, after.y), x: Math.max(before.x, after.x) }
+    const grow = {
+      y: Math.max(before.y, after.y), x: Math.max(before.x, after.x),
+      fixedY: before.fixedY ?? after.fixedY, fixedX: before.fixedX ?? after.fixedX,
+    }
+    const hitH = grow.fixedY != null ? Math.max(boxH, grow.fixedY) : boxH + grow.y
+    const hitW = grow.fixedX != null ? grow.fixedX : (boxW != null ? boxW + grow.x : null)
     return {
       sel, styled: true,
       boxW, boxH: Math.round(boxH * 10) / 10,
-      hitW: boxW != null ? boxW + grow.x : null,
-      hitH: Math.round((boxH + grow.y) * 10) / 10,
-      grew: grow.y > 0 || grow.x > 0,
+      hitW, hitH: Math.round(hitH * 10) / 10,
+      grew: hitH > boxH || (hitW != null && boxW != null && hitW > boxW),
     }
   })
 }

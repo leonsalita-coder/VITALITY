@@ -19,55 +19,73 @@ import { measure, MIN_TARGET } from '../../scripts/measure-targets.mjs'
 const rows = () => measure()
 const find = (sel: string) => rows().find((r) => r.sel === sel)!
 
-describe('the three controls this pass was asked to fix', () => {
-  it('sizes the dialog close button to the minimum', () => {
-    /* It is the close target on twenty dialogs. It paints no background,
-       so a 44px box looks identical to the 26px one it replaced. */
-    const popX = find('.popX')
-    expect(popX.boxH).toBeGreaterThanOrEqual(MIN_TARGET)
-    expect(popX.boxW).toBeGreaterThanOrEqual(MIN_TARGET)
+/** Everything a thumb can land on, and what it measures. */
+const REQUIRED = [
+  '.pillHit', '.pillMiss', '.pillWarm', '.pillReset', '.pillDrop',
+  '.actionPill', '.popX', '.pbtn', '.finishBtn', '.freshbtn', '.chip',
+  '.step', '.swapItem', '.cvSend', '.bouncyToggle', '.wcCheck', '.wcX', '.wcAddBtn',
+]
+
+describe('every tap target clears the minimum', () => {
+  it.each(REQUIRED)('%s reaches 44px', (sel) => {
+    const r = find(sel)
+    expect(r.styled, `${sel} has no rule`).toBe(true)
+    expect(r.hitH).toBeGreaterThanOrEqual(MIN_TARGET)
   })
 
-  it('extends the card action pill without changing its painted height', () => {
-    /* Vertical only: .exActions has a 7px horizontal gap, so widening
-       would make neighbouring pills overlap each other. */
-    const pill = find('.actionPill')
-    expect(pill.boxH).toBeLessThan(MIN_TARGET)
-    expect(pill.hitH).toBeGreaterThanOrEqual(MIN_TARGET)
-    expect(pill.grew).toBe(true)
+  it('leaves the painted boxes smaller than the targets', () => {
+    /* The point of the exercise: the visual density is unchanged and the
+       reachable area grew. If every painted box had simply been inflated
+       to 44 the row would be twice as tall. */
+    const padded = REQUIRED.map(find).filter((r) => r.hitH! > r.boxH!)
+    expect(padded.length).toBeGreaterThan(8)
   })
+})
 
-  it('brings the set-row flags to the minimum in both axes', () => {
-    /* W, A, RPE and L/R all live here, and they were 22x22. */
-    const warm = find('.pillWarm')
-    expect(warm.hitH).toBeGreaterThanOrEqual(MIN_TARGET)
-    expect(warm.hitW).toBeGreaterThanOrEqual(MIN_TARGET)
-  })
+describe('the set row cannot produce an ambiguous tap', () => {
+  const css = () => /<style[^>]*>([\s\S]*?)<\/style>/.exec(readFileSync('public/tiles/train.html', 'utf8'))![1]
 
-  it('keeps the set-row flag hit area inside its own row', () => {
-    /* .pill is 46px tall (12px padding on 30px content) and sets
-       overflow:hidden, so a 44px hit area is contained by the row rather
-       than reaching the row above or below. If the row ever gets
-       shorter than the target, taps become ambiguous between rows. */
-    const warm = find('.pillWarm')
-    const css = /<style[^>]*>([\s\S]*?)<\/style>/.exec(readFileSync('public/tiles/train.html', 'utf8'))![1]
-    const pill = /\.pill\s*\{([^}]*)\}/.exec(css)![1]
-    const padding = /padding\s*:\s*([\d.]+)px/.exec(pill)![1]
-    const rowHeight = warm.boxH! + parseFloat(padding) * 2
-    expect(rowHeight).toBeGreaterThanOrEqual(warm.hitH!)
-    expect(pill).toContain('overflow:hidden')
-  })
-
-  it('spaces the flags so their hit areas tile rather than overlap', () => {
-    /* 30px painted + 14px gap = 44. Adjacent hit areas meet exactly
-       edge to edge; a smaller gap would make them overlap and a tap
-       between two flags would be a coin toss. */
-    const css = /<style[^>]*>([\s\S]*?)<\/style>/.exec(readFileSync('public/tiles/train.html', 'utf8'))![1]
-    const gaps = [...css.matchAll(/\.pillActions\s*\{([^}]*)\}/g)]
+  it('tiles the action buttons edge to edge rather than overlapping', () => {
+    /* Every control in .pillActions extends 7px each side into a 14px
+       gap, so neighbouring hit areas meet exactly and never overlap.
+       A tap between Hit it and Miss resolves to a logged set or a
+       recorded failure — the worst ambiguity in the product. */
+    const gaps = [...css().matchAll(/\.pillActions[^{]*\{([^}]*)\}/g)]
       .flatMap((m) => [...m[1].matchAll(/gap\s*:\s*([\d.]+)px/g)].map((g) => parseFloat(g[1])))
     const gap = gaps[gaps.length - 1]
+    const reach = [...css().matchAll(/\.pillActions > button::before\s*\{([^}]*)\}/g)]
+      .flatMap((m) => [...m[1].matchAll(/left\s*:\s*(-[\d.]+)px/g)].map((g) => -parseFloat(g[1])))
+    expect(reach).toHaveLength(1)
+    expect(reach[0] * 2).toBe(gap)
+  })
+
+  it('gives every control in the row the same target height', () => {
+    /* Five painted heights, one target. If they differed, the boundary
+       between two buttons would sit at a different place depending on
+       how far down the row the thumb landed. */
+    const heights = ['.pillHit', '.pillMiss', '.pillWarm', '.pillReset', '.pillDrop'].map((s2) => find(s2).hitH)
+    expect(new Set(heights).size).toBe(1)
+    expect(heights[0]).toBe(MIN_TARGET)
+  })
+
+  it('keeps the whole target inside its own row', () => {
+    /* .pill sets overflow:hidden and is taller than the target, so a hit
+       area cannot reach the row above or below. */
     const warm = find('.pillWarm')
-    expect(warm.boxW! + gap).toBeGreaterThanOrEqual(MIN_TARGET)
+    const pill = /\.pill\s*\{([^}]*)\}/.exec(css())![1]
+    const padding = parseFloat(/padding\s*:\s*([\d.]+)px/.exec(pill)![1])
+    expect(warm.boxH! + padding * 2).toBeGreaterThanOrEqual(warm.hitH!)
+    expect(pill).toContain('overflow:hidden')
+  })
+})
+
+describe('what is still under, recorded rather than forgotten', () => {
+  it('names the inputs, which a pseudo-element cannot reach', () => {
+    /* ::before does not apply to a void element, so .pillInput cannot be
+       padded the way every button here was — reaching 44 needs a real
+       height change and a taller row. Recorded so it is a decision
+       rather than an oversight. */
+    expect(find('.pillInput').hitH).toBeLessThan(MIN_TARGET)
   })
 })
 
@@ -91,10 +109,11 @@ describe('the measurement itself', () => {
   })
 
   it('finds every target it was asked about', () => {
-    const missing = rows().filter((r) => !r.styled).map((r) => r.sel)
-    /* .wcCheck and .wcX are the checklist controls — never styled, in
-       August or now, and outside every list so far. Named here so the
-       gap is recorded rather than rediscovered. */
-    expect(missing).toEqual(['.wcCheck', '.wcX'])
+    /* .wcCheck and .wcX were unstyled in August and here, and were also
+       invisible to this measurement until the contact sheet rendered the
+       checklist — the sheet is the DOM the matcher runs against, so a
+       surface missing from it cannot be measured. Both are now styled
+       and both are found. */
+    expect(rows().filter((r) => !r.styled).map((r) => r.sel)).toEqual([])
   })
 })

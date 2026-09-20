@@ -328,6 +328,25 @@ ${sec('card', '9 · Card', 'One elevation and radius system, not six.', `
   </div>
 `)}
 
+${sec('checklist', '9b · Warm-up checklist', 'Ticked mid-session. Neither control was styled in August or now.', `
+  <div class="wcSection">
+    <button class="wcHead"><span class="wcCaret">▾</span><span class="wcTitle">Warm-up</span><span class="wcCount">1/3</span></button>
+    <div class="wcBody open"><div class="wcBodyInner">
+      <div class="wcItem">
+        <button class="wcCheck on" aria-pressed="true"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <span class="wcTxt done">Five minutes on the bike</span>
+        <button class="wcX" aria-label="Remove">×</button>
+      </div>
+      <div class="wcItem">
+        <button class="wcCheck" aria-pressed="false"><svg class="wcCheckMark" viewBox="0 0 12 12" fill="none"><path d="M2 6.5 L4.6 9 L10 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <span class="wcTxt">Band pull-aparts, two sets</span>
+        <button class="wcX" aria-label="Remove">×</button>
+      </div>
+      <div class="wcAdd"><input class="wcIn" placeholder="Add item" /><button class="wcAddBtn">+</button></div>
+    </div></div>
+  </div>
+`)}
+
 ${sec('sheet', '10 · Sheet', 'Four stacked in one scroll, no tab bar. They must read as separate sections.', `
   <div class="cs-stack">
     <div class="sheet"><div class="eyebrow">Short-term goal</div>
