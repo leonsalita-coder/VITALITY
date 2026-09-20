@@ -188,3 +188,153 @@ describe('test bodies are split so a control can be found in the right one', () 
     expect(splitTests(file)[0].line).toBeGreaterThan(0)
   })
 })
+
+/**
+ * The harness writes broken code into the working tree on purpose.
+ *
+ * A `finally` restores it when a run ends or throws, and covers nothing
+ * else. A Ctrl-C or a `pkill` ends the process first, and what is left
+ * on disk is a mutated engine file that looks exactly like a real edit —
+ * which is how `if (false) return record` ended up sitting in deload.ts
+ * and was found three steps later as a mysterious failure in a module
+ * nobody had touched.
+ *
+ * A signal handler was written first and does not work: `main()` is one
+ * synchronous block of execSync calls, so the event loop never spins and
+ * the JS callback never gets a turn. Recovery on the NEXT run is the
+ * thing that works, and it works for SIGKILL too.
+ */
+describe('an interrupted run leaves nothing behind', () => {
+  const SNAPSHOT = '.mutate-snapshot.json'
+  const TARGET = 'lib/train/deload.ts'
+
+  /**
+   * Whether the harness has left the target file changed.
+   *
+   * Compared against the content captured at the start of the test, NOT
+   * against git. The first version asked `git diff --quiet -- lib/train`,
+   * which reports dirty whenever the author has any uncommitted work in
+   * the engine — so the test passed alone and failed in the suite, for a
+   * reason that had nothing to do with the harness.
+   */
+  const changedFrom = async (original: string) => {
+    const { readFileSync } = await import('node:fs')
+    return readFileSync(TARGET, 'utf8') !== original
+  }
+
+  it('restores a file a previous run left mutated', async () => {
+    const { readFileSync, writeFileSync, existsSync, rmSync } = await import('node:fs')
+    const { execFileSync } = await import('node:child_process')
+
+    const original = readFileSync(TARGET, 'utf8')
+    try {
+      /* Exactly the state a killed run leaves: the snapshot on disk, and
+         the file on disk mutated. */
+      writeFileSync(SNAPSHOT, JSON.stringify({ files: { [TARGET]: original } }))
+      writeFileSync(TARGET, original.replace('export function', '/* MUTATED */ export function'))
+      expect(await changedFrom(original)).toBe(true)
+
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], {
+        cwd: process.cwd(), stdio: 'pipe',
+      })
+
+      expect(readFileSync(TARGET, 'utf8')).toBe(original)
+      expect(existsSync(SNAPSHOT)).toBe(false)
+      expect(await changedFrom(original)).toBe(false)
+    } finally {
+      writeFileSync(TARGET, original)
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 120_000)
+
+  it('recovers from a SIGKILL, which no in-process handler could', async () => {
+    const { spawn, execFileSync } = await import('node:child_process')
+    const { readFileSync, existsSync, rmSync, writeFileSync } = await import('node:fs')
+    const original = readFileSync(TARGET, 'utf8')
+
+    const child = spawn('node', ['scripts/mutate.mjs', '--mode=mutate', '--files=deload'], {
+      cwd: process.cwd(), stdio: 'ignore',
+    })
+    try {
+      /* Kill only once the tree is ACTUALLY dirty. A kill on a timer
+         would pass whether the recovery works or not, because a kill
+         landing before the first write has nothing to restore — a test
+         that cannot fail. */
+      let sawMutation = false
+      for (let i = 0; i < 600 && !sawMutation; i++) {
+        if (await changedFrom(original)) sawMutation = true
+        else await new Promise((r) => setTimeout(r, 50))
+      }
+      expect(sawMutation).toBe(true)
+
+      child.kill('SIGKILL')
+      await new Promise((resolve) => child.on('exit', resolve))
+      expect(await changedFrom(original)).toBe(true)
+      expect(existsSync(SNAPSHOT)).toBe(true)
+
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], {
+        cwd: process.cwd(), stdio: 'pipe',
+      })
+      expect(await changedFrom(original)).toBe(false)
+      expect(existsSync(SNAPSHOT)).toBe(false)
+    } finally {
+      child.kill('SIGKILL')
+      writeFileSync(TARGET, original)
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 120_000)
+})
+
+/**
+ * The harness restores the working tree. It cannot un-stage.
+ *
+ * During a call-site sweep something in this environment ran `git add`
+ * while the tile was stubbed, and the staged copy of train.html held
+ * `((()=>undefined))(changeContext())`. The worktree was restored on
+ * exit and looked perfectly clean; the index did not, and an automatic
+ * committer would have shipped a tile with a dead engine call.
+ *
+ * The snapshot file exists for exactly the duration of a run, so the
+ * commit gate can refuse while one is live.
+ */
+describe('the commit gate refuses while a mutation run is live', () => {
+  it('blocks when the snapshot file is present', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { writeFileSync, rmSync, existsSync } = await import('node:fs')
+    const SNAPSHOT = '.mutate-snapshot.json'
+    expect(existsSync(SNAPSHOT)).toBe(false)
+
+    try {
+      writeFileSync(SNAPSHOT, JSON.stringify({ files: {} }))
+      let blocked = false
+      let output = ''
+      try {
+        /* SKIP_VERIFY on purpose: this gate must win even when the
+           quality gate has been waived, because it is not about quality —
+           it is about the files on disk not being what they look like. */
+        output = execFileSync('sh', ['.githooks/pre-commit'], {
+          cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, SKIP_VERIFY: '1' },
+        })
+      } catch (err) {
+        blocked = true
+        output = String((err as { stdout?: string }).stdout || '')
+      }
+      expect(blocked).toBe(true)
+      expect(output).toMatch(/mutation run is in progress/i)
+    } finally {
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 60_000)
+
+  it('does not block when no run is live', async () => {
+    const { execFileSync } = await import('node:child_process')
+    /* The control: with the snapshot gone the same hook runs on past the
+       block, so the refusal above is the guard rather than the hook being
+       broken for every input. SKIP_VERIFY stops it short of the full
+       suite, which this test has no business re-running. */
+    const out = execFileSync('sh', ['.githooks/pre-commit'], {
+      cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, SKIP_VERIFY: '1' },
+    })
+    expect(out).toMatch(/gate skipped/i)
+  }, 60_000)
+})

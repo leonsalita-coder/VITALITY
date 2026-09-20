@@ -93,3 +93,4 @@ supabase/.temp/
 public/*-preview.html
 /explain-*.png
 /pol-*.png
+.mutate-snapshot.json

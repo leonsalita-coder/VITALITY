@@ -15,6 +15,30 @@
 
 set -e
 
+# A mutation run is in progress, which means the working tree currently
+# holds deliberately broken code.
+#
+# This is not hypothetical. During a call-site sweep something ran
+# `git add` while the tile was stubbed, and the staged copy of
+# public/tiles/train.html contained `((()=>undefined))(changeContext())`.
+# The harness restores the WORKING TREE when it finishes; it has no way to
+# un-stage what another process staged in the meantime, and an automatic
+# committer would have shipped a tile with a dead engine call in it.
+#
+# .mutate-snapshot.json exists for exactly the duration of a run, so its
+# presence is the signal. Checked before SKIP_VERIFY on purpose: this is
+# not a quality gate somebody might reasonably want to skip, it is a
+# "the files on disk are not what you think" gate.
+if [ -f .mutate-snapshot.json ]; then
+  echo ""
+  echo " COMMIT BLOCKED — a mutation run is in progress."
+  echo ""
+  echo " The working tree currently contains deliberately broken code."
+  echo " Wait for it to finish, or run 'node scripts/mutate.mjs --mode=lint'"
+  echo " to restore the files it left behind, then commit."
+  exit 1
+fi
+
 if [ -n "$SKIP_VERIFY" ]; then
   echo "pre-commit: SKIP_VERIFY set, gate skipped"
   exit 0

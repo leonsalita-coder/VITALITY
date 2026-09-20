@@ -26,7 +26,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync, readdirSync, mkdtempSync, cpSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync, cpSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -122,10 +122,72 @@ const firstLine = (s) => String(s).split('\n').find((l) => l.trim()) || 'no outp
  * snapshot of what you were editing.
  * ---------------------------------------------------------------- */
 
+/**
+ * The harness writes broken code into the working tree on purpose.
+ *
+ * A `finally` restores it when a run ends or throws, and covers nothing
+ * else. That is not enough: a Ctrl-C or a `pkill` ends the process
+ * first, and what is left on disk is a mutated engine file that looks
+ * exactly like a real edit. It happened — a killed run left
+ * `if (false) return record` in deload.ts and it was found three steps
+ * later as a mysterious failure in a module nobody had touched.
+ *
+ * A `process.on('SIGTERM')` handler was written first and DOES NOT WORK
+ * here, which is worth recording so nobody adds it back. `main()` is one
+ * long synchronous block of execSync calls; the event loop never spins,
+ * so the JS signal callback never gets a turn and the run continues to
+ * completion with the signal queued. Verified, not assumed.
+ *
+ * What works is recovery rather than interception: the snapshot is
+ * written to disk BEFORE the first mutation and removed on a clean exit,
+ * and every run begins by putting back anything a previous run left
+ * behind. That survives SIGTERM, SIGKILL, a closed laptop and a power
+ * cut, none of which any in-process handler can.
+ *
+ * Restoring from a snapshot rather than `git checkout` is deliberate and
+ * unchanged: checkout would also discard whatever uncommitted work the
+ * author had in those files, which is far worse than a stale mutation.
+ */
+const SNAPSHOT_FILE = '.mutate-snapshot.json'
+
+/**
+ * Put back anything a previous run left mutated.
+ *
+ * Runs before every mode, including the modes that never mutate — a
+ * `--mode=lint` in the pre-commit hook is the most likely next command
+ * after an interrupted run, and is therefore the best place to catch it.
+ */
+function recoverInterruptedRun() {
+  if (!existsSync(SNAPSHOT_FILE)) return
+  let saved
+  try {
+    saved = JSON.parse(readFileSync(SNAPSHOT_FILE, 'utf8'))
+  } catch {
+    console.error(`could not read ${SNAPSHOT_FILE}; delete it by hand and check git diff`)
+    process.exit(2)
+  }
+  let restored = 0
+  for (const [p, text] of Object.entries(saved.files || {})) {
+    if (!existsSync(p) || readFileSync(p, 'utf8') !== text) {
+      writeFileSync(p, text)
+      restored++
+    }
+  }
+  rmSync(SNAPSHOT_FILE, { force: true })
+  console.error(
+    restored
+      ? `recovered from an interrupted run: restored ${restored} file(s).`
+      : 'cleared a stale snapshot from an interrupted run; nothing needed restoring.',
+  )
+}
+
 function snapshot(paths) {
   const dir = mkdtempSync(join(tmpdir(), 'mutate-'))
   const saved = new Map()
   for (const p of paths) saved.set(p, readFileSync(p, 'utf8'))
+  /* On disk BEFORE the first mutation is applied. A snapshot held only
+     in memory dies with the process that needed it. */
+  writeFileSync(SNAPSHOT_FILE, JSON.stringify({ files: Object.fromEntries(saved) }))
   return {
     dir,
     restore() {
@@ -133,6 +195,7 @@ function snapshot(paths) {
     },
     cleanup() {
       rmSync(dir, { recursive: true, force: true })
+      rmSync(SNAPSHOT_FILE, { force: true })
     },
   }
 }
@@ -546,6 +609,7 @@ function checkRatchet(mode, count) {
 }
 
 function main() {
+  recoverInterruptedRun()
   const args = process.argv.slice(2)
   const opts = {
     mode: (args.find((a) => a.startsWith('--mode=')) || '--mode=all').split('=')[1],
