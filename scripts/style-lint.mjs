@@ -40,7 +40,10 @@ const PX_FONT = /font-size\s*:\s*[0-9.]+px|font\s*:\s*[^;"']*?\b[0-9.]+px/g
 export function splitCss(source) {
   const m = /<style[^>]*>([\s\S]*?)<\/style>/.exec(source)
   if (!m) throw new Error('no <style> block')
-  const css = m[1]
+  /* Comments stripped first. The check flagged a `#fff` that appeared in
+     a comment explaining that the #fff fallbacks had been replaced — the
+     lint reading its own documentation as a violation. */
+  const css = m[1].replace(/\/\*[\s\S]*?\*\//g, '')
   const root = /:root\s*\{[\s\S]*?\n\s*\}/.exec(css)
   return {
     css,
@@ -60,7 +63,7 @@ export function inlineStyles(source) {
 
 function scan(file) {
   const source = readFileSync(file, 'utf8')
-  const { tokens, rules } = splitCss(source)
+  const { css, rules } = splitCss(source)
   const found = []
   const push = (where, kind, hits) => hits.forEach((h) => found.push({ file, where, kind, text: h }))
 
@@ -71,8 +74,12 @@ function scan(file) {
     push('inline', 'px-font', decl.match(PX_FONT) || [])
   }
   /* Reported, not counted: a token referenced but never defined resolves
-     to nothing, so the declaration using it is already inert. */
-  const defined = new Set([...tokens.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]))
+     to nothing, so the declaration using it is already inert.
+
+     Tokens may be defined outside :root — `--state-ink` is set on the
+     button that uses it, which is the correct scope for it. Looking only
+     at :root reported it as dangling. */
+  const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]))
   const runtime = new Set([...source.matchAll(/setProperty\(\s*['"](--[\w-]+)/g)].map((m) => m[1]))
   const used = new Set([...source.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]))
   const dangling = [...used].filter((t) => !defined.has(t) && !runtime.has(t)).sort()

@@ -85,15 +85,77 @@ describe('the recovery does not collide with what was re-added since', () => {
   })
 })
 
+describe('the set row came back whole', () => {
+  it('has a laid-out row container', () => {
+    /* The nine class lists covered the set row's buttons but not the row.
+       .pill had twenty rules in August and three here, so the most tapped
+       surface in the app had no layout at all — nothing to hang a touch
+       target on, and nothing to contain one. */
+    const pill = /\.pill\s*\{([^}]*)\}/.exec(css())![1]
+    expect(pill).toContain('display:flex')
+    expect(pill).toContain('padding')
+  })
+
+  it.each([
+    'pillHit', 'pillMiss', 'pillReset', 'pillDrop', 'pillActions', 'pillStatus',
+    'pillIdx', 'pillSpacer', 'pillWrap', 'pills', 'pillValue', 'pillUnit',
+    'pillTimes', 'pillPerHand', 'drops', 'dropRow', 'dropArrow', 'dropX',
+  ])('has rules for .%s', (cls) => {
+    expect(new RegExp(`\\.${cls}(?![\\w-])`).test(css())).toBe(true)
+  })
+
+  it('distinguishes done, failed and warm-up rows without relying on colour', () => {
+    /* Greyscale legibility: each state has to change something other than
+       hue. done fills the row, failed marks it, warm-up mutes it. */
+    const all = css()
+    for (const sel of ['.pill.done', '.pill.failed', '.pill.warmup']) {
+      expect(all, sel).toContain(sel)
+    }
+  })
+})
+
+describe('button feedback is wired and scoped', () => {
+  it('draws the spinner and the check', () => {
+    /* setBtnState() is live in the tile and rendered nothing, because the
+       rules that draw these were global attribute selectors and did not
+       come back with the button primitive. */
+    const all = css()
+    expect(all).toContain('[data-state="loading"]::after')
+    expect(all).toContain('[data-state="success"]::after')
+  })
+
+  it('scopes them to buttons rather than every element', () => {
+    const all = css()
+    expect(all).not.toMatch(/\n\s*\[data-state/)
+    expect(all).toContain('button[data-state')
+  })
+
+  it('declares --state-ink where it is used', () => {
+    expect(css()).toContain('--state-ink:var(--signal-ink)')
+  })
+
+  it('declares it exactly once', () => {
+    /* It was duplicated: the rule came back with the button primitive and
+       again with the feedback block. */
+    const hits = css().match(/\.finishBtn\[data-state\]/g) || []
+    expect(hits).toHaveLength(1)
+  })
+})
+
+describe('the dead rule is gone', () => {
+  it('drops .swapItem .arr, which no markup produces', () => {
+    expect(css()).not.toContain('.arr')
+  })
+})
+
 describe('nothing recovered points at something that no longer exists', () => {
   it('references only tokens that are defined or set at runtime', () => {
     const tile = readFileSync(TILE, 'utf8')
     const { recovered } = split()
-    /* Read the whole :root block: it packs several tokens onto one line
-       (`--e0:#030304; --e1:#0a0a0d; …`), so a line-anchored match finds
-       only the first of each line and reports the rest as undefined. */
-    const root = /:root\s*\{([\s\S]*?)\n\s*\}/.exec(css())![1]
-    const defined = new Set([...root.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]))
+    /* Every definition in the sheet, not just :root. --state-ink is set
+       on the button that uses it, which is the right scope for it — a
+       :root-only scan reported it as dangling. */
+    const defined = new Set([...css().matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]))
     const runtime = new Set([...tile.matchAll(/setProperty\(\s*['"](--[\w-]+)/g)].map((m) => m[1]))
     const used = new Set([...recovered.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]))
     expect([...used].filter((t) => !defined.has(t) && !runtime.has(t))).toEqual([])

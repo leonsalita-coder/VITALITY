@@ -29,29 +29,36 @@ describe('values outside the token block', () => {
   }, 60_000)
 
   it('has a baseline worth holding', () => {
-    /* If this ever reaches zero the ratchet has done its job and the
-       assertion below should become an absolute one. */
     expect(BASELINE).toBeGreaterThanOrEqual(0)
   })
 
-  it('counts every hardcoded hex colour in the stylesheet', () => {
-    /* This was an absolute — "no hex, ever" — written when the surviving
-       CSS had none. That was a conclusion from a partial sample: the
-       rules it measured were the handful re-added after the August
-       deletion, not the stylesheet as it actually shipped. Recovering the
-       nine primitives brought back three real hex values, so the absolute
-       was wrong rather than violated.
-   
-       It is a ratchet now, and the three are named here so they cannot be
-       quietly joined by more:
-         #f4a09c  .pbtn.danger and .menuPop button.danger — a lightened
-                  --fail with no token of its own
-         #f2f2f0  .bouncyThumb — byte-identical to --text
-       Tokenising them is a colour decision and belongs with the rest of
-       the reconciled set. */
+  it('carries no px font size in the stylesheet', () => {
+    /* Also absolute now. All 74 went onto the --fs-* scale; what remains
+       in the baseline is inline style attributes in dialog markup, which
+       are markup rather than stylesheet and were not in this pass. */
     const { rules } = splitCss(readFileSync(TILE, 'utf8'))
-    const hits = [...new Set(rules.match(/#[0-9a-fA-F]{3,8}\b/g) || [])].sort()
-    expect(hits).toEqual(['#f2f2f0', '#f4a09c'])
+    expect(rules.match(/font-size\s*:\s*[0-9.]+px/g)).toBeNull()
+  })
+
+  it('leaves no token referenced but undefined', () => {
+    /* --mint computed to black on a near-black ground for months because
+       nothing checked this. */
+    const source = readFileSync(TILE, 'utf8')
+    const { css } = splitCss(source)
+    const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]))
+    const runtime = new Set([...source.matchAll(/setProperty\(\s*['"](--[\w-]+)/g)].map((m) => m[1]))
+    const used = new Set([...source.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]))
+    expect([...used].filter((t) => !defined.has(t) && !runtime.has(t))).toEqual([])
+  })
+
+  it('carries no hardcoded hex colour in the stylesheet', () => {
+    /* Absolute again. It was briefly a ratchet naming two exceptions,
+       because recovering the August rules brought back #f4a09c and
+       #f2f2f0 and the absolute I had written was drawn from a sample
+       that predated them. Both are now tokens — --danger and --text —
+       so the rule can go back to meaning what it says. */
+    const { rules } = splitCss(readFileSync(TILE, 'utf8'))
+    expect(rules.match(/#[0-9a-fA-F]{3,8}\b/g)).toBeNull()
   })
 
   it('carries no hardcoded hex colour in an inline style attribute', () => {
@@ -75,7 +82,8 @@ describe('the token block', () => {
   const tokens = () => splitCss(readFileSync(TILE, 'utf8')).tokens
 
   it('exists and defines the palette', () => {
-    for (const t of ['--e0', '--text', '--muted', '--signal', '--sans', '--mono', '--sp4', '--r-md']) {
+    for (const t of ['--e0', '--text', '--muted', '--signal', '--sans', '--mono', '--sp4', '--r-md',
+                     '--mint', '--bg', '--muted-strong', '--danger', '--fs-12', '--fs-19']) {
       expect(tokens(), t).toContain(t)
     }
   })

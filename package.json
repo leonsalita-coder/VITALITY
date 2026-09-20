@@ -21,7 +21,8 @@
     "verify:full": "npm run verify && node scripts/mutate.mjs --mode=callsites && node scripts/mutate.mjs --mode=fuzz && node scripts/mutate.mjs --mode=mutate --limit=6",
     "prepare": "git config core.hooksPath .githooks || true",
     "build:contact": "node scripts/build-contact-sheet.mjs",
-    "style:lint": "node scripts/style-lint.mjs"
+    "style:lint": "node scripts/style-lint.mjs",
+    "measure:targets": "node scripts/measure-targets.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.26.0",
