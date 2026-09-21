@@ -381,3 +381,109 @@ describe('the commit gate refuses while a mutation run is live', () => {
     expect(out).toMatch(/gate skipped/i)
   }, 60_000)
 })
+
+/**
+ * Recovery must not run while a sweep is still alive.
+ *
+ * This is not hypothetical. A sweep was stopped with `pkill` — SIGTERM,
+ * which the child does not necessarily die from promptly — and a
+ * `--mode=lint` was run two seconds later to tidy up. Recovery restored
+ * the files and DELETED the snapshot; the sweep, still breathing, then
+ * applied its next mutation with nothing on disk left to undo it. The
+ * result was `if (false) continue` sitting in lib/train/dose.ts in a
+ * clean-looking tree, one `git add -A` away from being committed.
+ *
+ * So the snapshot records who owns it, and recovery leaves a live
+ * owner's snapshot alone. The bug was a race between two of the
+ * harness's own commands, which is exactly the kind only a lock fixes.
+ */
+describe('recovery keeps its hands off a run that is still going', () => {
+  const SNAPSHOT = '.mutate-snapshot.json'
+  const TARGET = 'lib/train/deload.ts'
+
+  it('records the owning process in the snapshot', async () => {
+    const { spawn } = await import('node:child_process')
+    const { readFileSync, existsSync, rmSync, writeFileSync } = await import('node:fs')
+    const original = readFileSync(TARGET, 'utf8')
+    const child = spawn('node', ['scripts/mutate.mjs', '--mode=mutate', '--files=deload'], {
+      cwd: process.cwd(), stdio: 'ignore',
+    })
+    try {
+      for (let i = 0; i < 240 && !existsSync(SNAPSHOT); i++) await new Promise((r) => setTimeout(r, 500))
+      const snap = JSON.parse(readFileSync(SNAPSHOT, 'utf8'))
+      expect(snap.pid).toBe(child.pid)
+    } finally {
+      child.kill('SIGKILL')
+      await new Promise((r) => setTimeout(r, 300))
+      writeFileSync(TARGET, original)
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 180_000)
+
+  it('refuses to recover a snapshot whose owner is still running', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync, writeFileSync, existsSync, rmSync } = await import('node:fs')
+    const original = readFileSync(TARGET, 'utf8')
+    try {
+      /* This process is alive by definition, so it stands in for the
+         sweep that had not died yet. */
+      writeFileSync(SNAPSHOT, JSON.stringify({ pid: process.pid, files: { [TARGET]: original } }))
+      writeFileSync(TARGET, original.replace('export function', '/* MUTATED */ export function'))
+
+      let code = 0
+      try {
+        execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], { cwd: process.cwd(), stdio: 'pipe' })
+      } catch (e: any) { code = e.status }
+
+      /* It must not silently proceed: the tree is untrustworthy and the
+         only safe move is to say so and stop. */
+      expect(code).toBe(2)
+      expect(existsSync(SNAPSHOT)).toBe(true)
+      expect(readFileSync(TARGET, 'utf8')).not.toBe(original)
+    } finally {
+      writeFileSync(TARGET, original)
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 120_000)
+
+  it('still recovers once the owner is gone', async () => {
+    /* The positive control. A guard that refuses everything would pass
+       the test above and make the harness unusable. */
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync, writeFileSync, existsSync, rmSync } = await import('node:fs')
+    const original = readFileSync(TARGET, 'utf8')
+    try {
+      /* PID 2^22 is above every default pid_max on Linux and macOS, so
+         nothing can be running under it. */
+      writeFileSync(SNAPSHOT, JSON.stringify({ pid: 4194304, files: { [TARGET]: original } }))
+      writeFileSync(TARGET, original.replace('export function', '/* MUTATED */ export function'))
+
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], { cwd: process.cwd(), stdio: 'pipe' })
+
+      expect(readFileSync(TARGET, 'utf8')).toBe(original)
+      expect(existsSync(SNAPSHOT)).toBe(false)
+    } finally {
+      writeFileSync(TARGET, original)
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 120_000)
+
+  it('recovers a snapshot from before the owner was recorded', async () => {
+    /* Backward compatibility, and the standing rule: an absent field is
+       a safe default. An old snapshot has no pid; treating that as "the
+       owner might be alive" would strand it forever. */
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync, writeFileSync, existsSync, rmSync } = await import('node:fs')
+    const original = readFileSync(TARGET, 'utf8')
+    try {
+      writeFileSync(SNAPSHOT, JSON.stringify({ files: { [TARGET]: original } }))
+      writeFileSync(TARGET, original.replace('export function', '/* MUTATED */ export function'))
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], { cwd: process.cwd(), stdio: 'pipe' })
+      expect(readFileSync(TARGET, 'utf8')).toBe(original)
+      expect(existsSync(SNAPSHOT)).toBe(false)
+    } finally {
+      writeFileSync(TARGET, original)
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 120_000)
+})

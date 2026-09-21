@@ -168,6 +168,11 @@ const firstLine = (s) => String(s).split('\n').find((l) => l.trim()) || 'no outp
  */
 const SNAPSHOT_FILE = '.mutate-snapshot.json'
 
+/** Signal 0 asks the kernel whether a pid exists without disturbing it. */
+function alive(pid) {
+  try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
+}
+
 /**
  * Put back anything a previous run left mutated.
  *
@@ -184,6 +189,32 @@ function recoverInterruptedRun() {
     console.error(`could not read ${SNAPSHOT_FILE}; delete it by hand and check git diff`)
     process.exit(2)
   }
+  /* A snapshot belongs to the run that wrote it, and recovering another
+     run's snapshot is worse than doing nothing: it restores the files,
+     deletes the snapshot, and leaves the live sweep mutating a tree
+     nothing can undo. That happened — `pkill` sent SIGTERM, a
+     `--mode=lint` two seconds later tidied up, and the not-yet-dead
+     sweep put `if (false) continue` into lib/train/dose.ts where a
+     clean-looking `git status` hid it.
+
+     An absent pid means a snapshot from before this was recorded, and
+     the safe default there is to recover it — otherwise an old one is
+     stranded forever with no way out but deleting it by hand.
+
+     Pid reuse can strand a snapshot: a dead run's pid gets recycled and
+     this reads the recycled process as the owner. That is why the
+     message says what to do rather than just refusing — the failure is
+     loud and one `rm` away, which is the right trade against silently
+     recovering a snapshot out from under a live sweep. */
+  if (saved.pid && alive(saved.pid)) {
+    console.error(
+      `${SNAPSHOT_FILE} belongs to pid ${saved.pid}, which is still running.\n` +
+      'Another mutation run is in progress; the files on disk are its, not yours.\n' +
+      'Wait for it to finish, or stop it and run this again.',
+    )
+    process.exit(2)
+  }
+
   let restored = 0
   for (const [p, text] of Object.entries(saved.files || {})) {
     if (!existsSync(p) || readFileSync(p, 'utf8') !== text) {
@@ -205,7 +236,7 @@ function snapshot(paths) {
   for (const p of paths) saved.set(p, readFileSync(p, 'utf8'))
   /* On disk BEFORE the first mutation is applied. A snapshot held only
      in memory dies with the process that needed it. */
-  writeFileSync(SNAPSHOT_FILE, JSON.stringify({ files: Object.fromEntries(saved) }))
+  writeFileSync(SNAPSHOT_FILE, JSON.stringify({ pid: process.pid, files: Object.fromEntries(saved) }))
   return {
     dir,
     restore() {
