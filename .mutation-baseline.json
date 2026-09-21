@@ -1,6 +1,6 @@
 {
   "_note": "Survivor counts already present when the harness was built. The gate fails when a number goes UP. These are meant to fall; lower one with --bless.",
-  "lint": 58,
+  "lint": 57,
   "callsites": 20,
   "fuzz": 0,
   "mutate": 69

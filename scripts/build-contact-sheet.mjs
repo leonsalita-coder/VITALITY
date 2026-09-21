@@ -404,6 +404,23 @@ ${sec('chrome', '10b · Header, menu, coach and overlays', 'Surfaces that live o
   </div>
 `)}
 
+${sec('frame', '10c · The frame that is the argument', 'A card with eight logged sets and one unlogged. The unlogged row must be the most prominent thing here.', `
+  <div class="ex">
+    <div class="exHead"><div class="exName"><span class="nameTxt">Bench Press</span></div></div>
+    <div class="exMeta"><span>compound</span><span class="metaSep">·</span><span>9 × 5</span></div>
+    <div class="exActions"><button class="actionPill"><span class="pl">Swap</span></button></div>
+    <div class="restSlot"></div>
+    <div class="pills">
+      ${['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'].map((n, i) =>
+        `<div class="pillWrap">${loggedRow({ idx: n, status: 'done', pr: i === 5 ? 'e1rm' : null })}</div>`).join('')}
+      <div class="pillWrap">${unloggedRow({ idx: 'IX', bump: true })}
+        <div class="pillWhy why-clean">Three clean sessions — up 5 lb.</div></div>
+    </div>
+  </div>
+  <p class="cs-note">Sixth row carries an e1RM record: its rail is gold and the star is set at a real size.
+  Every other completed row recedes below the card; the unlogged row sits above it and carries the only filled control.</p>
+`)}
+
 ${sec('setrow', '11 · Set row — the composite', 'The most-tapped surface in the tile. done, failed and warmup must be distinguishable in greyscale.', `
   <div class="cs-stack">
     ${cell('unlogged', unloggedRow({ idx: 'I' }))}
@@ -418,6 +435,7 @@ ${sec('setrow', '11 · Set row — the composite', 'The most-tapped surface in t
     ${cell('done', loggedRow({ idx: 'I', status: 'done' }))}
     ${cell('done + over target', loggedRow({ idx: 'II', status: 'done <span class="sub">· +2</span>' }))}
     ${cell('done + under target', loggedRow({ idx: 'II', status: 'done <span class="sub">· 3 reps</span>' }))}
+    ${cell('done, no record — beside the one below', loggedRow({ idx: 'I', status: 'done' }))}
     ${cell('done + weight PR (dot)', loggedRow({ idx: 'III', status: 'done', pr: 'dot' }))}
     ${cell('done + e1RM PR (star)', loggedRow({ idx: 'III', status: 'done', pr: 'e1rm' }))}
     ${cell('done + RPE recorded', loggedRow({ idx: 'I', status: 'done', rpe: 8.5 }))}

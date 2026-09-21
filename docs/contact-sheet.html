@@ -140,15 +140,18 @@
      explanation and not a call to action. Only a layoff or a deload earns
      colour, since those are the two the lifter would otherwise misread as
      the app losing their progress. */
-  .pillWhy { margin:5px 0 0 34px; font-size:var(--fs-micro); line-height:1.35; font-family:var(--sans); color:var(--muted); letter-spacing:.005em; font-weight:var(--fw-micro);}
-  .pillWhy.why-clean { color:var(--signal); }
-  .pillWhy.why-layoff, .pillWhy.why-deload { color:var(--gold); }
+  .pillWhy { margin:5px 0 0 34px; font-size:var(--fs-micro); line-height:1.35; font-family:var(--sans); color:var(--muted-strong); letter-spacing:.005em; font-weight:var(--fw-micro);}
+  /* Every basis reads the same. The words already carry the difference —
+     colour-coding five of them spends two accents on explanatory text,
+     which is the colour-carries-meaning trap. */
 
   /* readiness — stated as fact before the session, not offered as a choice */
   .readinessNote { margin:var(--sp3) var(--sp5) 0; padding:10px var(--sp4);
     border-radius:var(--r-md); background:var(--e2); border:1px solid var(--hair);
     font-size:var(--fs-label); font-weight:600; line-height:1.4; color:var(--muted); }
-  .readinessNote.verdict-rest_advised { color:var(--fail); border-color:rgba(239,111,106,.3); }
+  /* Fail means a missed set. A readiness verdict is not one. All three
+     take the same treatment; the rail distinguishes them, not the hue. */
+  .readinessNote.verdict-rest_advised { color:var(--muted-strong); border-left:3px solid var(--text); }
   .weeklyReview { margin:var(--sp3) var(--sp5) 0; padding:12px var(--sp4);
     border-radius:var(--r-md); background:var(--e1); border:1px solid var(--hair); }
   .weeklyReview .wrHead { font-size:var(--fs-micro); font-weight:700; letter-spacing:.09em;
@@ -167,8 +170,7 @@
   .sPoint:active { transform:scale(1.5); }
   .mbFill.ok, .mbFill.band-in { background:var(--signal); }
   .mbFill.band-over, .mbFill.band-under { background:var(--gold); }
-  .readinessNote.verdict-reduced_volume,
-  .readinessNote.verdict-reduced_intensity { color:var(--gold); border-color:rgba(245,166,35,.28); }
+  .readinessNote.verdict-reduced_volume, .readinessNote.verdict-reduced_intensity { color:var(--muted-strong); border-left:3px solid var(--hair-strong); }
 
   /* warm-up toggle — deliberately quiet. It is a correction, not an action,
      and it should never compete with "Hit it". */
@@ -177,12 +179,19 @@
     font-family:var(--mono); font-size:var(--fs-micro); font-weight:700; line-height:1;
     transition:background var(--d1) var(--ease-out), color var(--d1) var(--ease-out); letter-spacing:var(--ls-micro);}
   .pillWarm.on { background:var(--e4); color:var(--text); }
-  .pill.warmup { opacity:.55; }
+  /* Recedes FURTHER than done, and by surface rather than by opacity.
+     Opacity blends toward whatever is behind — which worked while a done
+     row was a bright fill, and stopped working the moment done became a
+     recessed surface on a card of nearly the same value. An explicit
+     step down cannot drift with its background. Its rail is not the
+     completion mark either: a warm-up is not working volume. */
+  .pill.warmup { background:var(--e0); border-left-color:var(--hair-strong); }
+  .pill.warmup .pillValue, .pill.warmup .pillInput, .pill.warmup .pillStatus, .pill.warmup .pillIdx { color:var(--muted-2); }
   /* a weight or rep record: a dot, not a takeover */
   .pillPrDot { display:inline-block; width:5px; height:5px; border-radius:50%;
     background:var(--gold); margin-right:5px; vertical-align:middle; }
   /* the near-miss cue, before the set */
-  .pillNear { font-size:var(--fs-micro); font-weight:600; color:var(--gold); margin-right:8px;
+  .pillNear { font-size:var(--fs-micro); font-weight:600; color:var(--muted-strong); margin-right:8px;
     white-space:nowrap; line-height:var(--lh-micro); letter-spacing:var(--ls-micro);}
 
   /* ==== REST BAR — an instrument face, not a toast. It sits inside the
@@ -202,7 +211,7 @@
   .restbar .restRingFill { fill:none; stroke:var(--signal); stroke-width:3; stroke-linecap:round;
     transition:stroke-dashoffset var(--d1) linear, stroke var(--d2) var(--ease-out); }
   .restbar .restTime { font-family:var(--mono); font-variant-numeric:tabular-nums;
-    font-size:var(--fs-subhead); font-weight:600; letter-spacing:-.01em; color:var(--text); min-width:52px; line-height:var(--lh-subhead);}
+    font-size:var(--fs-subhead); font-weight:600; letter-spacing:-.01em; color:var(--muted); min-width:52px; line-height:var(--lh-subhead);}
   .restbar .restLabel { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     font-size:var(--fs-micro); font-weight:600; color:var(--muted); letter-spacing:.01em; line-height:var(--lh-micro);}
   .restbar .restStep { flex:none; padding:7px 9px; border-radius:var(--r-sm);
@@ -215,10 +224,12 @@
     font-size:var(--fs-body); line-height:1; font-weight:var(--fw-body);}
   .restbar .restX:active { color:var(--text); }
   /* overtime — the rest is over and the number is now counting up */
-  .restbar.over { border-color:rgba(245,166,35,.32); background:linear-gradient(var(--e2),var(--e2)) padding-box; }
-  .restbar.over .restRingFill { stroke:var(--gold); }
-  .restbar.over .restTime { color:var(--gold); }
-  .restbar.over .restLabel { color:var(--gold); opacity:.75; }
+  /* Running past your rest is not an alert. The ring completes, the time
+     brightens from muted to text, the + appears. No colour. */
+  .restbar.over { border-color:var(--hair-strong); }
+  .restbar.over .restRingFill { stroke:var(--hair-strong); }
+  .restbar.over .restTime { color:var(--text); }
+  .restbar.over .restLabel { color:var(--muted); }
   @media (prefers-reduced-motion:reduce) { .restbar { animation:none; } }
 
   /* ====================================================================
@@ -259,8 +270,8 @@
   .actionPill:active { transform:scale(.95); }
   .actionPill svg { width:13px; height:13px; stroke:currentColor; fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
   .actionPill .pl { font-family:var(--sans); letter-spacing:.01em; font-size:var(--fs-label); line-height:var(--lh-label); font-weight:var(--fw-label);}
-  .finishBtn { width:100%; border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:6px; transform-origin:bottom; border-radius:var(--r-md); padding:14px 16px 12px; font-family:var(--sans); font-size:var(--fs-body); font-weight:700; cursor:pointer; background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,0) 46%), var(--signal); color:var(--signal-ink); box-shadow:0 14px 34px -14px rgba(110,231,183,.55); transition:transform var(--d1) var(--spring), box-shadow var(--d2) var(--ease-out), opacity var(--d2), background var(--d2), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-body);}
-  .finishBtn:hover:not(:disabled) { box-shadow:0 18px 42px -12px rgba(110,231,183,.65); transform:translateY(-1px); }
+  .finishBtn { width:100%; border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:6px; transform-origin:bottom; border-radius:var(--r-md); padding:14px 16px 12px; font-family:var(--sans); font-size:var(--fs-body); font-weight:700; cursor:pointer; background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,0) 46%), var(--signal); color:var(--signal-ink); transition:transform var(--d1) var(--spring), box-shadow var(--d2) var(--ease-out), opacity var(--d2), background var(--d2), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-body);}
+  .finishBtn:hover:not(:disabled) { transform:translateY(-1px); }
   .finishBtn:active:not(:disabled) { transform:scaleY(.96) translateY(2px); border-bottom-width:2px; }
   .finishBtn:disabled { opacity:.35; cursor:default; box-shadow:none; }
   .finishBtn.locked { background:rgba(110,231,183,.1); color:var(--signal); border:1px solid rgba(110,231,183,.4); box-shadow:none; }
@@ -274,8 +285,8 @@
   .goalRow .photoX { position:absolute; right:0; top:8px; }
   .pbtn { flex:1; border:2px solid transparent; border-bottom-width:4px; transform-origin:bottom; border-radius:var(--r-md); padding:12px 14px 10px; font-family:var(--sans); font-size:var(--fs-body); font-weight:700; cursor:pointer; transition:transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-body);}
   .pbtn:active { transform:scaleY(.94) translateY(1px); border-bottom-width:2px; }
-  .pbtn.save { background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,0) 46%), var(--signal); border-color:color-mix(in srgb, var(--signal) 60%, black); color:var(--signal-ink); box-shadow:0 10px 26px -14px rgba(110,231,183,.5); }
-  .pbtn.save:hover:not(:disabled) { box-shadow:0 14px 34px -12px rgba(110,231,183,.6); }
+  .pbtn.save { background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,0) 46%), var(--signal); border-color:color-mix(in srgb, var(--signal) 60%, black); color:var(--signal-ink); }
+  .pbtn.save:hover:not(:disabled) { }
   .pbtn.ghost { background:var(--e1); border-color:var(--hair-strong); color:var(--muted); }
   .pbtn.ghost:hover { color:var(--text); border-color:var(--muted); }
   .pbtn.danger { background:rgba(239,111,106,.1); border-color:color-mix(in srgb, var(--fail) 55%, black); color:var(--danger); }
@@ -302,7 +313,7 @@
   .pillInput:focus { color:var(--signal); border-bottom-color:var(--signal); }
   .pillInput.w.bump { color:var(--signal); }
   .pillInput.small { font-size:.85em; }
-  .pill.done .pillValue, .pill.done .pillInput { color:var(--signal-ink); }
+  .pill.done .pillValue, .pill.done .pillInput { color:var(--muted-strong); }
   .field { display:flex; align-items:center; justify-content:space-between; padding:16px 0; border-bottom:1px solid var(--hair); }
   .field:last-of-type { border-bottom:none; }
   .field .lbl { color:var(--muted-2); font-size:var(--fs-body); font-weight:500; display:flex; align-items:center; gap:10px; line-height:var(--lh-body);}
@@ -362,7 +373,8 @@
   /* 8 · card — 21 rules */
   .miniCard { background:var(--e2); border-radius:var(--r-md); padding:13px 12px; }
   .miniCard b { display:block; font-family:var(--sans); font-weight:800; font-size:var(--fs-title); letter-spacing:-.02em; color:var(--signal); line-height:var(--lh-title);}
-  .miniCard b.gold { color:var(--gold); }
+  /* Gold means a record. A streak is not one. */
+  .miniCard b.gold { color:var(--text); }
   .miniCard span { display:block; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-top:4px; line-height:var(--lh-micro); font-weight:var(--fw-micro);}
   .ex { position:relative; background:var(--e2); border:1px solid transparent; border-radius:var(--r-md); padding:18px 16px 20px; transition:background var(--d2) var(--ease-out); }
   .ex::after { content:''; position:absolute; inset:0; border-radius:var(--r-md); background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%), rgba(110,231,183,.08), transparent 65%); opacity:0; transition:opacity var(--d3) var(--ease-out); pointer-events:none; }
@@ -420,8 +432,8 @@
   .pillPerHand { margin-left:1px; font-size:.85em; opacity:.7; }
   .pillSpacer { flex:1; }
   .pillActions { display:inline-flex; align-items:center; gap:10px; }
-  .pillHit { background:var(--signal); color:var(--signal-ink); border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:4px; transform-origin:bottom; font-family:var(--sans); font-weight:700; font-size:var(--fs-label); border-radius:var(--r-pill); padding:6px 13px 5px; cursor:pointer; white-space:nowrap; transition:transform var(--d1) var(--spring), box-shadow var(--d2), border-bottom-width var(--d1) var(--spring); box-shadow:0 4px 14px -6px rgba(110,231,183,.6); line-height:var(--lh-label);}
-  .pillHit:hover { box-shadow:0 6px 18px -6px rgba(110,231,183,.75); }
+  .pillHit { background:var(--signal); color:var(--signal-ink); border:2px solid color-mix(in srgb, var(--signal) 60%, black); border-bottom-width:4px; transform-origin:bottom; font-family:var(--sans); font-weight:700; font-size:var(--fs-label); border-radius:var(--r-pill); padding:6px 13px 5px; cursor:pointer; white-space:nowrap; transition:transform var(--d1) var(--spring), box-shadow var(--d2), border-bottom-width var(--d1) var(--spring); line-height:var(--lh-label);}
+  .pillHit:hover { }
   .pillHit:active { transform:scaleY(.92) translateY(1px); border-bottom-width:2px; }
   .pillMiss { background:none; border:none; font-family:var(--sans); font-size:var(--fs-label); font-weight:500; color:var(--muted); cursor:pointer; padding:6px; transition:color var(--d2); line-height:var(--lh-label);}
   .pillMiss:hover { color:var(--fail); }
@@ -439,20 +451,39 @@
   .pillReset svg { width:13px; height:13px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
   .pillReset:hover { opacity:1; background:var(--e4); }
   .pillReset:active { transform:scale(.85); }
-  .pill.done { background:var(--signal); border-color:color-mix(in srgb, var(--signal) 60%, black); border-left-color:color-mix(in srgb, var(--signal) 60%, black); }
-  .pill.done .pillIdx { color:color-mix(in srgb, var(--signal-ink) 55%, transparent); }
-  .pill.done .pillUnit, .pill.done .pillTimes { color:color-mix(in srgb, var(--signal-ink) 60%, transparent); }
-  .pill.done .pillStatus, .pill.done .pillPr { color:var(--signal-ink); }
-  .pill.done .pillStatus .sub { color:color-mix(in srgb, var(--signal-ink) 65%, transparent); }
-  .pill.done .pillDrop { border-color:color-mix(in srgb, var(--signal-ink) 35%, transparent); color:var(--signal-ink); }
-  .pill.done .pillDrop:hover { background:color-mix(in srgb, var(--signal-ink) 10%, transparent); }
-  .pill.done .pillReset { color:color-mix(in srgb, var(--signal-ink) 70%, transparent); }
-  .pill.done .pillReset:hover { background:color-mix(in srgb, var(--signal-ink) 12%, transparent); }
+  /* DONE RECEDES. It was a solid signal fill, and individually that
+     looked good — but across twenty-five sets it became a wall of green
+     in which the next unlogged row, the thing you act on, was the
+     quietest element on screen. A completed set is reference, not
+     action: a recessed surface, with the signal spent on a left rail
+     that marks completion rather than on the whole row. */
+  .pill.done { background:var(--e1); border-color:var(--hair); border-left-color:var(--signal); border-left-width:3px; }
+  .pill.done .pillIdx { color:var(--muted-2); }
+  .pill.done .pillUnit, .pill.done .pillTimes { color:var(--muted-2); }
+  .pill.done .pillStatus { color:var(--muted); }
+  /* A RECORD IS THE LOUDEST THING IN THE APP, and it is rare. On a
+     recessed row it finally has somewhere to land: the rail turns gold
+     and the star gets a real size instead of being a glyph squeezed
+     between other glyphs. :has() rather than a new class, so the markup
+     is untouched. The weight/rep dot stays quiet — that distinction is
+     the whole point of having two marks. */
+  .pill.done:has(.pillPr) { border-left-color:var(--gold); }
+  .pill.done .pillPr { color:var(--gold); font-size:var(--fs-subhead); line-height:1; margin-right:2px; }
+  .pill.done .pillStatus .sub { color:var(--muted-2); }
+  .pill.done .pillDrop { border-color:var(--hair-strong); color:var(--muted); }
+  .pill.done .pillDrop:hover { background:var(--e3); }
+  .pill.done .pillReset { color:var(--muted-2); }
+  .pill.done .pillReset:hover { background:var(--e3); }
   .pill.done .pillHit { display:none; }
   .pill.failed { background:rgba(239,111,106,.06); border-color:rgba(239,111,106,.25); border-left-color:var(--fail); }
   .pill.failed .pillIdx, .pill.failed .pillStatus { color:var(--fail); }
   .pill.failed .pillValue { text-decoration:line-through; color:var(--muted-2); }
-  .pill.shimmer { animation:pillSnap .32s var(--spring); }
+  /* The full-green flash survives, as the reward and only as the reward.
+     The class is added when a set is logged and removed 820ms later, so
+     it never accumulates — which is exactly why it works. The row
+     transitions back to its recessed state on its own. */
+  .pill.shimmer { animation:pillSnap .32s var(--spring); background:var(--signal); border-color:color-mix(in srgb, var(--signal) 60%, black); border-left-color:color-mix(in srgb, var(--signal) 60%, black); }
+  .pill.shimmer .pillValue, .pill.shimmer .pillInput, .pill.shimmer .pillStatus, .pill.shimmer .pillIdx { color:var(--signal-ink); }
   .pill.shimmer::after { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(110deg, transparent 30%, rgba(255,255,255,.35) 50%, transparent 70%); transform:translateX(-120%); animation:pillShimmer .8s var(--ease-out); }
 
   /* keyframes the set row references */
@@ -652,7 +683,7 @@
   .mbRow { display:flex; align-items:center; gap:10px; }
   .mbLbl { width:88px; flex:none; font-size:var(--fs-label); color:var(--muted-2); text-transform:capitalize; line-height:var(--lh-label); font-weight:var(--fw-label); }
   .mbTrack { flex:1; height:9px; border-radius:999px; background:rgba(255,255,255,.05); overflow:hidden; }
-  .mbFill { height:100%; background:linear-gradient(90deg, var(--signal), var(--signal-bright)); border-radius:999px; box-shadow:0 0 8px rgba(110,231,183,.28); transition:width var(--d5) var(--ease-out); }
+  .mbFill { height:100%; background:linear-gradient(90deg, var(--signal), var(--signal-bright)); border-radius:999px; transition:width var(--d5) var(--ease-out); }
   .mbVal { width:56px; flex:none; text-align:right; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); line-height:var(--lh-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro); }
   .formMuscles { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.08em; text-transform:uppercase; line-height:var(--lh-micro); font-weight:var(--fw-micro); }
   .formMuscles .primary { color:var(--signal); }
@@ -938,6 +969,22 @@
   </div>
 </section>
 
+<section class="cs-sec" id="frame"><h2>10c · The frame that is the argument</h2><p class="cs-note">A card with eight logged sets and one unlogged. The unlogged row must be the most prominent thing here.</p>
+  <div class="ex">
+    <div class="exHead"><div class="exName"><span class="nameTxt">Bench Press</span></div></div>
+    <div class="exMeta"><span>compound</span><span class="metaSep">·</span><span>9 × 5</span></div>
+    <div class="exActions"><button class="actionPill"><span class="pl">Swap</span></button></div>
+    <div class="restSlot"></div>
+    <div class="pills">
+      <div class="pillWrap"><div class="pill done"><span class="pillIdx">I</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div><div class="pillWrap"><div class="pill done"><span class="pillIdx">II</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div><div class="pillWrap"><div class="pill done"><span class="pillIdx">III</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div><div class="pillWrap"><div class="pill done"><span class="pillIdx">IV</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div><div class="pillWrap"><div class="pill done"><span class="pillIdx">V</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div><div class="pillWrap"><div class="pill done"><span class="pillIdx">VI</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus"><span class="pillPr">★ </span>done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div><div class="pillWrap"><div class="pill done"><span class="pillIdx">VII</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div><div class="pillWrap"><div class="pill done"><span class="pillIdx">VIII</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
+      <div class="pillWrap"><div class="pill tappable"><span class="pillIdx">IX</span><span class="pillValue"><input class="pillInput w bump" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><button class="pillHit" aria-label="Log set">Hit it →</button><button class="pillMiss" aria-label="Mark missed">Miss</button></div></div>
+        <div class="pillWhy why-clean">Three clean sessions — up 5 lb.</div></div>
+    </div>
+  </div>
+  <p class="cs-note">Sixth row carries an e1RM record: its rail is gold and the star is set at a real size.
+  Every other completed row recedes below the card; the unlogged row sits above it and carries the only filled control.</p>
+</section>
+
 <section class="cs-sec" id="setrow"><h2>11 · Set row — the composite</h2><p class="cs-note">The most-tapped surface in the tile. done, failed and warmup must be distinguishable in greyscale.</p>
   <div class="cs-stack">
     <div class="cs-cell"><div class="cs-lbl">unlogged</div><div class="pill tappable"><span class="pillIdx">I</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><button class="pillHit" aria-label="Log set">Hit it →</button><button class="pillMiss" aria-label="Mark missed">Miss</button></div></div></div>
@@ -952,6 +999,7 @@
     <div class="cs-cell"><div class="cs-lbl">done</div><div class="pill done"><span class="pillIdx">I</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">done + over target</div><div class="pill done"><span class="pillIdx">II</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done <span class="sub">· +2</span></span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">done + under target</div><div class="pill done"><span class="pillIdx">II</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done <span class="sub">· 3 reps</span></span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">done, no record — beside the one below</div><div class="pill done"><span class="pillIdx">I</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">done + weight PR (dot)</div><div class="pill done"><span class="pillIdx">III</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus"><span class="pillPrDot" title="Heaviest yet"></span>done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">done + e1RM PR (star)</div><div class="pill done"><span class="pillIdx">III</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><span class="pillStatus"><span class="pillPr">★ </span>done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
     <div class="cs-cell"><div class="cs-lbl">done + RPE recorded</div><div class="pill done"><span class="pillIdx">I</span><span class="pillValue"><input class="pillInput w" type="number" inputmode="decimal" value="185" aria-label="Weight — 45 + 25 per side" /><span class="pillUnit">lb</span><span class="pillTimes">×</span><input class="pillInput r" type="number" inputmode="numeric" value="5" aria-label="Reps" /></span><span class="pillSpacer"></span><div class="pillActions"><button class="pillWarm" aria-pressed="false" title="Warm-up — kept in history, excluded from volume, PRs and progression">W</button><button class="pillWarm on" title="How hard was that set? Optional.">8.5</button><span class="pillStatus">done</span><button class="pillDrop" aria-label="Add drop set">+ Drop</button><button class="pillReset" aria-label="Undo set">↺</button></div></div></div>
