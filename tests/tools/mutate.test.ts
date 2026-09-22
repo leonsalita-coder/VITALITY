@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import {
   OPERATORS, mutationsFor, splitTests, inCommentAt, evenlySampled,
   ABSENCE, CONTROL, verdictFrom, partialRun,
@@ -623,5 +624,102 @@ describe('verify:full runs the sweep that the baseline describes', () => {
     /* `verify` is the pre-commit gate and has to stay minutes, not an
        hour. The full sweep belongs in verify:full and nowhere else. */
     expect(scripts().verify).not.toContain('--mode=mutate')
+  })
+})
+
+/**
+ * The shipped tile is covered too, not just the source it is built from.
+ *
+ * The harness snapshotted lib/train and never the tiles, and the tile is
+ * the thing that actually ships. That gap was exploited once: a test
+ * rebuilt the tile from a mutated source mid-run, the harness restored
+ * the source, and a tile carrying a broken bestE1rm was left staged.
+ *
+ * Serialising the suite removed that particular path and the pre-commit
+ * gate caught the outcome, but two of the three layers protecting the
+ * tile were found broken in the same hour. The third one should not be
+ * the one nobody checked.
+ */
+describe('a killed run puts the tile back too', () => {
+  const SNAPSHOT = '.mutate-snapshot.json'
+  const TILES = ['public/tiles/train.html', 'tiles-library/train.html']
+
+  it('snapshots both tiles alongside the engine source', async () => {
+    const { spawn } = await import('node:child_process')
+    const { readFileSync, existsSync, rmSync, writeFileSync } = await import('node:fs')
+    const before = TILES.map((t) => readFileSync(t, 'utf8'))
+    const engine = readFileSync('lib/train/liftweeks.ts', 'utf8')
+    const child = spawn('node', ['scripts/mutate.mjs', '--mode=mutate', '--files=liftweeks'],
+      { cwd: process.cwd(), stdio: 'ignore' })
+    try {
+      for (let i = 0; i < 240 && !existsSync(SNAPSHOT); i++) await new Promise((r) => setTimeout(r, 500))
+      const snap = JSON.parse(readFileSync(SNAPSHOT, 'utf8'))
+      for (const t of TILES) expect(Object.keys(snap.files), `${t} is not snapshotted`).toContain(t)
+    } finally {
+      child.kill('SIGKILL')
+      await new Promise((r) => setTimeout(r, 300))
+      writeFileSync('lib/train/liftweeks.ts', engine)
+      TILES.forEach((t, i) => writeFileSync(t, before[i]))
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 180_000)
+
+  it('restores a tile a killed run left corrupted', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync, writeFileSync, existsSync, rmSync } = await import('node:fs')
+    const before = TILES.map((t) => readFileSync(t, 'utf8'))
+    try {
+      /* Exactly what was found staged: the snapshot on disk naming the
+         tiles, and a tile carrying a mutated engine. */
+      writeFileSync(SNAPSHOT, JSON.stringify({
+        files: Object.fromEntries(TILES.map((t, i) => [t, before[i]])),
+      }))
+      TILES.forEach((t, i) =>
+        writeFileSync(t, before[i].replace('if (!entry || entry.off) return null', 'if (!entry && entry.off) return null')))
+      expect(readFileSync(TILES[0], 'utf8')).not.toBe(before[0])
+
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], { cwd: process.cwd(), stdio: 'pipe' })
+
+      TILES.forEach((t, i) => expect(readFileSync(t, 'utf8'), t).toBe(before[i]))
+      expect(existsSync(SNAPSHOT)).toBe(false)
+    } finally {
+      TILES.forEach((t, i) => writeFileSync(t, before[i]))
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 120_000)
+})
+
+/**
+ * Importing the build must not build.
+ *
+ * One line, and it caused two of the three faults that put a corrupted
+ * tile in the index: a test that merely imported build-tile.mjs rewrote
+ * the shipped tile, and did it in parallel with the mutation harness.
+ */
+describe('the tile build is inert until called', () => {
+  it('writes nothing when imported', async () => {
+    const { statSync } = await import('node:fs')
+    const { execFileSync } = await import('node:child_process')
+    const TILE = 'public/tiles/train.html'
+
+    /* mtime, not content. A build-on-import writes the SAME bytes back
+       whenever the source is unmutated, so comparing content cannot see
+       it — and the damage was never the bytes, it was the write landing
+       in parallel with a harness that had mutated the source.
+
+       In a fresh process, because within one vitest worker the module is
+       already cached and importing it again does nothing. */
+    const before = statSync(TILE).mtimeMs
+    execFileSync('node', ['-e', "import('./scripts/build-tile.mjs')"],
+      { cwd: process.cwd(), stdio: 'pipe' })
+    expect(statSync(TILE).mtimeMs).toBe(before)
+  }, 60_000)
+
+  it('does write when actually run', () => {
+    /* The positive control. An import guard that never fires would pass
+       the assertion above by making the build impossible to run at all. */
+    const before = statSync('public/tiles/train.html').mtimeMs
+    execFileSync('node', ['scripts/build-tile.mjs'], { cwd: process.cwd(), stdio: 'pipe' })
+    expect(statSync('public/tiles/train.html').mtimeMs).not.toBe(before)
   })
 })

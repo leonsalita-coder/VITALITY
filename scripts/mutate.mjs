@@ -247,7 +247,12 @@ function snapshot(paths) {
   return {
     dir,
     restore() {
-      for (const [p, text] of saved) writeFileSync(p, text)
+      /* Only what actually moved. A sweep restores after every mutation,
+         and two 200KB tiles rewritten 1500 times is a lot of disk for no
+         change — the engine source is the only file that usually differs. */
+      for (const [p, text] of saved) {
+        if (readFileSync(p, 'utf8') !== text) writeFileSync(p, text)
+      }
     },
     cleanup() {
       rmSync(dir, { recursive: true, force: true })
@@ -374,7 +379,11 @@ function modeMutate(opts) {
     let all = mutationsFor(file)
     if (opts.limit) all = evenlySampled(all, opts.limit)
 
-    const snap = snapshot([file])
+    /* The tiles as well as the source. The harness only ever snapshotted
+       lib/train, and the tile is the thing that ships — a rebuild landing
+       mid-run bakes a mutated engine into it, the source gets restored,
+       and the corrupted tile stays. That happened, and reached the index. */
+    const snap = snapshot([file, ...TILES])
     try {
       for (const m of all) {
         considered++
