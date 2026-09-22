@@ -13,7 +13,7 @@
 import { WEEKLY_SET_BAND, type ExerciseIndex, type History } from './analysis'
 import { distribute, type Muscle } from './muscles'
 import { epley1RM } from './records'
-import { setWeight, workingSets, type HistoryEntry } from './sets'
+import { readableEntries, setWeight, workingSets, type HistoryEntry } from './sets'
 import { deltaOf, rollingWindow } from './windows'
 
 const DAY_MS = 86_400_000
@@ -50,13 +50,9 @@ function daysAgo(date: string, now: number): number {
  */
 export function e1rmSeries(entries: HistoryEntry[]): Point[] {
   const points: Point[] = []
-  for (const entry of entries || []) {
-    /* Every point carries its date, so a row without one cannot become a
-       point — it would draw as a tap target leading nowhere. Null rows
-       and dateless rows both arrive from imports; the shared reader in
-       analysis.ts steps over them and each traversal here has to as
-       well, because none of them go through it. */
-    if (!entry || entry.off || !entry.date) continue
+  /* Every point carries its date, so a row without one cannot become a
+     point — it would draw as a tap target leading nowhere. */
+  for (const entry of readableEntries(entries)) {
     let best = 0
     for (const set of workingSets(entry)) {
       const value = epley1RM(setWeight(entry, set), set.r || 0)
@@ -84,8 +80,7 @@ export function muscleWeekSeries(
   for (const id of Object.keys(history || {})) {
     const split = index[id]
     if (!split || (!split.primary.length && !split.secondary.length)) continue
-    for (const entry of history[id] || []) {
-      if (!entry || entry.off || !entry.date) continue
+    for (const entry of readableEntries(history[id])) {
       const age = daysAgo(entry.date, now)
       if (age < 0 || age > 6) continue
       const spread = distribute(workingSets(entry).length, split)
@@ -155,9 +150,8 @@ export function periodComparison(
     let sets = 0
     let tonnage = 0
     for (const id of Object.keys(history || {})) {
-      for (const entry of history[id] || []) {
-        if (!entry || !entry.date) continue
-        if (entry.off || entry.date < from || entry.date > to) continue
+      for (const entry of readableEntries(history[id])) {
+        if (entry.date < from || entry.date > to) continue
         for (const set of workingSets(entry)) {
           sets++
           tonnage += setWeight(entry, set) * (set.r || 0)

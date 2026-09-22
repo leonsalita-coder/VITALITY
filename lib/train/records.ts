@@ -12,7 +12,7 @@
  * UNITS: pounds throughout.
  */
 
-import {
+import { readableEntries,
   DEFAULT_SET_KIND,
   isWorkingSet,
   setKind,
@@ -65,8 +65,9 @@ export interface BestOptions {
   sinceDate?: string
 }
 
+/* Rest days are already gone: every caller walks readableEntries, which
+   drops them along with rows too incomplete to place on a calendar. */
 function eligible(entry: HistoryEntry, opts: BestOptions): boolean {
-  if (entry.off) return false
   if (opts.excludeDate && entry.date === opts.excludeDate) return false
   if (opts.sinceDate && entry.date < opts.sinceDate) return false
   return true
@@ -75,7 +76,7 @@ function eligible(entry: HistoryEntry, opts: BestOptions): boolean {
 /** Best estimated 1RM on record, from working sets inside the rep cap. */
 export function bestE1RM(history: HistoryEntry[], opts: BestOptions = {}): E1RMRecord | null {
   let best: E1RMRecord | null = null
-  for (const entry of history || []) {
+  for (const entry of readableEntries(history)) {
     if (!eligible(entry, opts)) continue
     for (const set of workingSets(entry)) {
       // e1RM is a reps_weight idea; assistance is not load
@@ -93,7 +94,7 @@ export function bestE1RM(history: HistoryEntry[], opts: BestOptions = {}): E1RMR
 /** Heaviest working weight on record, for the quiet weight PR. */
 function bestWorkingWeight(history: HistoryEntry[], opts: BestOptions = {}): number {
   let best = 0
-  for (const entry of history || []) {
+  for (const entry of readableEntries(history)) {
     if (!eligible(entry, opts)) continue
     best = Math.max(best, topWorkingWeight(entry))
   }
@@ -103,7 +104,7 @@ function bestWorkingWeight(history: HistoryEntry[], opts: BestOptions = {}): num
 /** Best reps seen at exactly this weight. */
 function bestRepsAtWeight(history: HistoryEntry[], weight: number, opts: BestOptions = {}): number {
   let best = 0
-  for (const entry of history || []) {
+  for (const entry of readableEntries(history)) {
     if (!eligible(entry, opts)) continue
     for (const set of workingSets(entry)) {
       if (setWeight(entry, set) === weight) best = Math.max(best, set.r || 0)
@@ -115,7 +116,7 @@ function bestRepsAtWeight(history: HistoryEntry[], weight: number, opts: BestOpt
 /** Best reps seen anywhere, for lifts whose reps sit above the e1RM cap. */
 function bestRepsAnywhere(history: HistoryEntry[], opts: BestOptions = {}): number {
   let best = 0
-  for (const entry of history || []) {
+  for (const entry of readableEntries(history)) {
     if (!eligible(entry, opts)) continue
     best = Math.max(best, topWorkingReps(entry))
   }
@@ -176,7 +177,7 @@ function bestBy(
   opts: BestOptions,
 ): number {
   let best = 0
-  for (const entry of history || []) {
+  for (const entry of readableEntries(history)) {
     if (!eligible(entry, opts)) continue
     best = Math.max(best, pick(entry))
   }
@@ -186,7 +187,7 @@ function bestBy(
 /** Least assistance ever used — the record for an assisted movement. */
 function leastAssistance(history: HistoryEntry[], opts: BestOptions): number | null {
   let best: number | null = null
-  for (const entry of history || []) {
+  for (const entry of readableEntries(history)) {
     if (!eligible(entry, opts)) continue
     for (const set of workingSets(entry)) {
       if (!set.assisted) continue

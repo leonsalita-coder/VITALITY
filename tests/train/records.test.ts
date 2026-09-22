@@ -323,3 +323,34 @@ describe('e1RM only where e1RM means something', () => {
     expect(pr.kind).not.toBe('e1rm')
   })
 })
+
+describe('history rows with holes in them', () => {
+  /* The fifth module found with this defect, and the one that decides
+     whether somebody gets a record. A null row in a lift's history threw
+     on every read here — bestE1RM, classifyPR and the near-miss cue all
+     go through the same eligibility check, and it reached straight
+     through. */
+  const solid = [session('2026-01-05', 200, [5, 5]), session('2026-01-12', 205, [5, 5])]
+
+  it('sets a record past an empty row', () => {
+    const rows = [null, ...solid] as never
+    expect(() => classifyPR(rows, { weight: 225, reps: 5 }, at('2026-01-19'))).not.toThrow()
+    expect(classifyPR(rows, { weight: 225, reps: 5 }, at('2026-01-19')).kind).toBe('e1rm')
+  })
+
+  it('reads the best estimate past an empty row', () => {
+    expect(bestE1RM([null, ...solid] as never)?.weight).toBe(205)
+  })
+
+  it('reads it past a row with no date', () => {
+    const rows = [{ ...session('2026-01-08', 300, [5]), date: undefined }, ...solid] as never
+    expect(bestE1RM(rows)?.weight).toBe(205)
+  })
+
+  it('still finds nothing in a history that is only holes', () => {
+    /* The control on the other side: stepping over everything is only
+       correct when there is nothing else there. */
+    expect(bestE1RM([null, null] as never)).toBeNull()
+    expect(bestE1RM(solid)).not.toBeNull()
+  })
+})

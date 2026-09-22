@@ -26,9 +26,12 @@ export interface BodyweightEntry {
  * March does not describe a session in January. Null when nothing precedes
  * it, which callers must treat as "unknown" rather than "zero".
  */
-export function bodyweightAt(history: BodyweightEntry[], date: string): number | null {
+export function bodyweightAt(readings: BodyweightEntry[], date: string): number | null {
   let best: BodyweightEntry | null = null
-  for (const entry of history || []) {
+  /* `readings`, not `history`: these are weight entries, not sessions —
+     a different shape with a different guard, and naming it history put
+     it under a rule about lift rows that does not apply to it. */
+  for (const entry of readings || []) {
     if (!entry || typeof entry.lb !== 'number' || !Number.isFinite(entry.lb) || entry.lb <= 0) continue
     if (entry.date > date) continue
     if (!best || entry.date > best.date) best = entry

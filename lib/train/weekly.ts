@@ -39,7 +39,7 @@
  */
 
 import { attribute, type ExerciseIndex, type History } from './analysis'
-import { amrapOf } from './sets'
+import { readableEntries, amrapOf } from './sets'
 import { medianRest } from './timing'
 import { otherLoadOf, type OtherEntry } from './other'
 import { workingRpe, workingSets, setWeight } from './sets'
@@ -114,8 +114,8 @@ const round = (n: number, places = 1) => {
 function entriesIn(ctx: WeeklyContext, w: Window) {
   const out: Array<{ id: string; entry: History[string][number] }> = []
   for (const id of Object.keys(ctx.history || {})) {
-    for (const entry of ctx.history[id] || []) {
-      if (!entry || entry.off || !inWindow(entry.date, w)) continue
+    for (const entry of readableEntries(ctx.history[id])) {
+      if (!inWindow(entry.date, w)) continue
       out.push({ id, entry })
     }
   }

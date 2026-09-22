@@ -45,6 +45,7 @@
  */
 
 import { attribute, type ExerciseIndex, type History } from './analysis'
+import { readableEntries } from './sets'
 import { otherLoadOf, type OtherEntry } from './other'
 import { daysBetween, dateKey } from './windows'
 import type { Muscle } from './muscles'
@@ -182,8 +183,7 @@ function spanOfHistory(ctx: LoadContext): number {
   const today = dateKey(ctx.now)
   let oldest = 0
   for (const id of Object.keys(ctx.history || {})) {
-    for (const entry of ctx.history[id] || []) {
-      if (!entry || entry.off || !entry.date) continue
+    for (const entry of readableEntries(ctx.history[id])) {
       const age = daysBetween(entry.date, today)
       if (age > oldest) oldest = age
     }

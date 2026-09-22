@@ -29,7 +29,7 @@
  * Pure and DOM-free.
  */
 
-import { amrapOf, type HistoryEntry } from './sets'
+import { readableEntries, amrapOf, type HistoryEntry } from './sets'
 
 /**
  * Reps over target that read as under-loaded.
@@ -114,8 +114,7 @@ export interface AmrapTrend {
  */
 export function amrapTrend(history: HistoryEntry[] | null | undefined): AmrapTrend | null {
   const reps: number[] = []
-  for (const entry of history || []) {
-    if (!entry || entry.off) continue
+  for (const entry of readableEntries(history)) {
     const set = amrapOf(entry)
     if (set && typeof set.r === 'number' && Number.isFinite(set.r)) reps.push(set.r)
   }

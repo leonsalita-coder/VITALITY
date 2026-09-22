@@ -17,7 +17,7 @@
  */
 
 import { distribute, muscleSplitFrom, PULL_MUSCLES, PUSH_MUSCLES, type Muscle, type MuscleSplit } from './muscles'
-import { workingSets, type HistoryEntry } from './sets'
+import { readableEntries, workingSets, type HistoryEntry } from './sets'
 import { weeklySetBand } from './targets'
 import type { TrainingAge } from './onboarding'
 import { deltaOf, inWindow, rollingWindow } from './windows'
@@ -125,15 +125,7 @@ export function attribute(history: History, index: ExerciseIndex): Attribution[]
   for (const id of Object.keys(history || {})) {
     const split = index[id]
     if (!split || (!split.primary.length && !split.secondary.length)) continue
-    for (const entry of history[id] || []) {
-      /* A null row, or one with no date, crashes this. weekly.ts's
-         reader already steps over a null and load.ts's spanOfHistory
-         already steps over a dateless row — two readers of one history
-         disagreeing about what is readable is how two screens come to
-         disagree, and imported rows are where a hole appears. A row with
-         no date cannot be placed in any window regardless, so there is
-         nothing to lose by skipping it. */
-      if (!entry || entry.off || !entry.date) continue
+    for (const entry of readableEntries(history[id])) {
       const sets = workingSets(entry).length
       if (!sets) continue
       const spread = distribute(sets, split)

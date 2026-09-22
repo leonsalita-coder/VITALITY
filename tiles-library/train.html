@@ -1061,6 +1061,7 @@ var TrainEngine = (() => {
     rangeSets: () => rangeSets,
     rankSwaps: () => rankSwaps,
     ratios: () => ratios,
+    readableEntries: () => readableEntries,
     recentOtherLoad: () => recentOtherLoad,
     recordBodyweight: () => recordBodyweight,
     recordDose: () => recordDose,
@@ -1240,9 +1241,9 @@ var TrainEngine = (() => {
   }
 
   // lib/train/bodyweight.ts
-  function bodyweightAt(history, date) {
+  function bodyweightAt(readings, date) {
     let best = null;
-    for (const entry of history || []) {
+    for (const entry of readings || []) {
       if (!entry || typeof entry.lb !== "number" || !Number.isFinite(entry.lb) || entry.lb <= 0) continue;
       if (entry.date > date) continue;
       if (!best || entry.date > best.date) best = entry;
@@ -1292,6 +1293,14 @@ var TrainEngine = (() => {
   }
   function isWorkingSet(set) {
     return !!set && set.fail !== true && set.warmup !== true;
+  }
+  function* readableEntries(rows, opts = {}) {
+    for (const entry of rows || []) {
+      if (!entry || typeof entry !== "object") continue;
+      if (typeof entry.date !== "string" || !entry.date) continue;
+      if (entry.off && !opts.includeOff) continue;
+      yield entry;
+    }
   }
   function workingSets(entry) {
     return (entry.sets || []).filter(isWorkingSet);
@@ -1433,14 +1442,13 @@ var TrainEngine = (() => {
     return weight * (1 + reps / 30);
   }
   function eligible(entry, opts) {
-    if (entry.off) return false;
     if (opts.excludeDate && entry.date === opts.excludeDate) return false;
     if (opts.sinceDate && entry.date < opts.sinceDate) return false;
     return true;
   }
   function bestE1RM(history, opts = {}) {
     let best = null;
-    for (const entry of history || []) {
+    for (const entry of readableEntries(history)) {
       if (!eligible(entry, opts)) continue;
       for (const set of workingSets(entry)) {
         if (setKind(set) !== "reps_weight" || set.assisted) continue;
@@ -1455,7 +1463,7 @@ var TrainEngine = (() => {
   }
   function bestRepsAtWeight(history, weight, opts = {}) {
     let best = 0;
-    for (const entry of history || []) {
+    for (const entry of readableEntries(history)) {
       if (!eligible(entry, opts)) continue;
       for (const set of workingSets(entry)) {
         if (setWeight(entry, set) === weight) best = Math.max(best, set.r || 0);
@@ -1465,7 +1473,7 @@ var TrainEngine = (() => {
   }
   function bestRepsAnywhere(history, opts = {}) {
     let best = 0;
-    for (const entry of history || []) {
+    for (const entry of readableEntries(history)) {
       if (!eligible(entry, opts)) continue;
       best = Math.max(best, topWorkingReps(entry));
     }
@@ -1474,7 +1482,7 @@ var TrainEngine = (() => {
   var NO_PR = { kind: null, scope: null, e1rm: null, unit: null };
   function bestBy(history, pick, opts) {
     let best = 0;
-    for (const entry of history || []) {
+    for (const entry of readableEntries(history)) {
       if (!eligible(entry, opts)) continue;
       best = Math.max(best, pick(entry));
     }
@@ -1482,7 +1490,7 @@ var TrainEngine = (() => {
   }
   function leastAssistance(history, opts) {
     let best = null;
-    for (const entry of history || []) {
+    for (const entry of readableEntries(history)) {
       if (!eligible(entry, opts)) continue;
       for (const set of workingSets(entry)) {
         if (!set.assisted) continue;
@@ -2857,8 +2865,7 @@ var TrainEngine = (() => {
     const today = dateKey2(ctx.now);
     let oldest = 0;
     for (const id of Object.keys(ctx.history || {})) {
-      for (const entry of ctx.history[id] || []) {
-        if (!entry || entry.off || !entry.date) continue;
+      for (const entry of readableEntries(ctx.history[id])) {
         const age = daysBetween(entry.date, today);
         if (age > oldest) oldest = age;
       }
@@ -2951,8 +2958,7 @@ var TrainEngine = (() => {
     for (const id of Object.keys(history || {})) {
       const split = index[id];
       if (!split || !split.primary.length && !split.secondary.length) continue;
-      for (const entry of history[id] || []) {
-        if (!entry || entry.off || !entry.date) continue;
+      for (const entry of readableEntries(history[id])) {
         const sets = workingSets(entry).length;
         if (!sets) continue;
         const spread = distribute(sets, split);
@@ -3399,8 +3405,7 @@ var TrainEngine = (() => {
   }
   function amrapTrend(history) {
     const reps = [];
-    for (const entry of history || []) {
-      if (!entry || entry.off) continue;
+    for (const entry of readableEntries(history)) {
       const set = amrapOf(entry);
       if (set && typeof set.r === "number" && Number.isFinite(set.r)) reps.push(set.r);
     }
@@ -3455,7 +3460,7 @@ var TrainEngine = (() => {
   function restTrend(history) {
     const medians = [];
     const shapes = [];
-    for (const entry of history || []) {
+    for (const entry of readableEntries(history)) {
       const value = medianRest(entry);
       if (value == null) continue;
       medians.push(value);
@@ -4466,7 +4471,7 @@ var TrainEngine = (() => {
   function perSetSeconds(ctx) {
     const gaps = [];
     for (const id of Object.keys(ctx.history || {})) {
-      for (const entry of ctx.history[id] || []) {
+      for (const entry of readableEntries(ctx.history[id])) {
         gaps.push(...restTaken(entry).gaps);
       }
     }
@@ -4624,8 +4629,8 @@ var TrainEngine = (() => {
   function entriesIn(ctx, w) {
     const out = [];
     for (const id of Object.keys(ctx.history || {})) {
-      for (const entry of ctx.history[id] || []) {
-        if (!entry || entry.off || !inWindow(entry.date, w)) continue;
+      for (const entry of readableEntries(ctx.history[id])) {
+        if (!inWindow(entry.date, w)) continue;
         out.push({ id, entry });
       }
     }
@@ -6030,8 +6035,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
   }
   function e1rmSeries(entries) {
     const points = [];
-    for (const entry of entries || []) {
-      if (!entry || entry.off || !entry.date) continue;
+    for (const entry of readableEntries(entries)) {
       let best = 0;
       for (const set of workingSets(entry)) {
         const value = epley1RM(setWeight(entry, set), set.r || 0);
@@ -6046,8 +6050,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
     for (const id of Object.keys(history || {})) {
       const split = index[id];
       if (!split || !split.primary.length && !split.secondary.length) continue;
-      for (const entry of history[id] || []) {
-        if (!entry || entry.off || !entry.date) continue;
+      for (const entry of readableEntries(history[id])) {
         const age = daysAgo2(entry.date, now);
         if (age < 0 || age > 6) continue;
         const spread = distribute(workingSets(entry).length, split);
@@ -6091,9 +6094,8 @@ Say that back in one short sentence, in the second person, keeping the number ex
       let sets = 0;
       let tonnage = 0;
       for (const id of Object.keys(history || {})) {
-        for (const entry of history[id] || []) {
-          if (!entry || !entry.date) continue;
-          if (entry.off || entry.date < from || entry.date > to) continue;
+        for (const entry of readableEntries(history[id])) {
+          if (entry.date < from || entry.date > to) continue;
           for (const set of workingSets(entry)) {
             sets++;
             tonnage += setWeight(entry, set) * (set.r || 0);

@@ -33,6 +33,7 @@
  */
 
 import { restTaken } from './timing'
+import { readableEntries } from './sets'
 import type { DeloadRecord } from './deload'
 import type { History } from './analysis'
 
@@ -108,7 +109,7 @@ export interface TrimPlan {
 function perSetSeconds(ctx: TrimContext): { seconds: number; basis: 'observed' | 'default' } {
   const gaps: number[] = []
   for (const id of Object.keys(ctx.history || {})) {
-    for (const entry of ctx.history[id] || []) {
+    for (const entry of readableEntries(ctx.history[id])) {
       /* restTaken already refuses estimated timestamps and breaks the
          chain around missing ones, so its gaps are observed by
          construction. A `hasObservedTiming` check here would be a second

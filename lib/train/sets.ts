@@ -220,6 +220,35 @@ export function isWorkingSet(set: HistorySet | null | undefined): boolean {
 }
 
 /** The sets that count as training. The stored list is left intact. */
+/**
+ * The one way to walk a lift's history.
+ *
+ * Four separate private traversals were found reaching straight through
+ * a row that was null or had no date — analysis.attribute and all three
+ * in series.ts — across three consecutive review passes. Each was fixed
+ * where it was found, which fixes the instance and leaves the pattern:
+ * the next module to walk history itself starts with the same hole.
+ *
+ * A row that cannot be placed on a calendar cannot be counted, charted,
+ * windowed or compared, so every caller would have to skip it anyway.
+ * Refusing it once, here, is the whole guard.
+ *
+ * Rest days are skipped by default because most reads are about training
+ * that happened; `includeOff` is for the reads that count the days
+ * somebody deliberately took.
+ */
+export function* readableEntries(
+  rows: HistoryEntry[] | null | undefined,
+  opts: { includeOff?: boolean } = {},
+): Generator<HistoryEntry> {
+  for (const entry of rows || []) {
+    if (!entry || typeof entry !== 'object') continue
+    if (typeof entry.date !== 'string' || !entry.date) continue
+    if (entry.off && !opts.includeOff) continue
+    yield entry
+  }
+}
+
 export function workingSets(entry: HistoryEntry): HistorySet[] {
   return (entry.sets || []).filter(isWorkingSet)
 }

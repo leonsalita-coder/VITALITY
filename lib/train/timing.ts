@@ -26,7 +26,7 @@
  * Pure and DOM-free.
  */
 
-import { isWorkingSet, type HistoryEntry, type HistorySet } from './sets'
+import { readableEntries, isWorkingSet, type HistoryEntry, type HistorySet } from './sets'
 
 /**
  * Longer than this is not rest.
@@ -148,7 +148,7 @@ export interface RestTrend {
 export function restTrend(history: HistoryEntry[] | null | undefined): RestTrend | null {
   const medians: number[] = []
   const shapes: string[] = []
-  for (const entry of history || []) {
+  for (const entry of readableEntries(history)) {
     const value = medianRest(entry)
     if (value == null) continue
     medians.push(value)
