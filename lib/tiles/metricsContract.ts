@@ -122,3 +122,40 @@ export function validatePublish(input: unknown): PublishResult {
   }
   return { metrics, rejected }
 }
+
+/* ------------------------------------------------------------------ *
+ * Which slots one tile may read from another.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Tiles whose WHOLE private store is still readable by any other tile.
+ *
+ * This is the old way in, and it hands over everything the tile saved.
+ * It stays only where a consumer already depends on it: peak.html and
+ * train.html both read `vitals` for a recovery signal, and narrowing it
+ * is a change to that tile rather than this one.
+ *
+ * `train` was on this list and is not any more. Nothing read it —
+ * confirmed across the host and every tile — while it exposed exercise
+ * names, session notes and progress photos, which is the most sensitive
+ * data in the app and was the most freely available. A tile publishes
+ * what it means to share; everything else is a decision nobody should
+ * have to defend later.
+ */
+export const WHOLE_STORE_READABLE = ['vitals'] as const
+
+/** Tiles that publish typed daily metrics for anyone to read. */
+export const METRICS_READABLE = ['train', 'fuel', 'vitals', 'brand', 'peak', 'finance'] as const
+
+/**
+ * May this slot be read across the tile boundary?
+ *
+ * Exported and pure so the rule is testable as behaviour rather than
+ * asserted by reading the host's source — the same reason every other
+ * boundary claim in this codebase is a function.
+ */
+export function isReadableSlot(slot: string): boolean {
+  if ((WHOLE_STORE_READABLE as readonly string[]).includes(slot)) return true
+  const metrics = /^(.+):metrics$/.exec(slot)
+  return !!metrics && (METRICS_READABLE as readonly string[]).includes(metrics[1])
+}

@@ -36,10 +36,20 @@
  * another tile and a separate decision; it is noted here so the
  * difference is deliberate rather than forgotten.
  *
- * The same door is open on this tile: `read('train')` still returns
- * Train's entire saved state — exercise names, notes, photos and all —
- * because existing consumers were built against it. This module is what
- * makes closing that door possible later; it does not close it.
+ * That door is now closed on this tile: `read('train')` is refused, and
+ * `read('train:metrics')` returns this payload instead. Nothing was
+ * reading the old slot — checked across the host and all nine tiles —
+ * while it exposed exercise names, session notes and progress photos.
+ *
+ * PATHS OUT OF THIS TILE, since publishing invites the question. Six,
+ * not two. `save` writes the whole private state to Train's OWN store,
+ * which nothing else can read. `publish` writes this payload, which
+ * anything can. The other four are user-initiated AI calls that leave
+ * the tile by design and carry more than this does: `classify` sends an
+ * exercise name, `getInsight` a goal and a digest of findings,
+ * `generateWorkout` the goal, the lift list and the PAIN FLAGS, and
+ * `addProgressPhoto` a photo. They are not cross-tile reads and are not
+ * narrowed by any of this; they are named so the list is complete.
  *
  * Pure and DOM-free.
  */

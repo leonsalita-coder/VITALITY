@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { validateMetric, validatePublish, MAX_METRICS_PER_PUBLISH } from '../../lib/tiles/metricsContract'
+import { readFileSync, readdirSync } from 'node:fs'
+import { validateMetric, validatePublish, isReadableSlot, MAX_METRICS_PER_PUBLISH } from '../../lib/tiles/metricsContract'
 
 /**
  * The metrics payload crosses an iframe boundary from a sealed tile,
@@ -114,8 +114,84 @@ describe('the host wires the channel it validates', () => {
     expect(host).not.toContain('msg.tileId')
   })
 
-  it('makes the published slot readable by other tiles', () => {
+  it('decides readable slots through the shared rule', () => {
+    /* The host must not carry its own copy of the list, or the rule and
+       the enforcement drift apart silently. */
     const host = readFileSync('lib/tiles/useTileHost.ts', 'utf8')
-    expect(host).toContain("'train:metrics'")
+    expect(host).toContain('isReadableSlot(slot)')
+    expect(host).not.toContain("const READABLE =")
+  })
+})
+
+/**
+ * The door that was open.
+ *
+ * `read('train')` returned Train's entire saved store — exercise names,
+ * session notes, progress photos — to any tile that asked, and nothing
+ * in the host or in any of the nine tiles ever asked. The most sensitive
+ * data in the app was the most freely available, for no consumer at all.
+ *
+ * Now it publishes what it means to share and nothing else.
+ */
+describe('a tile publishes what it means to share', () => {
+  it('refuses a whole-store read of train', () => {
+    expect(isReadableSlot('train')).toBe(false)
+  })
+
+  it('still serves train\'s published metrics', () => {
+    /* The control the negative needs: a bridge that refused everything
+       would pass the assertion above and break the feature. */
+    expect(isReadableSlot('train:metrics')).toBe(true)
+  })
+
+  it('keeps the one whole-store read that has a consumer', () => {
+    /* peak.html and train.html both read `vitals` for a recovery
+       signal. Narrowing it is a change to that tile, not this one. */
+    expect(isReadableSlot('vitals')).toBe(true)
+  })
+
+  it('offers a metrics slot for every tile, published or not', () => {
+    for (const tile of ['train', 'fuel', 'vitals', 'brand', 'peak', 'finance']) {
+      expect(isReadableSlot(`${tile}:metrics`), tile).toBe(true)
+    }
+  })
+
+  it('refuses a slot nobody named', () => {
+    for (const slot of ['', 'vee', 'reading', 'train:state', 'train:', ':metrics', '../train']) {
+      expect(isReadableSlot(slot), slot).toBe(false)
+    }
+  })
+
+  it('refuses a metrics slot for a tile that is not on the board', () => {
+    expect(isReadableSlot('mystery:metrics')).toBe(false)
+  })
+})
+
+describe('nothing was reading the door that closed', () => {
+  const tiles = readdirSync('public/tiles').filter((f) => f.endsWith('.html'))
+
+  it('finds the tiles to check', () => {
+    expect(tiles.length).toBeGreaterThan(5)
+  })
+
+  it('has no consumer of a whole-store train read anywhere', () => {
+    /* Asserted rather than audited: this is the claim the removal rests
+       on, and it is the kind that rots the moment somebody adds a tile. */
+    const callers: string[] = []
+    for (const f of tiles) {
+      const text = readFileSync(`public/tiles/${f}`, 'utf8')
+      for (const m of text.matchAll(/\.read\(\s*'([^']+)'\s*\)/g)) {
+        if (m[1] === 'train') callers.push(`${f}: read('train')`)
+      }
+    }
+    expect(callers, `move these onto train:metrics:\n${callers.join('\n')}`).toEqual([])
+  })
+
+  it('catches such a read when there is one', () => {
+    /* The regex, exercised — one that matched nothing would pass the
+       assertion above forever. */
+    const sample = `const v = await BRIDGE.read('vitals'); const t = await window.Vitality.read('train');`
+    const found = [...sample.matchAll(/\.read\(\s*'([^']+)'\s*\)/g)].map((m) => m[1])
+    expect(found).toEqual(['vitals', 'train'])
   })
 })

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef } from 'react'
-import { validatePublish } from './metricsContract'
+import { validatePublish, isReadableSlot } from './metricsContract'
 import { tileStore } from './tileStore'
 import { syncEnabled, syncSave, syncLoad } from '@/lib/sync'
 import { supa } from './tileSupabase'
@@ -285,14 +285,9 @@ export function useTileHost(
         const slot = String(msg.slot || '')
         /* `<tile>:metrics` is the disciplined way to read another tile:
            typed daily values with provenance, written by publish(). The
-           bare slots hand over a tile's whole private store and stay only
-           because existing tiles already read them that way. */
-        const READABLE = [
-          'train', 'fuel', 'vitals', 'brand', 'peak', 'finance',
-          'train:metrics', 'fuel:metrics', 'vitals:metrics',
-          'brand:metrics', 'peak:metrics', 'finance:metrics',
-        ]
-        if (!READABLE.includes(slot)) {
+           whole-store reads are the old way in and survive only where a
+           consumer already depends on one — see metricsContract. */
+        if (!isReadableSlot(slot)) {
           src.postMessage({ source: 'vitality-host', type: 'read:error', id: msg.id, reason: 'slot_not_allowed' }, '*')
           return
         }
