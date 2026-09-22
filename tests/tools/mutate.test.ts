@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   OPERATORS, mutationsFor, splitTests, inCommentAt, evenlySampled,
-  ABSENCE, CONTROL, verdictFrom,
+  ABSENCE, CONTROL, verdictFrom, partialRun,
 } from '../../scripts/mutate.mjs'
 
 /**
@@ -486,4 +486,142 @@ describe('recovery keeps its hands off a run that is still going', () => {
       rmSync(SNAPSHOT, { force: true })
     }
   }, 120_000)
+})
+
+/**
+ * A ratchet that cannot fire is the zero-test run wearing a different hat.
+ *
+ * `verify:full` ran `--mode=mutate --limit=6`: six mutations sampled per
+ * module, roughly 264 of 1527, and the resulting survivor count was
+ * compared against a baseline recorded from a WHOLE-engine sweep. A
+ * sample cannot exceed a full count, so the comparison returned
+ * "improved" forever. The gate at the top of the stack was the one gate
+ * structurally incapable of failing.
+ *
+ * `--files=` has the same shape — a 16-module subset was scored against
+ * the whole-engine baseline and reported a regression that was only ever
+ * arithmetic.
+ *
+ * So a partial run is now not scored at all, and says so. A number that
+ * is not comparable must not be compared.
+ */
+describe('the ratchet only judges a complete sweep', () => {
+  it('knows a sampled run is partial', () => {
+    expect(partialRun({ limit: 6, files: [] })).toBe(true)
+  })
+
+  it('knows a subset of modules is partial', () => {
+    expect(partialRun({ limit: 0, files: ['plates'] })).toBe(true)
+  })
+
+  it('knows a whole sweep is not', () => {
+    /* The positive control. A "partial" that is always true would pass
+       both assertions above and disable the ratchet entirely — which is
+       the bug, not the fix. */
+    expect(partialRun({ limit: 0, files: [] })).toBe(false)
+  })
+
+  it('says so rather than scoring a subset against the whole engine', async () => {
+    const { execFileSync } = await import('node:child_process')
+    /* liftweeks is the cheapest module in the engine: 9 mutations, one
+       test file. It has a survivor, so the old code reached the
+       comparison. */
+    let out = ''
+    try {
+      out = execFileSync('node', ['scripts/mutate.mjs', '--mode=mutate', '--files=liftweeks'],
+        { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })
+    } catch (e: any) { out = String(e.stdout || '') + String(e.stderr || '') }
+    expect(out).toContain('partial run')
+    expect(out).not.toContain('REGRESSION')
+    expect(out).not.toContain('improved:')
+  }, 180_000)
+
+  it('refuses to record a baseline from a partial run', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync } = await import('node:fs')
+    const before = readFileSync('.mutation-baseline.json', 'utf8')
+    let code = 0
+    try {
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=mutate', '--files=liftweeks', '--bless'],
+        { cwd: process.cwd(), stdio: 'pipe' })
+    } catch (e: any) { code = e.status }
+    /* Exit 2: the tool was misused, which is not the same as survivors. */
+    expect(code).toBe(2)
+    expect(readFileSync('.mutation-baseline.json', 'utf8')).toBe(before)
+  }, 180_000)
+})
+
+/**
+ * The gate has to have been SEEN to fail.
+ *
+ * checkRatchet returning 1 proves nothing on its own — main() has to
+ * turn that into a non-zero exit, and that path had never run, because
+ * the only mode wired into a gate was being handed a number that could
+ * not exceed its baseline. This drives a real regression through the
+ * CLI and watches it come back red.
+ *
+ * `lint` is the vehicle because it is complete and fast; the mechanism
+ * under test is shared by every mode.
+ */
+describe('a rising count actually fails the command', () => {
+  const FILE = '.mutation-baseline.json'
+
+  it('exits non-zero and names the regression', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync, writeFileSync } = await import('node:fs')
+    const before = readFileSync(FILE, 'utf8')
+    try {
+      writeFileSync(FILE, JSON.stringify({ ...JSON.parse(before), lint: 0 }, null, 2) + '\n')
+      let code = 0, out = ''
+      try {
+        out = execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'],
+          { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })
+      } catch (e: any) { code = e.status; out = String(e.stdout || '') + String(e.stderr || '') }
+      expect(code).toBe(1)
+      expect(out).toContain('REGRESSION')
+    } finally {
+      writeFileSync(FILE, before)
+    }
+  }, 120_000)
+
+  it('exits zero when the count is at the baseline', async () => {
+    /* The positive control. A gate that failed unconditionally would
+       pass the assertion above and block every commit. */
+    const { execFileSync } = await import('node:child_process')
+    let code = 0
+    try {
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], { cwd: process.cwd(), stdio: 'pipe' })
+    } catch (e: any) { code = e.status }
+    expect(code).toBe(0)
+  }, 120_000)
+})
+
+/**
+ * The wiring is the part that failed, so the wiring is asserted.
+ *
+ * Every piece of the ratchet worked in isolation. What was broken was
+ * the command that called it: `verify:full` passed `--limit=6`, so the
+ * gate spent its whole life comparing a sample against a whole-engine
+ * baseline. Nothing would have caught a `--limit` going back in, which
+ * is why this reads package.json rather than trusting it.
+ */
+describe('verify:full runs the sweep that the baseline describes', () => {
+  const scripts = () => JSON.parse(readFileSync('package.json', 'utf8')).scripts
+
+  it('runs the mutate mode at all', () => {
+    expect(scripts()['verify:full']).toContain('--mode=mutate')
+  })
+
+  it('does not sample it', () => {
+    const full = scripts()['verify:full']
+    const call = full.slice(full.indexOf('--mode=mutate'))
+    expect(call).not.toContain('--limit')
+    expect(call).not.toContain('--files')
+  })
+
+  it('keeps the fast gate free of it', () => {
+    /* `verify` is the pre-commit gate and has to stay minutes, not an
+       hour. The full sweep belongs in verify:full and nowhere else. */
+    expect(scripts().verify).not.toContain('--mode=mutate')
+  })
 })

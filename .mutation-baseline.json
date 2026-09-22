@@ -3,5 +3,5 @@
   "lint": 57,
   "callsites": 20,
   "fuzz": 0,
-  "mutate": 492
+  "mutate": 1
 }

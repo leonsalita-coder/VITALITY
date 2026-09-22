@@ -647,6 +647,21 @@ function readBaseline() {
   }
 }
 
+/**
+ * Is this run's count comparable to the baseline at all?
+ *
+ * The baseline is a whole-engine number. A sampled run (`--limit`) or a
+ * subset of modules (`--files`) produces a number measuring something
+ * else, and comparing the two is arithmetic dressed as a gate:
+ * `verify:full` ran `--limit=6` — about 264 of 1527 mutations — against a
+ * full-sweep baseline, so it could never exceed it and never fired.
+ * Blessing from one is worse: a `--bless --files=liftweeks` wrote
+ * `mutate: 1` over a baseline of 492, from nine mutations.
+ */
+export function partialRun(opts) {
+  return Boolean(opts.limit || (opts.files && opts.files.length))
+}
+
 function checkRatchet(mode, count) {
   const baseline = readBaseline()
   const allowed = baseline[mode]
@@ -675,6 +690,12 @@ function main() {
   }
 
   const bless = args.includes('--bless')
+  const partial = partialRun(opts)
+  if (bless && partial) {
+    console.error('refusing to record a baseline from a partial run.')
+    console.error('--limit and --files measure part of the engine; the baseline is the whole of it.')
+    process.exit(2)
+  }
   const modes = opts.mode === 'all' ? ['lint', 'callsites', 'fuzz', 'mutate'] : [opts.mode]
   const counts = {}
   let failed = 0
@@ -685,7 +706,9 @@ function main() {
       process.exit(2)
     }
     counts[mode] = report(mode.toUpperCase(), runner(opts), opts.json)
-    if (!bless) failed += checkRatchet(mode, counts[mode])
+    if (bless) continue
+    if (partial) console.log(`  partial run — not scored against the baseline`)
+    else failed += checkRatchet(mode, counts[mode])
   }
   if (bless) {
     writeFileSync(BASELINE_FILE, JSON.stringify({ ...readBaseline(), ...counts }, null, 2) + '\n')

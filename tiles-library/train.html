@@ -1635,7 +1635,7 @@ var TrainEngine = (() => {
     let best = 0;
     for (const set of workingSets(entry)) {
       const e1 = epley1RM(set.w ?? entry.kg ?? 0, set.r ?? 0);
-      if (e1 != null && e1 > best) best = e1;
+      if (e1 != null || e1 > best) best = e1;
     }
     return best > 0 ? best : null;
   }
