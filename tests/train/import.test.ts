@@ -27,6 +27,21 @@ describe('parseCsv', () => {
     expect(rows[1][0]).toBe('Squat, Back')
   })
 
+  it('ends the last cell where the file ends', () => {
+    /* Reading one character past the end appends the literal string
+       "undefined" to the final cell of every file and adds a phantom
+       row. It hides completely when the last column is empty — which
+       every export fixture here happens to have, because exporters
+       write a trailing comma for an optional field. */
+    expect(parseCsv('a,b\n1,2')).toEqual([['a', 'b'], ['1', '2']])
+    expect(parseCsv('a,b\n1,2\n')).toEqual([['a', 'b'], ['1', '2']])
+    expect(parseCsv('')).toEqual([])
+  })
+
+  it('ends it correctly when the last cell was quoted', () => {
+    expect(parseCsv('a,b\n1,"x,y"')).toEqual([['a', 'b'], ['1', 'x,y']])
+  })
+
   it('handles escaped quotes and blank lines', () => {
     expect(parseCsv('a\n"say ""hi"""\n\n')[1][0]).toBe('say "hi"')
   })
@@ -179,5 +194,251 @@ describe('it never claims a timestamp it did not observe', () => {
     for (const entry of out.entries) {
       for (const set of entry.sets) expect((set as unknown as Record<string, unknown>).at).toBeUndefined()
     }
+  })
+})
+
+/**
+ * The importer is about to be edited for session ids, and it runs over a
+ * year of somebody's real history in one pass. 31 of its 75 mutations
+ * survived, so almost none of the decisions below were actually pinned:
+ * which app wrote the file, what a date means, which measure a row
+ * carries, and which weight becomes the session's.
+ *
+ * A migration guided by tests that miss four mutations in ten is how you
+ * corrupt data quietly. These are the assertions the migration will lean
+ * on.
+ */
+describe('recognising the file before trusting a word of it', () => {
+  const header = (cols: string[]) => detectSource(cols)
+
+  it('needs BOTH Hevy markers, not either', () => {
+    /* A file with exercise_title but no set_index is not a Hevy export,
+       and reading it as one takes every column from the wrong place. */
+    expect(header(['exercise_title', 'set_index'])).toBe('hevy')
+    expect(header(['exercise_title'])).toBe('unknown')
+    expect(header(['set_index'])).toBe('unknown')
+  })
+
+  it('needs the Strong name column AND one of its two shapes', () => {
+    expect(header(['exercise_name', 'set_order'])).toBe('strong')
+    expect(header(['exercise_name', 'workout_name'])).toBe('strong')
+    expect(header(['exercise_name'])).toBe('unknown')
+    expect(header(['set_order'])).toBe('unknown')
+  })
+
+  it('imports nothing at all from an unknown header', () => {
+    /* Paired with the recognised file in the same body: "imports
+       nothing" is satisfied by an importer that imports nothing ever. */
+    expect(importCsv(HEVY).entries.length).toBeGreaterThan(0)
+    const r = importCsv('a,b,c\n1,2,3')
+    expect(r.entries).toEqual([])
+    expect(r.report.source).toBe('unknown')
+  })
+
+  it('imports nothing from a recognised header with no rows under it', () => {
+    /* A header-only export is a real thing people produce. */
+    expect(importCsv(HEVY).entries.length).toBeGreaterThan(0)
+    const r = importCsv('title,start_time,exercise_title,set_index,weight_kg,reps')
+    expect(r.entries).toEqual([])
+    expect(r.report.sets).toBe(0)
+  })
+})
+
+describe('a date is the day it says', () => {
+  const entriesFor = (raw: string) => {
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      `Day,${raw},${raw},Bench Press,1,normal,84,5,,,`,
+    ].join('\n')
+    return importCsv(csv).entries
+  }
+  /* The DATE of the imported row — and `entriesFor` beside it, because
+     a row imported with a null date also satisfies `?? null`. Dropping
+     the row and importing it undated are different failures. */
+  const dayOf = (raw: string) => entriesFor(raw)[0]?.date ?? null
+
+  it('reads an ISO timestamp as its own day', () => {
+    expect(dayOf('2026-09-14 18:02:00')).toBe('2026-09-14')
+  })
+
+  it('reads a bare ISO date', () => {
+    expect(dayOf('2026-09-14')).toBe('2026-09-14')
+  })
+
+  it('reads the slash form some exports use', () => {
+    /* Not a parse of convenience: without it these fall through to
+       `new Date`, which reads 2026/09/14 in the host timezone and can
+       land a day either side. */
+    expect(dayOf('2026/09/14')).toBe('2026-09-14')
+  })
+
+  it('drops a row whose date cannot be read at all', () => {
+    expect(entriesFor('last Tuesday')).toEqual([])
+    expect(dayOf('last Tuesday')).toBeNull()
+  })
+
+  it('drops a row with no date', () => {
+    expect(entriesFor('')).toEqual([])
+    expect(dayOf('')).toBeNull()
+  })
+
+  it('drops a row with no exercise name', () => {
+    const row = (name: string) => [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      `Day,2026-09-14 18:02:00,2026-09-14 19:00:00,${name},1,normal,84,5,,,`,
+    ].join('\n')
+    /* The same row WITH a name imports, so the silence is the missing
+       name rather than the fixture. */
+    expect(importCsv(row('Bench Press')).entries).toHaveLength(1)
+    expect(importCsv(row('')).entries).toEqual([])
+  })
+})
+
+describe('which measure a row actually carries', () => {
+  const kindOfRow = (cols: { w?: string; reps?: string; km?: string; secs?: string }) => {
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      `Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Plank,1,normal,${cols.w ?? ''},${cols.reps ?? ''},${cols.km ?? ''},${cols.secs ?? ''},`,
+    ].join('\n')
+    const e = importCsv(csv).entries[0]
+    return e?.sets[0]?.kind ?? 'reps_weight'
+  }
+
+  it('calls seconds with distance a time_distance set', () => {
+    expect(kindOfRow({ secs: '600', km: '2' })).toBe('time_distance')
+  })
+
+  it('calls distance alone a distance set', () => {
+    expect(kindOfRow({ km: '2' })).toBe('distance')
+  })
+
+  it('calls seconds without reps a time set', () => {
+    expect(kindOfRow({ secs: '60' })).toBe('time')
+  })
+
+  it('does not call seconds WITH reps a time set', () => {
+    /* A weighted carry logs both. Reading it as a hold loses the reps. */
+    expect(kindOfRow({ secs: '60', reps: '10', w: '40' })).toBe('reps_weight')
+  })
+
+  it('calls reps with no weight a reps_only set', () => {
+    expect(kindOfRow({ reps: '12' })).toBe('reps_only')
+  })
+
+  it('calls a ZERO weight the same as no weight', () => {
+    /* Exports write 0 for bodyweight work. Treating 0 as a load makes
+       every pull-up a 0 lb reps_weight set. */
+    expect(kindOfRow({ reps: '12', w: '0' })).toBe('reps_only')
+  })
+
+  it('calls a zero duration no duration', () => {
+    expect(kindOfRow({ secs: '0', reps: '12', w: '0' })).toBe('reps_only')
+  })
+
+  it('does not turn a distance into a time_distance on a zero duration', () => {
+    /* `seconds !== undefined && seconds > 0` — the two halves only come
+       apart when a row carries an explicit 0 BESIDE a distance, which
+       is what every treadmill export writes. */
+    expect(kindOfRow({ secs: '0', km: '2' })).toBe('distance')
+  })
+
+  it('calls a zero distance no distance', () => {
+    expect(kindOfRow({ km: '0', reps: '12', w: '100' })).toBe('reps_weight')
+  })
+
+  it('calls weight with reps a reps_weight set', () => {
+    expect(kindOfRow({ w: '84', reps: '5' })).toBe('reps_weight')
+  })
+})
+
+describe('the numbers that come off a row', () => {
+  it('reads a numeric string', () => {
+    const e = importCsv(HEVY).entries.find((x) => x.displayName.match(/Bench/))
+    expect(e?.sets.some((s) => s.r === 5)).toBe(true)
+  })
+
+  it('leaves a field that is not a number undefined rather than zero', () => {
+    /* NaN reaching a set would make every read of it silently wrong;
+       undefined is the honest shape and every consumer already handles
+       it. */
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,1,normal,heavy,5,,,',
+    ].join('\n')
+    const set = importCsv(csv).entries[0].sets[0]
+    expect(set.w).toBeUndefined()
+    expect(set.r).toBe(5)
+  })
+
+  it('omits a measure the row did not carry, rather than writing zero', () => {
+    const e = importCsv(HEVY).entries.find((x) => x.displayName === 'Plank')!
+    expect(e.sets[0].s).toBe(60)
+    expect(e.sets[0].w).toBeUndefined()
+    expect(e.sets[0].r).toBeUndefined()
+  })
+
+  it('converts a distance in kilometres to metres', () => {
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Run,1,normal,,,5,1800,',
+    ].join('\n')
+    expect(importCsv(csv).entries[0].sets[0].m).toBe(5000)
+  })
+})
+
+describe('the weight that becomes the session weight', () => {
+  it('takes the heaviest WORKING set, not the heaviest set', () => {
+    /* A warm-up heavier than the work is rare but real — a top single
+       followed by back-offs. Counting it would make the next
+       suggestion read from a set nobody worked. */
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,0,warmup,100,3,,,',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,1,normal,80,5,,,',
+    ].join('\n')
+    const e = importCsv(csv).entries[0]
+    expect(e.kg).toBe(Math.round(80 * LB_PER_KG * 100) / 100)
+  })
+
+  it('takes the heaviest of several working sets', () => {
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,1,normal,80,5,,,',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,2,normal,90,3,,,',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,3,normal,70,8,,,',
+    ].join('\n')
+    expect(importCsv(csv).entries[0].kg).toBe(Math.round(90 * LB_PER_KG * 100) / 100)
+  })
+
+  it('leaves the session weight at zero when every set was a warm-up', () => {
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,0,warmup,100,3,,,',
+    ].join('\n')
+    expect(importCsv(csv).entries[0].kg).toBe(0)
+  })
+})
+
+describe('a name it cannot resolve exactly is never guessed at', () => {
+  it('counts an unresolved name rather than importing it', () => {
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Zercher Yoke Carry,1,normal,100,5,,,',
+    ].join('\n')
+    const r = importCsv(csv)
+    expect(r.entries).toEqual([])
+    expect(r.report.unresolved.length).toBeGreaterThan(0)
+  })
+
+  it('imports the rows it CAN resolve from the same file', () => {
+    /* The control: refusing everything would satisfy the line above. */
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Zercher Yoke Carry,1,normal,100,5,,,',
+      'Day,2026-09-14 18:02:00,2026-09-14 19:00:00,Bench Press,1,normal,84,5,,,',
+    ].join('\n')
+    const r = importCsv(csv)
+    expect(r.entries).toHaveLength(1)
+    expect(r.report.unresolved).toHaveLength(1)
   })
 })
