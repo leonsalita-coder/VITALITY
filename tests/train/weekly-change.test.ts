@@ -654,6 +654,7 @@ describe('a context missing the parts it never filled in', () => {
          has its own case below. */
       const partial = { ...ctx(bare), [field]: undefined } as WeeklyContext
       expect(() => weeklyChange(partial)).not.toThrow()
+      expect(weeklyChange(partial)?.hypothesis).toBe('confounded_change')
       expect(weeklyChange(partial)?.text).toMatch(/Volume down 30% on the week/)
     })
 
@@ -663,6 +664,7 @@ describe('a context missing the parts it never filled in', () => {
     /* Silence is the correct answer with no confound left — so the same
        context WITH one sits beside it, or this passes against a module
        that has stopped speaking entirely. */
+    expect(weeklyChange(ctx(bare))?.hypothesis).toBe('confounded_change')
     expect(weeklyChange(ctx(bare))?.text).toMatch(/Volume down 30% on the week/)
     expect(weeklyChange(partial)).toBeNull()
   })

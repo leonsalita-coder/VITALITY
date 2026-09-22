@@ -69,7 +69,7 @@ describe('a session that ramps and backs off', () => {
     /* Paired with the weight that DOES clear the top set, so the silence
        is the comparison rather than a module that stopped awarding
        records at all. */
-    expect(classifyPR(history, { weight: 230, reps: 5 }, at('2026-09-25')).kind).toMatch(/e1rm/)
+    expect(classifyPR(history, { weight: 230, reps: 5 }, at('2026-09-25')).kind).toBe('e1rm')
     expect(classifyPR(history, { weight: 200, reps: 5 }, at('2026-09-25')).kind).toBeNull()
   })
 
