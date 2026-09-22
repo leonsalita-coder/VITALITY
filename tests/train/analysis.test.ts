@@ -235,3 +235,272 @@ describe('an empty side is the finding, not a reason to withhold it', () => {
     expect(ratios({ bench: [sess(3, 12)] }, INDEX, NOW)).toEqual([])
   })
 })
+
+/**
+ * Every gate, in both directions.
+ *
+ * Thirty mutations survived this module, and the reason is the shape
+ * that bit the catalog: a gate asserted only in the silent direction is
+ * satisfied completely by never firing. "Stays quiet inside the
+ * threshold" passes just as happily against a finding that has been
+ * switched off — so each one below is paired with the case that proves
+ * it can still speak, and both sit on the exact boundary rather than
+ * comfortably inside it.
+ *
+ * squat and legcurl carry a single primary each, so their sets land 1:1
+ * on quads and hamstrings and a boundary can be hit exactly.
+ */
+describe('each gate fires on its boundary and not before', () => {
+  describe('a gap of exactly the threshold is a gap', () => {
+    it('speaks at GAP_DAYS and not a day earlier', () => {
+      /* Both halves in one body deliberately. The quiet assertion on its
+         own is satisfied by a finding that never fires at all, which is
+         the shape this whole pass is about. */
+      const at = (gap: number) =>
+        frequencyGaps({ squat: [sess(gap, 5), sess(gap + 7, 5)] }, INDEX, NOW)
+          .some((f) => f.muscle === 'quads')
+      expect(at(GAP_DAYS)).toBe(true)
+      expect(at(GAP_DAYS - 1)).toBe(false)
+    })
+  })
+
+  describe('the weekly window includes today and the seventh day back', () => {
+    const over = (day: number) =>
+      weeklySets({ squat: [sess(day, 21)] }, INDEX, NOW).some((f) => /above/.test(f.text))
+
+    it('counts sets logged today', () => {
+      /* The window runs 0..6 days. Dropping today would silence the
+         finding on the day the athlete is most likely looking. */
+      expect(over(0)).toBe(true)
+    })
+
+    it('counts sets logged six days ago', () => expect(over(6)).toBe(true))
+    it('ignores sets logged seven days ago', () => expect(over(7)).toBe(false))
+  })
+
+  describe('the ceiling is a ceiling, not a limit to reach', () => {
+    const at = (sets: number) =>
+      weeklySets({ squat: [sess(1, sets)] }, INDEX, NOW).some((f) => /above the 20-set band/.test(f.text))
+
+    it('says nothing at exactly the band ceiling', () => expect(at(20)).toBe(false))
+    it('speaks one set above it', () => expect(at(21)).toBe(true))
+  })
+
+  describe('the floor is a floor', () => {
+    /* All inside the last week, so no trailing average exists and the
+       age profile is the floor under test. Three muscles, because the
+       age-profile floor is gated on the athlete training enough for
+       "under" to be a choice rather than a starting point. */
+    const at = (sets: number) => weeklySets(
+      { squat: [sess(1, sets)], curl: [sess(2, 12)], legcurl: [sess(3, 12)] },
+      INDEX, NOW, { trainingAge: 'intermediate' },
+    ).some((f) => f.muscle === 'quads' && /under/.test(f.text))
+
+    it('says nothing at exactly the band floor', () => expect(at(10)).toBe(false))
+    it('speaks one set below it', () => expect(at(9)).toBe(true))
+    it('says nothing at all about a muscle with no sets', () => expect(at(0)).toBe(false))
+  })
+
+  describe('the age-profile floor needs three muscles, and exactly three will do', () => {
+    const withMuscles = (lifts: History) =>
+      weeklySets(lifts, INDEX, NOW, { trainingAge: 'intermediate' })
+        .some((f) => f.muscle === 'quads' && /under the 10-set band/.test(f.text))
+
+    it('speaks on exactly three', () => {
+      expect(withMuscles({ squat: [sess(1, 2)], curl: [sess(2, 12)], legcurl: [sess(3, 12)] })).toBe(true)
+    })
+
+    it('stays quiet on two', () => {
+      expect(withMuscles({ squat: [sess(1, 2)], curl: [sess(2, 12)] })).toBe(false)
+    })
+  })
+
+  describe('the ratio window runs from today to the far edge inclusive', () => {
+    const heavy = (day: number) =>
+      ratios({ squat: [sess(day, 14)], legcurl: [sess(1, 6)] }, INDEX, NOW)
+        .some((f) => /Quads to hamstrings/.test(f.text))
+
+    it('counts work done today', () => expect(heavy(0)).toBe(true))
+    it('counts work on the last day of the window', () => expect(heavy(28)).toBe(true))
+    it('drops work one day past it', () => expect(heavy(29)).toBe(false))
+  })
+
+  describe('a pattern needs enough sets behind it', () => {
+    const total = (quads: number) =>
+      ratios({ squat: [sess(3, quads)], legcurl: [sess(5, 6)] }, INDEX, NOW)
+        .some((f) => /Quads to hamstrings/.test(f.text))
+
+    it('passes judgement at exactly twenty combined sets', () => expect(total(14)).toBe(true))
+    it('withholds it at nineteen', () => expect(total(13)).toBe(false))
+  })
+
+  describe('the balanced band is inclusive at both edges', () => {
+    const ratioOf = (quads: number, hams: number) =>
+      ratios({ squat: [sess(3, quads)], legcurl: [sess(5, hams)] }, INDEX, NOW)
+        .some((f) => /Quads to hamstrings/.test(f.text))
+
+    it('says nothing at exactly the top of the band', () => expect(ratioOf(17, 10)).toBe(false))
+    it('speaks just above it', () => expect(ratioOf(18, 10)).toBe(true))
+    it('says nothing at exactly the bottom of the band', () => expect(ratioOf(12, 20)).toBe(false))
+    it('speaks just below it', () => expect(ratioOf(11, 20)).toBe(true))
+  })
+})
+
+describe('what counts as having trained', () => {
+  it('ignores a session marked off, and only because it is marked off', () => {
+    const session = sess(1, 25)
+    expect(weeklySets({ squat: [{ ...session, off: true }] }, INDEX, NOW)).toEqual([])
+    expect(weeklySets({ squat: [session] }, INDEX, NOW).length).toBeGreaterThan(0)
+  })
+
+  it('does not treat a warm-up-only session as having trained', () => {
+    /* Counting it does more than inflate a total: it makes the muscle
+       look trained twice, so the app then reports a gap since a day the
+       athlete never worked. The control is the same shape with real
+       sets, in the same body — alone, the quiet half passes against a
+       gap finding that fires for nobody. */
+    const warmOnly = {
+      date: ago(20), kg: 100,
+      sets: Array.from({ length: 8 }, () => ({ w: 100, r: 5, warmup: true })),
+    }
+    expect(frequencyGaps({ squat: [warmOnly, sess(30, 5)] }, INDEX, NOW)).toEqual([])
+    expect(frequencyGaps({ squat: [sess(20, 8), sess(30, 5)] }, INDEX, NOW)
+      .some((f) => f.muscle === 'quads')).toBe(true)
+  })
+
+  it('skips a lift whose muscles are unrecognised instead of throwing', () => {
+    const index = indexFrom({ mystery: { primary: ['Vibes'] }, squat: { primary: ['Quads'] } })
+    const history: History = { mystery: [sess(1, 20)], squat: [sess(1, 25)] }
+    expect(() => analyse(history, index, NOW)).not.toThrow()
+    const found = analyse(history, index, NOW)
+    expect(found.every((f) => f.muscle !== undefined ? f.muscle === 'quads' : true)).toBe(true)
+  })
+})
+
+describe('a guess anywhere makes the finding a guess', () => {
+  it('marks a gap estimated when any contributing set was estimated', () => {
+    /* Propagation is an OR, not an AND. Requiring every row to be a
+       guess would report a finding as exact on the strength of one
+       exact lift among guesses — the flag reads as "trust this". */
+    const index = indexFrom({
+      exact: { primary: [{ muscle: 'quads', share: 1 }] },
+      guessy: { primary: ['Quads'] },
+    })
+    const history: History = { exact: [sess(20, 5)], guessy: [sess(30, 5)] }
+    const found = frequencyGaps(history, index, NOW)
+    expect(found).toHaveLength(1)
+    expect(found[0].estimated).toBe(true)
+  })
+
+  it('leaves a finding built only from exact splits unmarked', () => {
+    const index = indexFrom({ exact: { primary: [{ muscle: 'quads', share: 1 }] } })
+    const history: History = { exact: [sess(20, 5), sess(30, 5)] }
+    const found = frequencyGaps(history, index, NOW)
+    expect(found).toHaveLength(1)
+    expect(found[0].estimated).toBe(false)
+  })
+})
+
+/**
+ * The trailing average, pinned by the number it puts on screen.
+ *
+ * The four-week walk is the most intricate arithmetic in the file and
+ * nothing asserted its result — only that a finding of some kind
+ * appeared. Both the week-boundary comparisons survived a sweep because
+ * a finding still appeared with the wrong average in it.
+ *
+ * So these assert the average the athlete is actually shown.
+ */
+describe('the four-week trailing average', () => {
+  /* Weeks 1-4 are days 7-13, 14-20, 21-27, 28-34. One session sits on
+     the first day of each, and the last one is deliberately the odd one
+     out so that dropping or keeping it changes the answer. */
+  const history: History = {
+    squat: [sess(1, 3), sess(7, 6), sess(14, 6), sess(21, 6), sess(28, 18)],
+  }
+
+  it('counts all four weeks, including the one the oldest session starts', () => {
+    /* 6 + 6 + 6 + 18 over four weeks is 9. Stopping a week early reads
+       18 over three and calls it 6. */
+    const found = weeklySets(history, INDEX, NOW, { trainingAge: 'intermediate' })
+    expect(found.some((f) => f.muscle === 'quads' && /recent average of 9/.test(f.text))).toBe(true)
+  })
+
+  it('counts a session landing exactly on a week boundary', () => {
+    /* Every session above sits on the first day of its week. Excluding
+       the boundary empties all four weeks, the average becomes zero, and
+       the finding vanishes rather than becoming wrong — which is how it
+       survived unnoticed. */
+    const found = weeklySets(history, INDEX, NOW, { trainingAge: 'intermediate' })
+    expect(found.some((f) => f.muscle === 'quads' && /recent average/.test(f.text))).toBe(true)
+  })
+
+  it('prefers the athlete\'s own average to the age profile', () => {
+    /* The control on which floor is in play: 3 sets is under the
+       intermediate floor of 10 too, so a test that only checked for
+       "under" would pass either way. */
+    const found = weeklySets(history, INDEX, NOW, { trainingAge: 'intermediate' })
+    const quads = found.find((f) => f.muscle === 'quads')
+    expect(quads?.text).toMatch(/recent average/)
+    expect(quads?.text).not.toMatch(/10-set band/)
+  })
+})
+
+describe('history the index has never heard of', () => {
+  it('skips an exercise with no entry in the index at all', () => {
+    /* Not the same as an entry with no muscles: this id is absent, so
+       the split is undefined and anything that reaches through it
+       throws rather than staying quiet. */
+    const index = indexFrom({ squat: { primary: ['Quads'] } })
+    const history: History = { ghost: [sess(1, 20)], squat: [sess(1, 25)] }
+    expect(() => analyse(history, index, NOW)).not.toThrow()
+    /* Ratio findings carry no muscle, so only the ones that name a
+       muscle are the claim here: none of them may be the ghost. */
+    const named = analyse(history, index, NOW).filter((f) => f.muscle)
+    expect(named.length).toBeGreaterThan(0)
+    expect(named.every((f) => f.muscle === 'quads')).toBe(true)
+  })
+
+  it('still reads the exercises it does know', () => {
+    const index = indexFrom({ squat: { primary: ['Quads'] } })
+    const history: History = { ghost: [sess(1, 20)], squat: [sess(1, 25)] }
+    expect(analyse(history, index, NOW).length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * One set is not "almost none".
+ *
+ * The one-sided wording exists for the case where a ratio cannot be
+ * stated — a month of pressing against literally nothing. A side holding
+ * a whole set has a ratio, and saying "almost none" of it instead throws
+ * away the number that makes the finding actionable.
+ *
+ * Both operands are asserted: the guard reads `right < 1 || left < 1`,
+ * and each half is reachable depending on which side is the busy one.
+ */
+describe('the line between a ratio and an empty side', () => {
+  it('states the ratio when the quiet side has a whole set', () => {
+    const found = ratios({ squat: [sess(3, 20)], legcurl: [sess(5, 1)] }, INDEX, NOW)
+    expect(found.some((f) => /Quads to hamstrings is running/.test(f.text))).toBe(true)
+    expect(found.some((f) => /almost none/.test(f.text))).toBe(false)
+  })
+
+  it('says almost none when that side has nothing at all', () => {
+    const found = ratios({ squat: [sess(3, 20)] }, INDEX, NOW)
+    expect(found.some((f) => /almost none of hamstrings/.test(f.text))).toBe(true)
+  })
+
+  it('states the ratio when it is the BUSY side that holds one set', () => {
+    /* The other operand. With hamstrings carrying the volume the same
+       guard is reached through its left-hand half. */
+    const found = ratios({ squat: [sess(3, 1)], legcurl: [sess(5, 20)] }, INDEX, NOW)
+    expect(found.some((f) => /Quads to hamstrings is running/.test(f.text))).toBe(true)
+    expect(found.some((f) => /almost none/.test(f.text))).toBe(false)
+  })
+
+  it('says almost none when the busy side is alone', () => {
+    const found = ratios({ legcurl: [sess(5, 20)] }, INDEX, NOW)
+    expect(found.some((f) => /almost none of quads/.test(f.text))).toBe(true)
+  })
+})

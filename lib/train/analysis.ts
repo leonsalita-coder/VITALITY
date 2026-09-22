@@ -183,7 +183,8 @@ export function frequencyGaps(history: History, index: ExerciseIndex, now: numbe
  */
 function trailingAverage(rows: Attribution[], muscle: Muscle, now: number): number | null {
   const mine = rows.filter((r) => r.muscle === muscle)
-  if (!mine.length) return null
+  /* No empty check: with no rows the oldest is 0, the first week already
+     predates it, and `covered < 2` returns null on its own. */
   const oldest = mine.reduce((max, r) => Math.max(max, daysAgo(r.date, now)), 0)
 
   let total = 0
@@ -220,7 +221,6 @@ export function weeklySets(
 ): Finding[] {
   const all = attribute(history, index)
   const rows = all.filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0)
-  if (!rows.length) return []
 
   const totals = new Map<Muscle, { sets: number; estimated: boolean }>()
   for (const row of rows) {
@@ -288,7 +288,6 @@ export function ratios(history: History, index: ExerciseIndex, now: number, days
     const age = daysAgo(r.date, now)
     return age >= 0 && age <= days
   })
-  if (!rows.length) return []
   const estimated = rows.some((r) => r.estimated)
 
   const findings: Finding[] = []

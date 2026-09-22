@@ -2991,7 +2991,6 @@ var TrainEngine = (() => {
   }
   function trailingAverage(rows, muscle, now) {
     const mine = rows.filter((r) => r.muscle === muscle);
-    if (!mine.length) return null;
     const oldest = mine.reduce((max, r) => Math.max(max, daysAgo(r.date, now)), 0);
     let total = 0;
     let covered = 0;
@@ -3010,7 +3009,6 @@ var TrainEngine = (() => {
   function weeklySets(history, index, now, opts = {}) {
     const all = attribute(history, index);
     const rows = all.filter((r) => daysAgo(r.date, now) <= 6 && daysAgo(r.date, now) >= 0);
-    if (!rows.length) return [];
     const totals = /* @__PURE__ */ new Map();
     for (const row of rows) {
       const t = totals.get(row.muscle) || { sets: 0, estimated: false };
@@ -3063,7 +3061,6 @@ var TrainEngine = (() => {
       const age = daysAgo(r.date, now);
       return age >= 0 && age <= days;
     });
-    if (!rows.length) return [];
     const estimated = rows.some((r) => r.estimated);
     const findings = [];
     const MIN_TOTAL = 20;
