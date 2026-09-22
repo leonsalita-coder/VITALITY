@@ -540,7 +540,13 @@ const ABSENCE = /expect\(([^;]*?)\)\s*\.(?:toEqual\(\[\]\)|toBeNull\(\)|toHaveLe
    toBeCloseTo(0.05) on a gap both prove the fixture produced something.
    Zero is excluded from both, since toBe(0) is another way of asserting
    absence — which is the thing being looked for, not a control for it. */
-const CONTROL = /toBeGreaterThan|toBeTruthy|not\.toBeNull|toBe\(true\)|toContain|toMatch|not\.toEqual|toBeDefined|toBeCloseTo\((?!0[,)\s])|toBe\([1-9]|toHaveLength\([1-9]/
+/* `toBe('e1rm')` is the same claim as `toBe(true)` or `toBe(3)`: a
+   specific, definite result came back. It was missing, so a test pairing
+   "this is not a record" with "and THIS one is" read as uncontrolled —
+   and the lint then pushed the control toward toMatch, which is a weaker
+   assertion than the one it replaced. Empty stays excluded: '' is
+   absence wearing a string. */
+const CONTROL = /toBeGreaterThan|toBeTruthy|not\.toBeNull|toBe\(true\)|toContain|toMatch|not\.toEqual|toBeDefined|toBeCloseTo\((?!0[,)\s])|toBe\([1-9]|toBe\(['"][^'"]+['"]\)|toHaveLength\([1-9]/
 
 /**
  * Only absence assertions made against a BUILT FIXTURE.

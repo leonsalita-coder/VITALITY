@@ -863,3 +863,43 @@ describe('a deliberately unpinned mode', () => {
     expect(b.lint).toBeTypeOf('number')
   })
 })
+
+/**
+ * A specific non-empty result is a positive control.
+ *
+ * CONTROL already accepts `toBe(true)` and `toBe(1)` — a claim that
+ * something definite came back. `toBe('e1rm')` is the same claim about
+ * a string, and it was not recognised, so a test pairing "this is not a
+ * record" with "and THIS one is" read as an absence assertion with no
+ * control.
+ *
+ * That matters more than the count: the lint was pushing assertions
+ * toward `toMatch(/e1rm/)` to satisfy it, which is a weaker claim than
+ * the one it replaced. A linter that makes tests worse is worse than no
+ * linter.
+ *
+ * Empty and zero stay excluded, because those ARE absence.
+ */
+describe('the absence lint knows a string control when it sees one', () => {
+  it('accepts a specific string result', () => {
+    expect(CONTROL.test("expect(pr.kind).toBe('e1rm')")).toBe(true)
+  })
+
+  it('accepts one with double quotes', () => {
+    expect(CONTROL.test('expect(pr.kind).toBe("e1rm")')).toBe(true)
+  })
+
+  it('does not accept the empty string, which is absence', () => {
+    expect(CONTROL.test("expect(s).toBe('')")).toBe(false)
+  })
+
+  it('still rejects a body with no control at all', () => {
+    expect(CONTROL.test('expect(classifyPR(h, c, NOW).kind).toBeNull()')).toBe(false)
+  })
+
+  it('still accepts the controls it always did', () => {
+    for (const c of ['toBeGreaterThan(0)', 'toBe(true)', 'toBe(3)', 'toHaveLength(2)', 'toMatch(/x/)']) {
+      expect(CONTROL.test(`expect(v).${c}`), c).toBe(true)
+    }
+  })
+})

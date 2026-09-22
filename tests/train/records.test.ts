@@ -354,3 +354,270 @@ describe('history rows with holes in them', () => {
     expect(bestE1RM(solid)).not.toBeNull()
   })
 })
+
+/**
+ * Records, pinned at their edges.
+ *
+ * 24 of 74 mutations survived here, and almost all of them were the
+ * same comparison: `>` against `>=`. That difference is the whole
+ * meaning of a record — MATCHING your best is not beating it, and a
+ * celebration that fires on a tie fires most sessions and stops meaning
+ * anything. The module this is about to be edited alongside decides
+ * whether somebody gets a star, so its edges are the contract.
+ */
+const timed = (date: string, seconds: number): HistoryEntry =>
+  ({ date, kg: 0, sets: [{ s: seconds, kind: 'time' }] } as never)
+const ran = (date: string, metres: number): HistoryEntry =>
+  ({ date, kg: 0, sets: [{ m: metres, kind: 'distance' }] } as never)
+const repsOnly = (date: string, reps: number): HistoryEntry =>
+  ({ date, kg: 0, sets: [{ r: reps, kind: 'reps_only' }] } as never)
+const assisted = (date: string, help: number): HistoryEntry =>
+  ({ date, kg: help, sets: [{ w: help, r: 5, assisted: true }] } as never)
+
+describe('matching your best is not beating it', () => {
+  const NOW = at('2026-09-22')
+
+  it('a hold equal to the longest is not a record', () => {
+    const h = [timed('2026-09-01', 60)]
+    expect(classifyPR(h, { kind: 'time', seconds: 60 }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { kind: 'time', seconds: 61 }, NOW).kind).toBe('time')
+  })
+
+  it('a distance equal to the furthest is not a record', () => {
+    const h = [ran('2026-09-01', 5000)]
+    expect(classifyPR(h, { kind: 'distance', metres: 5000 }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { kind: 'distance', metres: 5001 }, NOW).kind).toBe('distance')
+  })
+
+  it('reps equal to the most is not a record', () => {
+    const h = [repsOnly('2026-09-01', 20)]
+    expect(classifyPR(h, { kind: 'reps_only', reps: 20 }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { kind: 'reps_only', reps: 21 }, NOW).kind).toBe('reps')
+  })
+
+  it('an estimate equal to the best is not a record', () => {
+    const h = [session('2026-09-01', 200, [5, 5])]
+    expect(classifyPR(h, { weight: 200, reps: 5 }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { weight: 205, reps: 5 }, NOW).kind).toBe('e1rm')
+  })
+
+  it('a weight equal to the heaviest is not a record', () => {
+    /* Reached only when the estimate does not fire — above the rep cap,
+       where there is no e1RM to beat. */
+    const h = [session('2026-09-01', 200, [12])]
+    expect(classifyPR(h, { weight: 200, reps: 12 }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { weight: 205, reps: 12 }, NOW).kind).toBe('weight')
+  })
+
+  it('the same reps at the same weight is not a record', () => {
+    const h = [session('2026-09-01', 200, [12])]
+    expect(classifyPR(h, { weight: 200, reps: 12 }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { weight: 200, reps: 13 }, NOW).kind).toBe('reps')
+  })
+
+  it('the same help as ever is not a record — less help is', () => {
+    const h = [assisted('2026-09-01', 40)]
+    expect(classifyPR(h, { weight: 40, reps: 5, assisted: true }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { weight: 35, reps: 5, assisted: true }, NOW).kind).toBe('assist')
+    expect(classifyPR(h, { weight: 45, reps: 5, assisted: true }, NOW).kind).toBeNull()
+  })
+})
+
+describe('a record needs something to beat', () => {
+  const NOW = at('2026-09-22')
+
+  it('does not celebrate the first hold ever logged', () => {
+    /* `best > 0` — with no history there is no record to take, and
+       calling a first session a PR makes every first session one. */
+    expect(classifyPR([], { kind: 'time', seconds: 60 }, NOW).kind).toBeNull()
+    expect(classifyPR([timed('2026-09-01', 30)], { kind: 'time', seconds: 60 }, NOW).kind).toBe('time')
+  })
+
+  it('does not celebrate the first run', () => {
+    expect(classifyPR([], { kind: 'distance', metres: 5000 }, NOW).kind).toBeNull()
+    expect(classifyPR([ran('2026-09-01', 1000)], { kind: 'distance', metres: 5000 }, NOW).kind).toBe('distance')
+  })
+
+  it('does not celebrate the first set of reps', () => {
+    expect(classifyPR([], { kind: 'reps_only', reps: 20 }, NOW).kind).toBeNull()
+    expect(classifyPR([repsOnly('2026-09-01', 10)], { kind: 'reps_only', reps: 20 }, NOW).kind).toBe('reps')
+  })
+
+  it('does not celebrate the first assisted set', () => {
+    expect(classifyPR([], { weight: 40, reps: 5, assisted: true }, NOW).kind).toBeNull()
+    expect(classifyPR([assisted('2026-09-01', 50)], { weight: 40, reps: 5, assisted: true }, NOW).kind)
+      .toBe('assist')
+  })
+})
+
+describe('the twelve-month record is its own scope', () => {
+  const NOW = at('2026-09-22')
+
+  it('marks a best-in-a-year even when the all-time is out of reach', () => {
+    const h = [session('2020-01-01', 300, [5]), session('2026-08-01', 200, [5])]
+    const pr = classifyPR(h, { weight: 210, reps: 5 }, NOW)
+    expect(pr.kind).toBe('e1rm')
+    expect(pr.scope).toBe('12-month')
+  })
+
+  it('does not mark one equal to the year’s best', () => {
+    const h = [session('2020-01-01', 300, [5]), session('2026-08-01', 200, [5])]
+    expect(classifyPR(h, { weight: 200, reps: 5 }, NOW).kind).toBeNull()
+  })
+
+  it('counts a session exactly at the edge of the window as inside it', () => {
+    /* `entry.date < sinceDate` — the day the window opens is IN it, and
+       moving that edge silently re-scopes every rolling record. */
+    const edge = new Date(NOW - ROLLING_PR_DAYS * 86_400_000)
+    const p = (n: number) => String(n).padStart(2, '0')
+    const edgeDay = `${edge.getFullYear()}-${p(edge.getMonth() + 1)}-${p(edge.getDate())}`
+    const h = [session('2020-01-01', 300, [5]), session(edgeDay, 250, [5])]
+    /* 240 beats the all-time? No — 300 stands. And inside the window
+       the 250 stands too, so nothing fires. */
+    expect(classifyPR(h, { weight: 240, reps: 5 }, NOW).kind).toBeNull()
+  })
+})
+
+describe('the near-miss cue', () => {
+  const NOW = at('2026-09-22')
+  const h = [session('2026-09-01', 200, [5])]
+
+  it('speaks when the prefill lands just under the best', () => {
+    expect(nearMissCue(h, { weight: 197, reps: 5 }, 5, NOW)).toMatch(/under your best/)
+  })
+
+  it('says nothing when the prefill would BEAT the best', () => {
+    /* A deficit of zero or less is not a near miss, it is a record
+       about to happen — and the cue would read as discouragement. */
+    expect(nearMissCue(h, { weight: 200, reps: 5 }, 5, NOW)).toBeNull()
+    expect(nearMissCue(h, { weight: 205, reps: 5 }, 5, NOW)).toBeNull()
+  })
+
+  it('says nothing when the gap is wider than one increment', () => {
+    expect(nearMissCue(h, { weight: 150, reps: 5 }, 5, NOW)).toBeNull()
+  })
+
+  it('treats a gap exactly one increment wide as near', () => {
+    /* The window edge: `deficit > window` excludes, so equal is in. */
+    const best = 200 * (1 + 5 / 30)
+    const target = best - 5
+    const weight = target / (1 + 5 / 30)
+    expect(nearMissCue(h, { weight, reps: 5 }, 5, NOW)).toMatch(/under your best/)
+  })
+
+  it('says nothing when the prefill has no estimate at all', () => {
+    expect(nearMissCue(h, { weight: 200, reps: 30 }, 5, NOW)).toBeNull()
+    expect(nearMissCue(h, { weight: 197, reps: 5 }, 5, NOW)).toMatch(/under/)
+  })
+})
+
+describe('what counts toward a record at all', () => {
+  const NOW = at('2026-09-22')
+
+  it('ignores an assisted set when reading the heaviest', () => {
+    /* Assistance is not load. Counting 40 lb of help as 40 lb lifted
+       would make every assisted set a weight record on a new lift. */
+    const h = [assisted('2026-09-01', 40)]
+    expect(bestE1RM(h)).toBeNull()
+  })
+
+  it('reads an unassisted set normally', () => {
+    expect(bestE1RM([session('2026-09-01', 200, [5])])?.weight).toBe(200)
+  })
+
+  it('takes the best estimate in a session, not the last', () => {
+    const ramped = { date: '2026-09-01', kg: 225, sets: [{ w: 135, r: 5 }, { w: 225, r: 5 }, { w: 95, r: 8 }] }
+    expect(bestE1RM([ramped as never])?.weight).toBe(225)
+  })
+
+  it('counts reps at the SAME weight, not at any weight', () => {
+    /* bestRepsAtWeight compares `set.w === weight`. Matching loosely
+       would measure today's eight reps at 200 against twelve at 100. */
+    /* Above the rep cap so no estimate fires and the reps branch is
+       actually reached. bestRepsAtWeight(200) is 5; a loose match would
+       read the twelve done at 100 and refuse the record. */
+    const h = [session('2026-09-01', 100, [12]), session('2026-09-02', 200, [5])]
+    expect(classifyPR(h, { weight: 200, reps: 12 }, NOW).kind).toBe('reps')
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * PR SCOPE — the decided behaviour, not the current one.
+ * See docs/two-a-day-decisions.md.
+ * ------------------------------------------------------------------ */
+describe('records are chronological, not day-scoped', () => {
+  const NOW = at('2026-09-22')
+
+  it.fails('measures the evening against the morning of the same day', () => {
+    /* DECIDED: a record is "better than anything before it". classifyPR
+       excludes the whole of today from the baseline, so an evening lift
+       LIGHTER than the morning still scores — a record the athlete
+       already beat at breakfast.
+       Wrong today, deliberately. */
+    const h = [session('2026-09-15', 135, [5]), session('2026-09-22', 245, [5])]
+    expect(classifyPR(h, { weight: 230, reps: 5 }, NOW).kind).toBeNull()
+  })
+
+  it('still lets the evening take a record it genuinely beat', () => {
+    /* NOT .fails: this half already holds, and it is what makes the
+       assertion above a SCOPE question rather than a broken module.
+       Chronological means the morning counts, not that the evening is
+       excluded — so a genuine beat must keep scoring after the fix. */
+    const h = [session('2026-09-15', 135, [5]), session('2026-09-22', 200, [5])]
+    expect(classifyPR(h, { weight: 250, reps: 5 }, NOW).kind).toBe('e1rm')
+  })
+
+  it('CONTROL: a prior DAY is already counted today', () => {
+    /* Not .fails — this works now, and must keep working. It is what
+       makes the two above a scope question rather than a broken module. */
+    const h = [session('2026-09-15', 200, [5])]
+    expect(classifyPR(h, { weight: 190, reps: 5 }, NOW).kind).toBeNull()
+    expect(classifyPR(h, { weight: 210, reps: 5 }, NOW).kind).toBe('e1rm')
+  })
+})
+
+describe('the edges that were still unpinned', () => {
+  const NOW = at('2026-09-22')
+
+  it('refuses an estimate from a number that is not one', () => {
+    /* Both halves of the finiteness check, independently: a NaN weight
+       with sound reps must still produce null rather than NaN, or the
+       NaN travels into every comparison downstream and loses silently. */
+    expect(epley1RM(Number.NaN, 5)).toBeNull()
+    expect(epley1RM(200, Number.NaN)).toBeNull()
+    expect(epley1RM(200, 5)).toBeCloseTo(200 * (1 + 5 / 30), 5)
+  })
+
+  it('treats a gap of exactly one increment as a near miss', () => {
+    /* Exact by construction: a single rep makes the estimate the weight
+       itself, so the deficit is 5 with no floating point in the way. */
+    const h = [session('2026-09-01', 200, [1])]
+    expect(nearMissCue(h, { weight: 195, reps: 1 }, 5, NOW)).toMatch(/5 lb under your best/)
+    expect(nearMissCue(h, { weight: 194, reps: 1 }, 5, NOW)).toBeNull()
+  })
+
+  it('counts a session on the first day of the rolling window', () => {
+    /* `entry.date < sinceDate` excludes; the edge day itself is IN.
+       Moving that boundary drops a whole day out of every 12-month
+       record, and the day it drops is the oldest one that still counts. */
+    const edge = new Date(NOW - ROLLING_PR_DAYS * 86_400_000)
+    const p = (n: number) => String(n).padStart(2, '0')
+    const edgeDay = `${edge.getFullYear()}-${p(edge.getMonth() + 1)}-${p(edge.getDate())}`
+    const h = [session('2019-01-01', 300, [1]), session(edgeDay, 250, [1])]
+    const pr = classifyPR(h, { weight: 260, reps: 1 }, NOW)
+    expect(pr.kind).toBe('e1rm')
+    expect(pr.scope).toBe('12-month')
+  })
+
+  it('reads assistance only from assisted sets', () => {
+    /* leastAssistance walks every set. Without the assisted check a
+       LIGHT ordinary set reads as very little help, and the athlete can
+       then never beat their own "record" of ten pounds of assistance
+       that nobody ever used. */
+    const mixed = {
+      date: '2026-09-01', kg: 40,
+      sets: [{ w: 40, r: 5, assisted: true }, { w: 10, r: 5 }],
+    } as never
+    expect(classifyPR([mixed], { weight: 35, reps: 5, assisted: true }, NOW).kind).toBe('assist')
+  })
+})

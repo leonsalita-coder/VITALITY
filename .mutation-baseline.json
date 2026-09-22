@@ -1,6 +1,6 @@
 {
   "_note": "Survivor counts the gate refuses to let RISE. Lower one with --bless. `mutate` is null — deliberately UNPINNED, not missing: it is measured but not gating, pending the post-migration full sweep. Every number available today is pre-harness-fix (492 and 379 were both produced before a failed SUITE counted as a kill), and the 1 it held until now was corruption from a partial --bless that survived into fcb730e. Do not re-pin it to an old figure.",
-  "lint": 57,
+  "lint": 51,
   "callsites": 20,
   "fuzz": 0,
   "mutate": null
