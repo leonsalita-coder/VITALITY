@@ -292,3 +292,67 @@ above. Two are worth recording because the reasoning generalises:
 
 The pattern is the one in the table above — a defensive check written near
 an existing one should immediately be asked whether either can fire alone.
+
+## What "equivalent" meant, per module
+
+A surviving mutation gets one of three verdicts: killed by a new test, deleted
+as unreachable, or **left as equivalent**. That third verdict is a claim, and
+it is only ever as good as the inputs it was checked against.
+
+The method is a probe grid: capture every output across a spread of inputs,
+apply the mutation at the byte offset the sweep recorded, and compare. Identical
+output means equivalent — *over the dimensions the grid varies*. It says nothing
+about a dimension the grid never touches.
+
+That is not hypothetical. The first analysis grid agreed with **23 of 30**
+mutants. Widening it to include sessions marked `off`, warm-up-only sessions,
+forward-dated entries and exercises missing from the index took that to 15, and
+three of those newly-caught mutants were real bugs — including one I had already
+written off as dead code. The grid was the thing that was wrong, and a grid that
+is wrong is indistinguishable from a module that is clean.
+
+So each module's equivalence claims carry their scope. **Absent dimensions are
+not a to-do list** — they are the boundary of what was actually checked.
+
+**plates.** Seven configurations — the default rack; a rack with no 2.5s; a
+barless setup; an empty plate list; a list containing zero; a list containing a
+negative; a 20kg-style bar with 1.25 pairs — crossed with every target from 0 to
+400 lb in 1.25 lb steps, through `snapToLoadable`, `plateBreakdown` and
+`loadableWeights`. *Never varied:* `maxLb` beyond its default, non-finite or NaN
+targets, duplicate denominations in one list, denominations other than the
+standard imperial and metric sets, or a bar heavier than the targets asked for.
+The seven survivors' equivalence is claimed only within that.
+
+**catalog.** No probe grid at all, and none was needed: the survivors were
+authored booleans, the replacement was invariant tests over the whole table, and
+all eight mutations are killed. **No equivalence claims are outstanding here** —
+nothing was left standing to justify.
+
+**progression.** No probe grid either. That pass was driven by hand-written
+fixtures naming a user consequence per survivor, which is a different and
+weaker instrument: it proves the cases someone thought of. One survivor remains,
+at `progression.ts` around the `previous > 0` guard, and its equivalence rests
+on **reading the code, not on measurement** — the argument being that `previous`
+is zero only when there is no earlier session and a negative count of reps,
+seconds or metres is unreachable. That argument is sound but it has never been
+executed against a grid, which makes it the weakest equivalence claim in the
+engine.
+
+**analysis.** Final grid: gap lengths 0–40 days; per-muscle set counts 0–30
+across one, two and three muscle shapes; a five-session trailing history with a
+deliberately odd final week; every quads/hamstrings pair from 0–24 against
+0/1/5/6/10/20 with the sides swapped; ratio windows at 0, 27, 28 and 29 days;
+colliding and out-of-order dates; sessions marked `off`; warm-up-only sessions;
+forward-dated sessions; empty history; an exercise absent from the index; an
+exercise whose muscles are unrecognised; and all four training ages including
+none — through `analyse`, `weeklySets`, `frequencyGaps`, `ratios` and
+`volumeRamp`. *Never varied:* `otherTraining` entries (so the systemic-load path
+is exercised only at its default), exercises with secondary muscles at the ratio
+boundaries, histories longer than about five sessions per lift, or any date
+range past 40 days.
+
+**A second way to be wrong, separate from the grid.** Twice I "confirmed" a
+survivor was real by hand-editing the source, and once that meant replacing both
+`||` operators on a line the sweep mutates one of. With the correct single
+operator the mutation is genuinely equivalent. Apply mutations at the offset the
+sweep recorded, never by search-and-replace on the text.
