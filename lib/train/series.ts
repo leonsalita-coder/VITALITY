@@ -51,7 +51,12 @@ function daysAgo(date: string, now: number): number {
 export function e1rmSeries(entries: HistoryEntry[]): Point[] {
   const points: Point[] = []
   for (const entry of entries || []) {
-    if (entry.off) continue
+    /* Every point carries its date, so a row without one cannot become a
+       point — it would draw as a tap target leading nowhere. Null rows
+       and dateless rows both arrive from imports; the shared reader in
+       analysis.ts steps over them and each traversal here has to as
+       well, because none of them go through it. */
+    if (!entry || entry.off || !entry.date) continue
     let best = 0
     for (const set of workingSets(entry)) {
       const value = epley1RM(setWeight(entry, set), set.r || 0)
@@ -80,7 +85,7 @@ export function muscleWeekSeries(
     const split = index[id]
     if (!split || (!split.primary.length && !split.secondary.length)) continue
     for (const entry of history[id] || []) {
-      if (entry.off) continue
+      if (!entry || entry.off || !entry.date) continue
       const age = daysAgo(entry.date, now)
       if (age < 0 || age > 6) continue
       const spread = distribute(workingSets(entry).length, split)
@@ -151,6 +156,7 @@ export function periodComparison(
     let tonnage = 0
     for (const id of Object.keys(history || {})) {
       for (const entry of history[id] || []) {
+        if (!entry || !entry.date) continue
         if (entry.off || entry.date < from || entry.date > to) continue
         for (const set of workingSets(entry)) {
           sets++

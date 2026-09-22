@@ -403,6 +403,23 @@ the property it was named for. And it never placed a session on the oldest day
 inside the window, which is the only place the trailing-week mutant is visible
 at all.
 
+**series.** Charts, and the one module where the rule is to assert the DATA
+rather than the geometry: a test pinning an SVG path is brittle and says nothing
+about whether the figures are right. Dimensions varied: reps 0–20 spanning the
+e1RM cap, weights 0–225, 0–3 sets a session, warm-up-only and `off` sessions,
+sessions in either chronological order and on the same date, per-muscle counts
+0–26 across both band edges, window ages −1 to 30 days, lifts absent from the
+index and lifts whose muscles are unrecognised, rolling views of 1–26 weeks with
+duplicate and consecutive dates, and period windows probed on every boundary day
+of a 1-, 4- and 8-week block. *Never varied:* supersets, per-side logging,
+assisted sets, more than two lifts at once, `now` at a DST boundary, or
+session-level metadata beyond `off` and `warmup`.
+
+One blind spot, and it hid the last live defect in the module: every fixture
+built a session from IDENTICAL sets, so "the heaviest set" and "the last set"
+were always the same number and the comparison choosing between them was never
+exercised. A real session ramps and often ends on a back-off set.
+
 **A second way to be wrong, separate from the grid.** Twice I "confirmed" a
 survivor was real by hand-editing the source, and once that meant replacing both
 `||` operators on a line the sweep mutates one of. With the correct single
