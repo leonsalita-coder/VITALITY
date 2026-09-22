@@ -372,9 +372,12 @@
 
   /* 8 · card — 21 rules */
   .miniCard { background:var(--e2); border-radius:var(--r-md); padding:13px 12px; }
-  .miniCard b { display:block; font-family:var(--sans); font-weight:800; font-size:var(--fs-title); letter-spacing:-.02em; color:var(--signal); line-height:var(--lh-title);}
-  /* Gold means a record. A streak is not one. */
-  .miniCard b.gold { color:var(--text); }
+  /* Reference, not action. These sit on the session sheet, the same
+     surface as the set rows — three signal figures in the header pull
+     the eye up and away from the row being acted on, which undoes the
+     recession below. The `gold` variant is gone with them: it said
+     exactly this and now duplicates the base. */
+  .miniCard b { display:block; font-family:var(--sans); font-weight:800; font-size:var(--fs-title); letter-spacing:-.02em; color:var(--text); line-height:var(--lh-title);}
   .miniCard span { display:block; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-top:4px; line-height:var(--lh-micro); font-weight:var(--fw-micro);}
   .ex { position:relative; background:var(--e2); border:1px solid transparent; border-radius:var(--r-md); padding:18px 16px 20px; transition:background var(--d2) var(--ease-out); }
   .ex::after { content:''; position:absolute; inset:0; border-radius:var(--r-md); background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%), rgba(110,231,183,.08), transparent 65%); opacity:0; transition:opacity var(--d3) var(--ease-out); pointer-events:none; }
@@ -438,8 +441,13 @@
   .pillMiss { background:none; border:none; font-family:var(--sans); font-size:var(--fs-label); font-weight:500; color:var(--muted); cursor:pointer; padding:6px; transition:color var(--d2); line-height:var(--lh-label);}
   .pillMiss:hover { color:var(--fail); }
   .pillStatus { font-family:var(--mono); font-size:var(--fs-label); cursor:default; color:var(--muted); line-height:var(--lh-label); font-weight:var(--fw-label);}
-  .pillDrop { background:none; border:1px solid var(--hair-strong); font-family:var(--sans); font-size:var(--fs-label); font-weight:500; color:var(--signal); cursor:pointer; padding:5px 9px; border-radius:var(--r-pill); white-space:nowrap; transition:border-color var(--d2), background var(--d2); line-height:var(--lh-label);}
-  .pillDrop:hover { background:rgba(110,231,183,.08); border-color:rgba(110,231,183,.4); }
+  /* A drop set attaches to a completed one, so this button renders only
+     where classifySet says 'done'. It could never appear on an unlogged
+     row, which made the signal base and its tinted hover dead styling —
+     overridden on every row that could ever show them. Stated once here
+     instead of twice. */
+  .pillDrop { background:none; border:1px solid var(--hair-strong); font-family:var(--sans); font-size:var(--fs-label); font-weight:500; color:var(--muted); cursor:pointer; padding:5px 9px; border-radius:var(--r-pill); white-space:nowrap; transition:border-color var(--d2), background var(--d2); line-height:var(--lh-label);}
+  .pillDrop:hover { background:var(--e3); border-color:var(--hair-strong); }
   .pillWrap { display:flex; flex-direction:column; gap:6px; }
   .drops:empty { display:none; }
   .dropRow { display:flex; align-items:center; gap:9px; padding:9px 14px 9px 28px; margin-left:8px; border-left:2px solid var(--hair-strong); font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-caption);}
@@ -470,8 +478,6 @@
   .pill.done:has(.pillPr) { border-left-color:var(--gold); }
   .pill.done .pillPr { color:var(--gold); font-size:var(--fs-subhead); line-height:1; margin-right:2px; }
   .pill.done .pillStatus .sub { color:var(--muted-2); }
-  .pill.done .pillDrop { border-color:var(--hair-strong); color:var(--muted); }
-  .pill.done .pillDrop:hover { background:var(--e3); }
   .pill.done .pillReset { color:var(--muted-2); }
   .pill.done .pillReset:hover { background:var(--e3); }
   .pill.done .pillHit { display:none; }

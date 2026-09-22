@@ -153,7 +153,7 @@ describe('gold means a record and nothing else', () => {
      the bare "does not contain gold" check — a rule that is gone is not
      a rule that was restrained. */
   it.each([
-    ['.miniCard b.gold', 'color', 'the week streak'],
+    ['.miniCard b', 'color', 'the week streak, and every figure beside it'],
     ['.pillNear', 'color', 'the near-miss cue'],
     ['.restbar.over .restTime', 'color', 'rest overtime'],
     ['.restbar.over .restLabel', 'color', 'rest overtime'],
@@ -214,5 +214,88 @@ describe('the glow is gone', () => {
     /* The control: the glow was removed, not the button. */
     expect(declFor('.pillHit').background).toContain('--signal')
     expect(declFor('.finishBtn').background).toContain('--signal')
+  })
+})
+
+/**
+ * The header does not compete with the row being acted on.
+ *
+ * The mini cards sit on the SESSION sheet, the same surface as the set
+ * rows — so three signal figures above a deliberately recessed list pull
+ * the eye up and away from the only thing on screen to act on. The
+ * streak went to text for this reason; the others follow for the same
+ * one. They are reference, not action.
+ */
+describe('the session header recedes with the rows', () => {
+  it('paints every mini-card figure in text', () => {
+    expect(declFor('.miniCard b').color).toContain('--text')
+  })
+
+  it('keeps no variant that says the same thing twice', () => {
+    /* `.miniCard b.gold` existed to exempt the streak from signal. With
+       the base in text it duplicates it exactly, and a rule that cannot
+       change anything is one more place to look. */
+    expect(declFor('.miniCard b.gold')).toEqual({})
+  })
+
+  it('still paints them', () => {
+    /* The control: deleting the colour entirely would satisfy both. */
+    expect(declFor('.miniCard b')['font-size']).toContain('--fs-title')
+    expect(declFor('.miniCard b').color).toBeTruthy()
+  })
+})
+
+/**
+ * A drop set attaches to a completed set, and only to one.
+ *
+ * `+ Drop` is rendered inside `kind === 'done'` and nowhere else, so it
+ * could never appear on an unlogged row — which made its signal base
+ * and its signal-tinted hover dead styling, overridden on every row that
+ * could ever show them. This asserts the reachability claim rather than
+ * trusting the reading of it, because "this cannot render there" is
+ * exactly the kind of statement that rots silently.
+ */
+describe('the drop-set button only exists on a completed row', () => {
+  const tile = () => readFileSync(TILE, 'utf8')
+
+  it('is rendered only where the set is done', () => {
+    expect(tile()).toContain("kind==='done'?'<button class=\"pillDrop\"")
+  })
+
+  it('is not rendered on the unlogged branch', () => {
+    /* The unlogged branch of the same ternary offers Hit it and Miss.
+       If pillDrop ever joins them, the base colour stops being dead and
+       this pass's reasoning stops holding. */
+    const src = tile()
+    const branch = src.slice(src.indexOf(": (nearMiss?'<span class=\"pillNear\">"),
+                             src.indexOf('aria-label="Mark missed"') + 90)
+    expect(branch).toContain('pillHit')
+    expect(branch).toContain('pillMiss')
+    expect(branch).not.toContain('pillDrop')
+  })
+
+  it('classifies a set as exactly one of three kinds', () => {
+    /* The claim rests on `done` being the only kind that renders it, so
+       the set of kinds is part of the claim. */
+    expect(tile()).toContain("if(!s) return 'empty'; if(s.fail) return 'failed'; return 'done'")
+  })
+
+  it('carries no signal, on the row or under the cursor', () => {
+    expect(declFor('.pillDrop').color).toContain('--muted')
+    const hover = Object.values(declFor('.pillDrop:hover')).join(' ')
+    expect(hover).not.toContain('110,231,183')
+    expect(hover).not.toContain('--signal')
+  })
+
+  it('says it once rather than twice', () => {
+    /* The done-scoped copies said what the base now says. */
+    expect(declFor('.pill.done .pillDrop')).toEqual({})
+    expect(declFor('.pill.done .pillDrop:hover')).toEqual({})
+  })
+
+  it('is still a visible button', () => {
+    /* The control for the two absence checks above. */
+    expect(declFor('.pillDrop')['border-radius']).toBeTruthy()
+    expect(declFor('.pillDrop:hover').background).toContain('--e3')
   })
 })
