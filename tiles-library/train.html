@@ -939,6 +939,7 @@ var TrainEngine = (() => {
     OTHER_ACTIVITIES: () => OTHER_ACTIVITIES,
     PARAMETER_GATES: () => PARAMETER_GATES,
     POWER_MARGIN: () => POWER_MARGIN,
+    PROVENANCE: () => PROVENANCE,
     PULL_MUSCLES: () => PULL_MUSCLES,
     PUSH_MUSCLES: () => PUSH_MUSCLES,
     RAMP_LADDERS: () => RAMP_LADDERS,
@@ -960,6 +961,7 @@ var TrainEngine = (() => {
     SURFACEABLE: () => SURFACEABLE,
     SWAP_WEIGHTS: () => SWAP_WEIGHTS,
     SYSTEMIC_WINDOW_DAYS: () => SYSTEMIC_WINDOW_DAYS,
+    TRAINED_STATES: () => TRAINED_STATES,
     TRANSFER_BLOCK_WEEKS: () => TRANSFER_BLOCK_WEEKS,
     TRANSFER_PAIRS: () => TRANSFER_PAIRS,
     WEEKLY_SET_BAND: () => WEEKLY_SET_BAND,
@@ -1063,6 +1065,7 @@ var TrainEngine = (() => {
     profileFor: () => profileFor,
     progressionDamping: () => progressionDamping,
     projectGoal: () => projectGoal,
+    publishedMetrics: () => publishedMetrics,
     pushSnapshot: () => pushSnapshot,
     rangeSets: () => rangeSets,
     rankSwaps: () => rankSwaps,
@@ -3648,19 +3651,19 @@ var TrainEngine = (() => {
   }
   function deloadPlan(record, trainingAge) {
     if (!record) return { weight: null, setsFactor: 1 };
-    const round11 = (n2) => Math.round(n2 * 100) / 100;
+    const round12 = (n2) => Math.round(n2 * 100) / 100;
     const prior = priorOf(record);
     if (record.state === "reapproach") {
-      return { weight: prior == null ? null : round11(prior * REAPPROACH), setsFactor: 1 };
+      return { weight: prior == null ? null : round12(prior * REAPPROACH), setsFactor: 1 };
     }
     if (record.state !== "deloading") return { weight: null, setsFactor: 1 };
     if (record.kind === "volume") {
-      return { weight: prior == null ? null : round11(prior), setsFactor: VOLUME_CUT };
+      return { weight: prior == null ? null : round12(prior), setsFactor: VOLUME_CUT };
     }
     return {
       /* `confidence` absent takes the INFERRED cut, which is the gentler
          one: no recovery data is no evidence for a hard reduction. */
-      weight: prior == null ? null : round11(prior * deloadCut(trainingAge, record.confidence ?? "inferred")),
+      weight: prior == null ? null : round12(prior * deloadCut(trainingAge, record.confidence ?? "inferred")),
       setsFactor: 1
     };
   }
@@ -5338,6 +5341,81 @@ var TrainEngine = (() => {
     return { ok: true, exercises, violations, source: "model" };
   }
 
+  // lib/train/metrics.ts
+  var PROVENANCE = ["measured", "derived", "estimated"];
+  var TRAINED_STATES = ["trained", "rest", "not_trained"];
+  var round8 = (n2, p = 2) => Math.round(n2 * 10 ** p) / 10 ** p;
+  function entriesOn(ctx) {
+    const out = [];
+    for (const id of Object.keys(ctx.history || {})) {
+      for (const entry of readableEntries(ctx.history[id], { includeOff: true })) {
+        if (entry.date === ctx.date) out.push(entry);
+      }
+    }
+    return out;
+  }
+  function trainedState(ctx) {
+    const today = entriesOn(ctx);
+    if (today.some((e) => !e.off && workingSets(e).length > 0)) return "trained";
+    if (today.some((e) => e.off)) return "rest";
+    return "not_trained";
+  }
+  function publishedMetrics(ctx) {
+    const date = ctx.date;
+    const out = [];
+    const add = (key, value, unit, provenance, state2) => out.push({ key, value, ...state2 ? { state: state2 } : {}, unit, date, provenance });
+    const state = trainedState(ctx);
+    add("trained", state === "trained" ? 1 : 0, null, "measured", state);
+    const worked = entriesOn(ctx).filter((e) => !e.off);
+    const hardSets = worked.reduce((n2, e) => n2 + workingSets(e).length, 0);
+    add("hard_sets", hardSets, "sets", "measured");
+    let tonnage = 0;
+    for (const entry of worked) {
+      for (const set of workingSets(entry)) tonnage += setWeight(entry, set) * (set.r || 0);
+    }
+    add("tonnage", Math.round(tonnage), "lb", "derived");
+    const rows = attribute(ctx.history || {}, ctx.index || {}).filter((r) => r.date === date);
+    const byMuscle = /* @__PURE__ */ new Map();
+    for (const r of rows) {
+      const t = byMuscle.get(r.muscle) || { sets: 0, estimated: false };
+      t.sets += r.sets;
+      t.estimated = t.estimated || r.estimated;
+      byMuscle.set(r.muscle, t);
+    }
+    for (const [muscle, t] of [...byMuscle.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      add(`hard_sets.${muscle}`, round8(t.sets, 1), "sets", t.estimated ? "estimated" : "derived");
+    }
+    if (ctx.sessionTimingObserved && ctx.sessionSeconds != null && ctx.sessionSeconds > 0) {
+      add("session_duration", Math.round(ctx.sessionSeconds), "s", "measured");
+    }
+    const snapshot = acuteChronic({
+      history: ctx.history || {},
+      index: ctx.index || {},
+      otherTraining: ctx.otherTraining || [],
+      now: ctx.now
+    });
+    const systemic = snapshot.systemic;
+    if (systemic.usable) {
+      const prov = systemic.estimated ? "estimated" : "derived";
+      const band = systemic.ratio > SANE_BAND[1] ? "over" : systemic.ratio < SANE_BAND[0] ? "under" : "in";
+      add("load_ratio", systemic.ratio, null, prov, band);
+    }
+    if (ctx.readiness) add("readiness", null, null, "derived", ctx.readiness);
+    add("deload_lifts", Math.max(0, ctx.deloadLifts || 0), "lifts", "derived");
+    if (ctx.pr) add("pr", 1, null, "derived", ctx.pr);
+    const weekAgo = new Date(ctx.now);
+    weekAgo.setDate(weekAgo.getDate() - 6);
+    const from = `${weekAgo.getFullYear()}-${String(weekAgo.getMonth() + 1).padStart(2, "0")}-${String(weekAgo.getDate()).padStart(2, "0")}`;
+    const sessions = new Set((ctx.finishedDates || []).filter((d) => d >= from && d <= date)).size;
+    add("streak_sessions", sessions, "sessions", "measured");
+    if (typeof ctx.streakTarget === "number") {
+      add("streak_target", ctx.streakTarget, "sessions", "measured");
+    }
+    const weighed = (ctx.bodyweight || []).filter((b) => b && b.date === date && typeof b.lb === "number");
+    if (weighed.length) add("bodyweight", weighed[weighed.length - 1].lb, "lb", "measured");
+    return out;
+  }
+
   // lib/train/identity.ts
   var ABBREVIATIONS = {
     bb: "barbell",
@@ -5654,7 +5732,7 @@ var TrainEngine = (() => {
     "streak_milestone",
     "first_time"
   ];
-  var round8 = (n2) => Math.round(n2 * 10) / 10;
+  var round9 = (n2) => Math.round(n2 * 10) / 10;
   function fromFinding(finding) {
     const kind = finding.kind === "ratio" ? "ratio" : finding.kind === "volume_ramp" ? "volume_ramp" : finding.kind === "weekly_sets" ? "weekly_sets" : finding.kind === "frequency_gap" ? "frequency_gap" : null;
     if (!kind) return null;
@@ -5681,24 +5759,24 @@ var TrainEngine = (() => {
     for (const d of ctx.deloadsApplied || []) {
       signals.push({
         kind: "deload_applied",
-        text: `${d.name} moved from ${round8(d.from)} to ${round8(d.to)} lb \u2014 ${d.kind === "intensity" ? "an" : "a"} ${d.kind} deload, applied automatically.`,
-        value: round8(d.to),
+        text: `${d.name} moved from ${round9(d.from)} to ${round9(d.to)} lb \u2014 ${d.kind === "intensity" ? "an" : "a"} ${d.kind} deload, applied automatically.`,
+        value: round9(d.to),
         estimated: false
       });
     }
     for (const p of ctx.plateaus || []) {
       signals.push({
         kind: "plateau",
-        text: `${p.name} has been flat at ${round8(p.weight)} for ${p.sessions} sessions.`,
-        value: round8(p.weight),
+        text: `${p.name} has been flat at ${round9(p.weight)} for ${p.sessions} sessions.`,
+        value: round9(p.weight),
         estimated: false
       });
     }
     for (const r of ctx.records || []) {
       signals.push({
         kind: "personal_record",
-        text: `${r.name}: ${round8(r.value)}${r.unit} is ${/^[aeiou]/i.test(r.kind) ? "an" : "a"} ${r.kind} record.`,
-        value: round8(r.value),
+        text: `${r.name}: ${round9(r.value)}${r.unit} is ${/^[aeiou]/i.test(r.kind) ? "an" : "a"} ${r.kind} record.`,
+        value: round9(r.value),
         estimated: false
       });
     }
@@ -5753,7 +5831,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
     if (sets < WEEKLY_SET_BAND[0]) return "under";
     return "in";
   }
-  var round9 = (n2) => Math.round(n2 * 10) / 10;
+  var round10 = (n2) => Math.round(n2 * 10) / 10;
   function weeklyReview(ctx) {
     const to = dateKey4(ctx.now);
     const from = shift(ctx.now, -6);
@@ -5791,7 +5869,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
         }
       }
     }
-    const hardSetsByMuscle = [...perMuscle.entries()].map(([muscle, sets]) => ({ muscle, sets: round9(sets), band: bandOf(sets) })).sort((a, b) => b.sets - a.sets);
+    const hardSetsByMuscle = [...perMuscle.entries()].map(([muscle, sets]) => ({ muscle, sets: round10(sets), band: bandOf(sets) })).sort((a, b) => b.sets - a.sets);
     const quiet = [...trainedEver].filter((m2) => !trainedNow.has(m2)).sort();
     const findings = analyse(ctx.history, index, ctx.now, { trainingAge: ctx.trainingAge });
     const quiet_week = sessions === 0 && !findings.length && !moved2.length;
@@ -5910,7 +5988,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
     const n2 = typeof raw === "string" ? parseFloat(raw) : typeof raw === "number" ? raw : NaN;
     return Number.isFinite(n2) ? n2 : void 0;
   }
-  var round10 = (n2) => Math.round(n2 * 100) / 100;
+  var round11 = (n2) => Math.round(n2 * 100) / 100;
   function readRows(rows, source, strongUnit) {
     const cols = headerIndex(rows[0] || []);
     const at = (row, key) => cols[key] === void 0 ? "" : row[cols[key]];
@@ -5924,10 +6002,10 @@ Say that back in one short sentence, in the second person, keeping the number ex
       let weightLb;
       if (source === "hevy") {
         const kg = num(at(row, "weight_kg"));
-        weightLb = kg === void 0 ? void 0 : round10(kg * LB_PER_KG);
+        weightLb = kg === void 0 ? void 0 : round11(kg * LB_PER_KG);
       } else {
         const w = num(at(row, "weight"));
-        weightLb = w === void 0 ? void 0 : strongUnit === "kg" ? round10(w * LB_PER_KG) : w;
+        weightLb = w === void 0 ? void 0 : strongUnit === "kg" ? round11(w * LB_PER_KG) : w;
       }
       const km = num(at(row, "distance_km"));
       const distance = num(at(row, "distance"));
@@ -5937,7 +6015,7 @@ Say that back in one short sentence, in the second person, keeping the number ex
         weightLb,
         reps: num(at(row, "reps")),
         seconds: num(source === "hevy" ? at(row, "duration_seconds") : at(row, "seconds")),
-        metres: km !== void 0 ? round10(km * 1e3) : distance,
+        metres: km !== void 0 ? round11(km * 1e3) : distance,
         rpe: num(at(row, "rpe")),
         warmup
       });
@@ -6392,6 +6470,83 @@ function lastKgFromHistory(id){
 let STATE = null;
 /* Fire-and-forget persistence through the dashboard bridge (no device storage). */
 function saveState(){ if(window.Vitality && typeof window.Vitality.save==='function') window.Vitality.save(STATE); }
+/* ---- publishing what this tile knows ------------------------------- *
+ * The dashboard's premise is that the tiles read each other. Train has
+ * been reading Vitals and publishing nothing, so the cross-read only ran
+ * one way. This is the other half: typed daily metrics with provenance,
+ * for any tile to read and format for its own surface.
+ *
+ * ON FINISH, ON ROLLOVER, AFTER A BACKDATED EDIT — never on render. A
+ * render is not an event in the athlete's life, and publishing from one
+ * would write a payload every time a chart repainted.
+ *
+ * The payload carries no exercise names, no per-set detail, no notes and
+ * no pain flags. Another tile needs to know the session was hard, not
+ * what was in it, and a field withheld can be added later while a field
+ * published is one somebody may already depend on. */
+function metricsContextFor(dateKey){
+  const durations = STATE.sessionDurations || [];
+  const rec = durations.find(d => d && d.date === dateKey) || null;
+  /* A duration only counts as measured where the session clock actually
+     ran. An imported row carries atEstimated and never claims one. */
+  const observed = !!(rec && typeof rec.minutes === 'number'
+    && (dateKey !== today || (curSession() && curSession().startedAt)));
+  const deloadLifts = Object.keys(STATE.deloadStates || {})
+    .filter(id => { const d = STATE.deloadStates[id]; return !!d && d.state === 'deloading'; }).length;
+  const r = (dateKey === today) ? readiness() : null;
+  let pr = null;
+  if (dateKey === today && curSession()) {
+    for (const e of curSession().ex || []) {
+      for (let i = 0; i < (e.log || []).length; i++) {
+        const k = e.log[i] ? prFor(e, i).kind : null;
+        if (k === 'e1rm') { pr = 'e1rm'; break; }
+        if (k && !pr) pr = k;
+      }
+      if (pr === 'e1rm') break;
+    }
+  }
+  /* Today's work lives on the session until it is committed to history,
+     so a payload built from history alone would describe the day as
+     untrained right up to the moment it stopped being today. Merged
+     here, never written back — this is a read of the day, not an edit
+     of it. */
+  let history = STATE.history || {};
+  if(dateKey === today && curSession()){
+    history = Object.assign({}, history);
+    for(const e of curSession().ex || []){
+      if(!(e.log || []).some(Boolean)) continue;
+      const rest = (history[e.id] || []).filter(x => x && x.date !== today);
+      history[e.id] = rest.concat([todayEntry(e)]);
+    }
+  }
+  return {
+    date: dateKey,
+    history: history,
+    index: TrainEngine.indexFrom(STATE.customLib || {}),
+    finishedDates: STATE.finishedDates || [],
+    bodyweight: STATE.bodyweight || [],
+    otherTraining: STATE.otherTraining || [],
+    deloadLifts: deloadLifts,
+    readiness: (r && r.verdict) ? r.verdict : null,
+    sessionSeconds: rec ? rec.minutes * 60 : null,
+    sessionTimingObserved: observed,
+    streakTarget: weeklyTarget(),
+    pr: pr,
+    now: Date.now(),
+  };
+}
+function publishMetrics(dateKey, why){
+  if(!window.Vitality || typeof window.Vitality.publish!=='function') return;
+  if(!STATE) return;
+  try{
+    const metrics = TrainEngine.publishedMetrics(metricsContextFor(dateKey || today));
+    window.Vitality.publish(metrics);
+    console.log('[train] published ' + metrics.length + ' metrics for ' + (dateKey||today) + ' — ' + why);
+  }catch(err){
+    /* Publishing is never allowed to take the session down with it. */
+    console.warn('[train] publish failed — ' + ((err && err.message) || 'unknown'));
+  }
+}
 
 /* ---- helpers on state -------------------------------------------- */
 /* Plate math config, editable in Settings. */
@@ -6996,6 +7151,7 @@ function renderFinish(session){
       if(!session.insight) fetchInsight(session);
       recordShadowFindings();
       snapshotNow('session finished');
+      publishMetrics(today, 'session finished');
     }
     const wasSubmitted=STATE.submitted;
     renderFinish(session); renderStreak(); renderOverviewCards(); saveState();
@@ -9037,6 +9193,10 @@ function runImport(text, unit, status){
     if((STATE.finishedDates||[]).indexOf(entry.date)<0){ STATE.finishedDates=STATE.finishedDates||[]; STATE.finishedDates.push(entry.date); }
   });
   rederiveFromHistory();
+  /* Every day the import touched, oldest first — a backdated edit changes
+     what was true on those days, and a consumer holding the old payload
+     has no way to learn otherwise. */
+  for(const d of [...new Set((r.entries||[]).map(x=>x.date))].sort()) publishMetrics(d, 'backdated edit');
   status.style.color='var(--signal)';
   status.innerHTML='Imported <b>'+r.sets+'</b> sets across <b>'+r.sessions+'</b> sessions and <b>'+r.lifts+'</b> lifts'
     + (r.from?', '+fmtDate(r.from)+' to '+fmtDate(r.to):'') + '.'
@@ -11042,6 +11202,17 @@ function spawnParticles(root){
     setTimeout(()=>openOnboarding(), 400);
   }
   render(); wireFresh();
+  /* ROLLOVER. `today` is read once at boot, so a new day IS a new boot.
+     Publishing only when the day has moved keeps this off every page
+     load while still closing out the day that ended — a consumer
+     otherwise holds yesterday's payload with no way to learn it is
+     stale. An absent marker means nothing was ever published, which is
+     also a day worth publishing. */
+  if(STATE.lastPublishedDate !== today){
+    publishMetrics(today, 'rollover');
+    STATE.lastPublishedDate = today;
+    saveState();
+  }
   renderGoalBubble(); renderPhotos(); wirePhotoUpload(); renderOverviewCards(); renderStatsPicker(); drawStatsSection();
   const exportBtn=$('#exportCsvBtn'); if(exportBtn) exportBtn.onclick=exportCSV;
   const fab=$('#coachFab'); if(fab) fab.onclick=()=> openCoach();

@@ -71,6 +71,13 @@ const SHIM = `<script>
     read: function (slot) { return call('read', { slot: slot }); },
     report: function (stream) {
       parent.postMessage({ source: 'vitality-tile', type: 'report', stream: stream }, '*');
+    },
+    // Typed daily metrics for OTHER TILES to read, distinct from report()
+    // which feeds one numeric life-stream into Vee. Fire-and-forget: a
+    // tile never blocks on publishing, and a dropped payload costs the
+    // next write, not the session.
+    publish: function (metrics) {
+      parent.postMessage({ source: 'vitality-tile', type: 'publish', metrics: metrics }, '*');
     }
   };
 })();

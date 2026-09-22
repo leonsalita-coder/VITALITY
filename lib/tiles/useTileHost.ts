@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef } from 'react'
+import { validatePublish } from './metricsContract'
 import { tileStore } from './tileStore'
 import { syncEnabled, syncSave, syncLoad } from '@/lib/sync'
 import { supa } from './tileSupabase'
@@ -27,7 +28,7 @@ import { supa } from './tileSupabase'
  */
 export function useTileHost(
   userId: string,
-  onActivity?: (info: { tileId: string; type: 'save' | 'load' | 'report'; count: number }) => void,
+  onActivity?: (info: { tileId: string; type: 'save' | 'load' | 'report' | 'publish'; count: number }) => void,
   /**
    * Injected handler for a tile's Vitality.report() stream (one numeric life-stream
    * into Vee). Passed in (not imported) so this hook stays decoupled from the
@@ -282,7 +283,15 @@ export function useTileHost(
       // OWN data, and whitelisted to the data slots (never 'vee' or internals).
       if (msg.type === 'read') {
         const slot = String(msg.slot || '')
-        const READABLE = ['train', 'fuel', 'vitals', 'brand', 'peak', 'finance']
+        /* `<tile>:metrics` is the disciplined way to read another tile:
+           typed daily values with provenance, written by publish(). The
+           bare slots hand over a tile's whole private store and stay only
+           because existing tiles already read them that way. */
+        const READABLE = [
+          'train', 'fuel', 'vitals', 'brand', 'peak', 'finance',
+          'train:metrics', 'fuel:metrics', 'vitals:metrics',
+          'brand:metrics', 'peak:metrics', 'finance:metrics',
+        ]
         if (!READABLE.includes(slot)) {
           src.postMessage({ source: 'vitality-host', type: 'read:error', id: msg.id, reason: 'slot_not_allowed' }, '*')
           return
@@ -342,6 +351,24 @@ export function useTileHost(
         src.postMessage({ source: 'vitality-host', type: 'load:result', id: msg.id, data }, '*')
         const count = Array.isArray(data) ? data.length : 0
         activity.current?.({ tileId, type: 'load', count })
+        return
+      }
+
+      if (msg.type === 'publish') {
+        /* Typed daily metrics for other tiles, written under the SENDER's
+           own `<tileId>:metrics` slot — the id comes from our registry,
+           never from the iframe's claim, so a tile can only ever publish
+           as itself. Validated here because the payload crossed an
+           iframe boundary from a sealed sender. */
+        const { metrics, rejected } = validatePublish(msg.metrics)
+        if (rejected.length) {
+          console.warn(`[tiles] ${tileId} published ${rejected.length} unusable metric(s):`, rejected)
+        }
+        if (metrics.length) {
+          await tileStore.saveData(userId, `${tileId}:metrics`, metrics as never)
+          if (syncEnabled()) void syncSave(`${tileId}:metrics`, metrics as never, new Date().toISOString())
+        }
+        activity.current?.({ tileId, type: 'publish', count: metrics.length })
         return
       }
 
