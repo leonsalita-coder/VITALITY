@@ -131,16 +131,19 @@ export function validatePublish(input: unknown): PublishResult {
  * Tiles whose WHOLE private store is still readable by any other tile.
  *
  * This is the old way in, and it hands over everything the tile saved.
- * It stays only where a consumer already depends on it: peak.html and
- * train.html both read `vitals` for a recovery signal, and narrowing it
- * is a change to that tile rather than this one.
+ * One entry, and it is here because it has real consumers: peak.html and
+ * train.html both read `vitals` for a recovery signal. Narrowing it is a
+ * change to that tile rather than this one.
  *
- * `train` was on this list and is not any more. Nothing read it —
- * confirmed across the host and every tile — while it exposed exercise
- * names, session notes and progress photos, which is the most sensitive
- * data in the app and was the most freely available. A tile publishes
- * what it means to share; everything else is a decision nobody should
- * have to defend later.
+ * `train`, `fuel`, `brand`, `peak` and `finance` were all on this list
+ * and none of them were ever read — confirmed across the host and every
+ * tile. Train's store alone held exercise names, session notes and
+ * progress photos, which made the most sensitive data in the app the
+ * most freely available, for no consumer at all.
+ *
+ * A tile publishes what it means to share. A door nobody uses is a door
+ * nobody has to defend, and everything not published stays a decision
+ * that never has to be argued later.
  */
 export const WHOLE_STORE_READABLE = ['vitals'] as const
 

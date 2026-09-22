@@ -144,6 +144,18 @@ describe('a tile publishes what it means to share', () => {
     expect(isReadableSlot('train:metrics')).toBe(true)
   })
 
+  it.each(['train', 'fuel', 'brand', 'peak', 'finance'])(
+    'refuses a whole-store read of %s', (tile) => {
+      expect(isReadableSlot(tile)).toBe(false)
+    })
+
+  it.each(['train', 'fuel', 'brand', 'peak', 'finance'])(
+    'still serves %s\'s published metrics', (tile) => {
+      /* Each refusal paired with the read that replaces it — a bridge
+         that refused everything would pass every negative above. */
+      expect(isReadableSlot(`${tile}:metrics`)).toBe(true)
+    })
+
   it('keeps the one whole-store read that has a consumer', () => {
     /* peak.html and train.html both read `vitals` for a recovery
        signal. Narrowing it is a change to that tile, not this one. */
@@ -174,17 +186,33 @@ describe('nothing was reading the door that closed', () => {
     expect(tiles.length).toBeGreaterThan(5)
   })
 
-  it('has no consumer of a whole-store train read anywhere', () => {
-    /* Asserted rather than audited: this is the claim the removal rests
-       on, and it is the kind that rots the moment somebody adds a tile. */
+  it('has no consumer of any closed whole-store read', () => {
+    /* Asserted rather than audited: this is the claim every removal
+       rests on, and it is the kind that rots the moment somebody adds a
+       tile that reaches for the old door. */
     const callers: string[] = []
     for (const f of tiles) {
       const text = readFileSync(`public/tiles/${f}`, 'utf8')
       for (const m of text.matchAll(/\.read\(\s*'([^']+)'\s*\)/g)) {
-        if (m[1] === 'train') callers.push(`${f}: read('train')`)
+        if (!isReadableSlot(m[1])) callers.push(`${f}: read('${m[1]}')`)
       }
     }
-    expect(callers, `move these onto train:metrics:\n${callers.join('\n')}`).toEqual([])
+    expect(callers, `move these onto <tile>:metrics:\n${callers.join('\n')}`).toEqual([])
+  })
+
+  it('finds the reads that DO exist, so the scan is not vacuous', () => {
+    /* Every cross-tile read in the codebase asks for the recovery
+       signal and nothing else. Asserted as the SET of slots rather than
+       a count, because one of the occurrences is a doc comment in
+       peak.html explaining the call — which is not a call, and is not
+       worth making the test brittle over. If this ever reads empty, the
+       assertion above proves nothing. */
+    const slots = new Set<string>()
+    for (const f of tiles) {
+      const text = readFileSync(`public/tiles/${f}`, 'utf8')
+      for (const m of text.matchAll(/\.read\(\s*'([^']+)'\s*\)/g)) slots.add(m[1])
+    }
+    expect([...slots]).toEqual(['vitals'])
   })
 
   it('catches such a read when there is one', () => {

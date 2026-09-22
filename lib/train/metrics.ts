@@ -42,14 +42,12 @@
  * while it exposed exercise names, session notes and progress photos.
  *
  * PATHS OUT OF THIS TILE, since publishing invites the question. Six,
- * not two. `save` writes the whole private state to Train's OWN store,
- * which nothing else can read. `publish` writes this payload, which
- * anything can. The other four are user-initiated AI calls that leave
- * the tile by design and carry more than this does: `classify` sends an
- * exercise name, `getInsight` a goal and a digest of findings,
- * `generateWorkout` the goal, the lift list and the PAIN FLAGS, and
- * `addProgressPhoto` a photo. They are not cross-tile reads and are not
- * narrowed by any of this; they are named so the list is complete.
+ * not two, and all of them are in docs/tile-data-paths.md. Two of the
+ * four AI paths carry things this contract refuses to publish — pain
+ * flags, and a progress photo — which is deliberate rather than
+ * inconsistent: publishing is passive and permanent, an unknown reader
+ * may come to depend on any field forever, while those calls are
+ * user-initiated, go to one place for one answer, and keep nothing.
  *
  * Pure and DOM-free.
  */
