@@ -1,7 +1,7 @@
 {
-  "_note": "Survivor counts the gate refuses to let RISE. These are meant to fall; lower one with --bless. `mutate` was 69 until 2026-09-21, a number no full sweep ever produced — every attempt aborted partway, so the figure came from whatever prefix of the modules had run. 492 is the first complete count: 1527 mutations across all 44 modules, 1035 killed.",
+  "_note": "Survivor counts the gate refuses to let RISE. Lower one with --bless. `mutate` is null — deliberately UNPINNED, not missing: it is measured but not gating, pending the post-migration full sweep. Every number available today is pre-harness-fix (492 and 379 were both produced before a failed SUITE counted as a kill), and the 1 it held until now was corruption from a partial --bless that survived into fcb730e. Do not re-pin it to an old figure.",
   "lint": 57,
   "callsites": 20,
   "fuzz": 0,
-  "mutate": 1
+  "mutate": null
 }

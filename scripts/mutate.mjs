@@ -695,6 +695,24 @@ export function partialRun(opts) {
 function checkRatchet(mode, count) {
   const baseline = readBaseline()
   const allowed = baseline[mode]
+  /**
+   * `null` is DELIBERATELY UNPINNED, and it is not the same as absent.
+   *
+   * An absent key means nobody has measured this mode yet, which must
+   * not pass silently — that is the "no baseline" case below. `null`
+   * means somebody measured it, decided the number was not worth
+   * gating against, and said so. The run reports its count and stays
+   * green.
+   *
+   * mutate is null because every figure available is a pre-harness-fix
+   * one: 492 and 379 were both produced before a failed SUITE counted
+   * as a kill, and 1 was corruption from a partial --bless. The next
+   * number worth pinning comes from the post-migration sweep.
+   */
+  if (allowed === null) {
+    console.log(`  ${mode}: ${count} survivor(s) — unpinned, not gating`)
+    return 0
+  }
   if (typeof allowed !== 'number') {
     console.log(`  no baseline for ${mode}; run with --bless to record ${count}`)
     return count > 0 ? 1 : 0

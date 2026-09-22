@@ -797,3 +797,69 @@ TypeError: Cannot read properties of undefined (reading 'trim')
     expect(v.lethal).toBe(false)
   })
 })
+
+/**
+ * A mode can be deliberately UNPINNED, and that is not the same as
+ * never having been measured.
+ *
+ * `mutate` was left holding 1 — the value a `--bless --files=liftweeks`
+ * wrote before the partial-run guard existed, committed in fcb730e
+ * because the restore did not survive into the commit. Any real sweep
+ * then reads as a regression against a number nine modules could not
+ * meet, so verify:full has been red and meaning nothing.
+ *
+ * Deleting the key would be worse: a missing baseline means "nobody has
+ * measured this yet, go and record one", which fails a run with
+ * survivors. `null` says something different and deliberate — measured
+ * before, deliberately not gating NOW, pending a number worth pinning.
+ */
+describe('a deliberately unpinned mode', () => {
+  const FILE = '.mutation-baseline.json'
+
+  it('does not fail a run, however many survivors there are', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync, writeFileSync } = await import('node:fs')
+    const before = readFileSync(FILE, 'utf8')
+    try {
+      writeFileSync(FILE, JSON.stringify({ ...JSON.parse(before), lint: null }, null, 2) + '\n')
+      let code = 0, out = ''
+      try {
+        out = execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'],
+          { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })
+      } catch (e: any) { code = e.status; out = String(e.stdout || '') + String(e.stderr || '') }
+      expect(code).toBe(0)
+      expect(out).toMatch(/unpinned/i)
+      expect(out).not.toMatch(/REGRESSION/)
+    } finally {
+      writeFileSync(FILE, before)
+    }
+  }, 120_000)
+
+  it('still fails a mode with no baseline at all', async () => {
+    /* The control, and the distinction that matters: an ABSENT key is
+       "nobody measured this", which must not pass silently. */
+    const { execFileSync } = await import('node:child_process')
+    const { readFileSync, writeFileSync } = await import('node:fs')
+    const before = readFileSync(FILE, 'utf8')
+    try {
+      const b = JSON.parse(before)
+      delete b.lint
+      writeFileSync(FILE, JSON.stringify(b, null, 2) + '\n')
+      let code = 0
+      try {
+        execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], { cwd: process.cwd(), stdio: 'pipe' })
+      } catch (e: any) { code = e.status }
+      expect(code).toBe(1)
+    } finally {
+      writeFileSync(FILE, before)
+    }
+  }, 120_000)
+
+  it('leaves mutate unpinned until a post-migration sweep', () => {
+    /* The state this commit puts the file in, asserted so a stray
+       --bless cannot quietly re-pin it to a pre-harness-fix number. */
+    const b = JSON.parse(readFileSync(FILE, 'utf8'))
+    expect(b.mutate).toBeNull()
+    expect(b.lint).toBeTypeOf('number')
+  })
+})
