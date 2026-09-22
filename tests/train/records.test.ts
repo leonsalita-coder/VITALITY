@@ -265,3 +265,61 @@ describe('assisted records run the other way', () => {
     expect(classifyPR(history, { weight: 0, reps: 8, assisted: true }, today).kind).toBe('assist')
   })
 })
+
+/**
+ * An Epley estimate off a barbell curl is a number, not a one-rep max.
+ *
+ * e1RM is the canonical record because it ranks 245x3 above 225x5 and
+ * does not fire every session — that scarcity is the whole reason it
+ * earns the celebration. Computing it for isolation work spends the
+ * star on curls, which is precisely the inflation the e1RM-canonical
+ * decision was made to stop.
+ *
+ * This is the per-exercise form of the ten-rep cap: both say the
+ * estimate is not meaningful here, and both say it by having no
+ * estimate rather than by suppressing a display.
+ */
+describe('e1RM only where e1RM means something', () => {
+  /* Beats the best estimate AND the heaviest weight ever, so a record
+     of SOME kind is certain — which is what makes the kind the claim. */
+  const history = [session('2026-01-05', 100, [5, 5, 5])]
+  const better = { weight: 105, reps: 5 }
+  const now = at('2026-01-12')
+
+  it('gives a compound lift the star', () => {
+    expect(classifyPR(history, { ...better, e1rmValid: true }, now).kind).toBe('e1rm')
+  })
+
+  it('gives an isolation lift a weight PR and no star', () => {
+    const pr = classifyPR(history, { ...better, e1rmValid: false }, now)
+    expect(pr.kind).toBe('weight')
+  })
+
+  it('reports no estimate at all on a lift where it is meaningless', () => {
+    /* Not merely a different kind — the number itself must not be
+       handed out, or it reappears in whatever reads the field. */
+    expect(classifyPR(history, { ...better, e1rmValid: false }, now).e1rm).toBeNull()
+  })
+
+  it('still lets an isolation lift set a rep record', () => {
+    /* "Weight and rep PRs only" — the point is that the quiet records
+       survive, not that the lift stops being tracked. */
+    const pr = classifyPR(history, { weight: 100, reps: 8, e1rmValid: false }, now)
+    expect(pr.kind).toBe('reps')
+  })
+
+  it('treats an absent flag as valid', () => {
+    /* A custom lift the catalog has never heard of keeps its star.
+       Absent field = safe default, and the safe default here is the
+       behaviour every existing stored row already has. */
+    expect(classifyPR(history, better, now).kind).toBe('e1rm')
+  })
+
+  it('does not hand out the celebration on a 12-month e1RM either', () => {
+    /* The second door into the same claim. Blocking only the all-time
+       branch would leave the star reachable through the rolling one. */
+    const old = [session('2024-02-01', 200, [3]), session('2026-01-05', 100, [5])]
+    const pr = classifyPR(old, { weight: 105, reps: 5, e1rmValid: false }, now)
+    expect(pr.kind).not.toBe('e1rm')
+  })
+})

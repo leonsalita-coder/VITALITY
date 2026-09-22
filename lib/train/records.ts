@@ -132,6 +132,19 @@ export interface PRCandidate {
   /** `weight` is assistance; less of it is the record. */
   assisted?: boolean
   /**
+   * Whether an estimated 1RM means anything for this movement.
+   *
+   * The per-exercise form of the ten-rep cap. An Epley estimate off a
+   * barbell curl is a number, not a one-rep max, and e1RM earns the
+   * celebration precisely because it is scarce — spending it on
+   * isolation work is the PR inflation that making e1RM canonical was
+   * meant to stop. The catalog authors this per lift.
+   *
+   * Absent means valid: a custom lift the catalog has never heard of
+   * keeps the behaviour every stored row already has.
+   */
+  e1rmValid?: boolean
+  /**
    * Taken to failure. Carried so a candidate can be built straight from a
    * logged set; a record stands or falls on the numbers either way, and an
    * all-out set is exactly where a rep record tends to come from.
@@ -247,7 +260,11 @@ export function classifyPR(
   const weight = candidate.weight || 0
   const reps = candidate.reps || 0
   const rolling: BestOptions = { excludeDate: today, sinceDate: shiftDays(now, -ROLLING_PR_DAYS) }
-  const value = epley1RM(weight, reps)
+  /* Nulled rather than filtered downstream, exactly as the rep cap does
+     it: with no estimate there is no e1RM branch to take, no estimate to
+     report on the weight or rep PR that replaces it, and no second door
+     through the rolling twelve-month record. */
+  const value = candidate.e1rmValid === false ? null : epley1RM(weight, reps)
   const allTime = bestE1RM(history, base)
 
   if (value != null && allTime) {

@@ -14,9 +14,9 @@
  *
  * ESTIMATED 1RM RATHER THAN BARE WEIGHT. Five reps at 200 is progress
  * over three reps at 200, and a weight-only measure calls that a flat
- * week. The absolute e1RM of a lateral raise is meaningless — which is
- * why no e1rm-validity filter applies here — but its week-over-week
- * fractional change is not.
+ * week. The absolute e1RM of a lateral raise is meaningless but its
+ * week-over-week fractional change is not, which is why this reads the
+ * estimate on every lift where records.ts deliberately will not.
  *
  * Pure and DOM-free.
  */
