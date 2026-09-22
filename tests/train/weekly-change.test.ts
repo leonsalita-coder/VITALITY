@@ -425,3 +425,369 @@ describe('one finding, ranked', () => {
     expect(weeklyChange(c)).toEqual(weeklyChange(c))
   })
 })
+
+/* ------------------------------------------------------------------ *
+ * The number the athlete is shown.
+ *
+ * 49 of 77 mutations survived this module — the largest count in the
+ * engine, in the thing that speaks once a week to someone who may not
+ * have trained. Two shapes accounted for nearly all of it, and both are
+ * about what is NOT asserted rather than what is.
+ *
+ * Gates were checked only in the silent direction, so a gate that had
+ * stopped firing altogether would pass. And findings had their presence
+ * asserted but not their content: the sentence composes real figures
+ * into a claim a user acts on, and every test checked that a sentence
+ * appeared rather than what it said. A wrong number inside a
+ * true-shaped sentence is the worst failure available here, because it
+ * is the one the athlete cannot detect.
+ * ------------------------------------------------------------------ */
+
+/** One session `back` days ago, each set at `weight` for `reps`. */
+const setsAt = (back: number, weight: number, reps: number[]) => ({
+  date: day(back), kg: weight,
+  sets: reps.map((r) => ({ w: weight, r })),
+})
+
+/**
+ * Four baseline weeks at `base` sets a week, this week at `now`.
+ *
+ * TWO sessions a week, always. Every hypothesis needs two observations
+ * at each end, so a one-session week silently fails the sample gate and
+ * the whole fixture reports nothing — which looks exactly like the
+ * finding being correctly withheld.
+ */
+const weekly = (baseSets: number, weekSets: number, weight = 185, baseWeight = weight) => {
+  const split = (n: number) => [Math.floor(n / 2), Math.ceil(n / 2)]
+  const out: ReturnType<typeof session>[] = []
+  for (let w = 1; w <= 4; w++)
+    split(baseSets).forEach((n, i) => out.push(session(w * 7 + i * 2, baseWeight, n)))
+  split(weekSets).forEach((n, i) => out.push(session(1 + i * 2, weight, n)))
+  return out
+}
+const vitalsOf = (field: 'sleepHours' | 'recovery', now: number, then: number, lag = 1) =>
+  Array.from({ length: 40 }, (_, i) => ({ date: day(i + 1), [field]: i + 1 <= 7 + lag ? now : then }))
+const bwOf = (now: number, then: number, days = 40) =>
+  Array.from({ length: days }, (_, i) => ({ date: day(i + 1), lb: i + 1 <= 7 ? now : then }))
+
+describe('the sentence carries the figures, not just the shape', () => {
+  const found = () => weeklyChange(ctx({
+    history: { bench: weekly(20, 24) },
+    vitals: vitalsOf('sleepHours', 9, 8),
+  }))
+
+  it('states the outcome the data actually holds', () => {
+    const f = found()
+    expect(f?.hypothesis).toBe('sleep_output')
+    expect(f?.outcome.current).toBe(24)
+    expect(f?.outcome.baseline).toBe(20)
+    expect(f?.outcome.change).toBeCloseTo(0.2, 5)
+  })
+
+  it('puts that same outcome in the sentence', () => {
+    expect(found()?.text).toMatch(/Volume up 20%/)
+  })
+
+  it('states the driver in its own units, both sides of it', () => {
+    const f = found()
+    expect(f?.driver?.current).toBe(9)
+    expect(f?.text).toMatch(/averaged 9h sleep against your usual 8/)
+  })
+
+  it('names the metric correctly when a confound explains the change', () => {
+    /* The noun is chosen by a chain of comparisons and nothing checked
+       which word came out. A volume drop announced as "Sessions down
+       30%" is a true number attached to the wrong thing. */
+    const f = weeklyChange(ctx({
+      history: { bench: weekly(20, 14) },
+      deloadDates: [day(2)],
+    }))
+    expect(f?.hypothesis).toBe('confounded_change')
+    expect(f?.outcome.metric).toBe('hard_sets')
+    expect(f?.text).toMatch(/^Volume down 30% on the week/)
+    expect(f?.text).not.toMatch(/Sessions|Tonnage/)
+  })
+})
+
+describe('the estimated flag on a confounded change', () => {
+  const build = (over: Partial<WeeklyContext>) => weeklyChange(ctx({
+    history: { bench: weekly(20, 14) }, deloadDates: [day(2)], ...over,
+  }))
+
+  it('marks it when the history was imported', () => {
+    expect(build({ imported: true })?.estimated).toBe(true)
+  })
+
+  it('leaves it unmarked when every split is exact and nothing was imported', () => {
+    /* The control. A flag that is always true says nothing, and a flag
+       that is always false is the one that misleads. */
+    expect(build({})?.estimated).toBe(false)
+  })
+})
+
+describe('the effect threshold includes its own boundary', () => {
+  /* 20 sets a week to 23 is exactly the 15% this hypothesis asks for.
+     A gate that needs MORE than its threshold silently raises every
+     number in the closed list. */
+  const at = (weekSets: number) => weeklyChange(ctx({
+    history: { bench: weekly(20, weekSets) },
+    vitals: vitalsOf('sleepHours', 9, 7),
+  }))
+
+  it('speaks at exactly the minimum effect', () => {
+    const f = at(23)
+    expect(f?.hypothesis).toBe('sleep_output')
+    expect(f?.outcome.change).toBeCloseTo(0.15, 10)
+  })
+
+  it('stays silent below it', () => expect(at(22)).toBeNull())
+})
+
+describe('direction is part of the claim', () => {
+  const other = (now: number, then: number) =>
+    Array.from({ length: 40 }, (_, i) => ({
+      date: day(i + 1), activity: 'conditioning' as const,
+      minutes: i + 1 <= 7 ? now : then, intensity: 3,
+    }))
+
+  it('reports lifting volume falling while other training rose', () => {
+    const f = weeklyChange(ctx({
+      history: { bench: weekly(20, 14) }, otherTraining: other(60, 30),
+    }))
+    expect(f?.hypothesis).toBe('other_load_volume')
+  })
+
+  it('says nothing when both rose, which is not what this hypothesis claims', () => {
+    /* An opposite-direction link firing on a same-direction week is the
+       app asserting something the data contradicts. */
+    const f = weeklyChange(ctx({
+      history: { bench: weekly(20, 26) }, otherTraining: other(60, 30),
+    }))
+    expect(f?.hypothesis).not.toBe('other_load_volume')
+  })
+})
+
+describe('the estimated one-rep max behind three of the findings', () => {
+  /* e1RM feeds recovery_e1rm, relative_strength and progression. Every
+     test here reads the NUMBER through a finding, because the reader
+     itself is private and a finding is what the athlete sees. */
+  const withWeek = (weekSets: Array<{ w: number; r: number }>) => weeklyChange(ctx({
+    history: {
+      bench: [
+        ...[1, 2, 3, 4].flatMap((w) => [setsAt(w * 7, 185, [5, 5]), setsAt(w * 7 + 2, 185, [5, 5])]),
+        { date: day(1), kg: 185, sets: weekSets },
+        { date: day(3), kg: 185, sets: weekSets },
+      ],
+    },
+    vitals: vitalsOf('recovery', 80, 60),
+  }))
+
+  it('uses the best set of the week, not the last one logged', () => {
+    /* 205x5 estimates 239.2; a lighter set after it must not replace it. */
+    const f = withWeek([{ w: 205, r: 5 }, { w: 95, r: 5 }])
+    expect(f?.outcome.current).toBeCloseTo(239.2, 1)
+  })
+
+  it('ignores a set above the ten-rep cap however heavy it is', () => {
+    /* 300x12 would estimate 420 — an Epley figure off a set that far out
+       is not a one-rep max, and letting it in inflates the week. */
+    const capped = withWeek([{ w: 205, r: 5 }, { w: 300, r: 12 }])
+    expect(capped?.outcome.current).toBeCloseTo(239.2, 1)
+  })
+
+  it('counts a set at exactly ten reps', () => {
+    /* The boundary in the other direction: the cap excludes ELEVEN. */
+    const f = withWeek([{ w: 200, r: 10 }])
+    expect(f?.outcome.current).toBeCloseTo(266.7, 1)
+  })
+
+  it('ignores a set logged with no reps at all', () => {
+    const f = withWeek([{ w: 205, r: 5 }, { w: 400, r: 0 }])
+    expect(f?.outcome.current).toBeCloseTo(239.2, 1)
+  })
+})
+
+describe('bodyweight is read from the entries that are actually bodyweight', () => {
+  /* Lifting held flat and bodyweight rising: strength per pound falls
+     while the driver climbs, which is the opposite-direction pairing
+     this hypothesis is actually about. */
+  const build = (entries: unknown[]) => weeklyChange(ctx({
+    history: { bench: weekly(6, 6) },
+    bodyweight: entries as WeeklyContext['bodyweight'],
+  }))
+
+  it('averages the readings inside the week', () => {
+    const f = build(bwOf(190, 180))
+    expect(f?.hypothesis).toBe('bodyweight_relative_strength')
+    expect(f?.driver?.current).toBe(190)
+    expect(f?.text).toMatch(/averaged 190 lb/)
+  })
+
+  it('ignores an entry whose weight is not a number', () => {
+    const polluted = [...bwOf(190, 180), { date: day(2), lb: 'heavy' }]
+    expect(build(polluted)?.driver?.current).toBe(190)
+  })
+
+  it('ignores an empty slot in the list', () => {
+    const polluted = [...bwOf(190, 180), null]
+    expect(build(polluted)?.driver?.current).toBe(190)
+  })
+
+  it('ignores a reading from outside the window', () => {
+    const polluted = [...bwOf(190, 180), { date: day(200), lb: 400 }]
+    expect(build(polluted)?.driver?.current).toBe(190)
+  })
+})
+
+describe('a context missing the parts it never filled in', () => {
+  /* Each of these lists is optional at the boundary and absent in a
+     brand-new athlete's state. Reaching through one is a crash on the
+     quietest week there is. */
+  const bare = { history: { bench: weekly(20, 14) }, deloadDates: [day(2)] }
+
+  it.each(['finishedDates', 'bodyweight', 'otherTraining', 'vitals', 'layoffDates'])(
+    'survives a missing %s and still answers', (field) => {
+      /* Paired in one body: "does not throw" alone is satisfied by a
+         function that returns null for everybody, which is exactly the
+         failure this module is prone to. deloadDates is excluded because
+         removing it removes the confound this fixture is built on — it
+         has its own case below. */
+      const partial = { ...ctx(bare), [field]: undefined } as WeeklyContext
+      expect(() => weeklyChange(partial)).not.toThrow()
+      expect(weeklyChange(partial)?.text).toMatch(/Volume down 30% on the week/)
+    })
+
+  it('survives a missing deloadDates, which removes the only confound', () => {
+    const partial = { ...ctx(bare), deloadDates: undefined } as unknown as WeeklyContext
+    expect(() => weeklyChange(partial)).not.toThrow()
+    /* Silence is the correct answer with no confound left — so the same
+       context WITH one sits beside it, or this passes against a module
+       that has stopped speaking entirely. */
+    expect(weeklyChange(ctx(bare))?.text).toMatch(/Volume down 30% on the week/)
+    expect(weeklyChange(partial)).toBeNull()
+  })
+
+  it('returns nothing rather than throwing when there is no context at all', () => {
+    expect(weeklyChange(null as never)).toBeNull()
+    expect(weeklyChange(undefined as never)).toBeNull()
+    expect(weeklyChange({} as never)).toBeNull()
+  })
+
+  it('still produces its finding when everything IS filled in', () => {
+    /* The control for the six above: "does not throw" is satisfied by a
+       function that returns null for everybody. */
+    expect(weeklyChange(ctx(bare))?.hypothesis).toBe('confounded_change')
+  })
+})
+
+describe('both ends of a comparison need enough behind them', () => {
+  /* "A mean of one is not a mean" is the rule, and it has to hold on
+     each side independently. Every fixture above happens to have a fat
+     baseline and a two-session week, so a gate that only ever checked
+     one end passed all of them. */
+  const sleep = vitalsOf('sleepHours', 9, 7)
+
+  /** Baseline weeks holding `sessions` sessions in total, `sets` each. */
+  const sparseBaseline = (sessions: number, sets: number) =>
+    Array.from({ length: sessions }, (_, i) => session(8 + i * 7, 185, sets))
+
+  it('needs two baseline sessions, and exactly two is enough', () => {
+    /* A returning athlete has plenty logged this week and almost
+       nothing to compare it against; reporting a change there is
+       arithmetic against one observation. Both halves sit in one body
+       because the silent half alone is satisfied by a module that never
+       speaks at all. */
+    const at = (sessions: number, sets: number) => weeklyChange(ctx({
+      history: { bench: [...sparseBaseline(sessions, sets), session(1, 185, 12), session(3, 185, 12)] },
+      vitals: sleep,
+    }))
+    expect(at(1, 80)).toBeNull()
+    const f = at(2, 40)
+    expect(f?.hypothesis).toBe('sleep_output')
+    expect(f?.outcome.baseline).toBe(20)
+    expect(f?.outcome.current).toBe(24)
+  })
+
+  it('applies the same rule on the confounded path', () => {
+    /* That path carries its own copy of the gate, so it needs its own
+       pair rather than inheriting the one above. */
+    const at = (sessions: number, sets: number) => weeklyChange(ctx({
+      history: { bench: [...sparseBaseline(sessions, sets), session(1, 185, 7), session(3, 185, 7)] },
+      deloadDates: [day(2)],
+    }))
+    expect(at(1, 80)).toBeNull()
+    const f = at(2, 40)
+    expect(f?.hypothesis).toBe('confounded_change')
+    expect(f?.text).toMatch(/Volume down 30% on the week/)
+  })
+
+  it('gates the DRIVER baseline separately, and on the same rule', () => {
+    /* The driver window is read and gated on its own, and a thin driver
+       is exactly how a coincidence gets promoted to a finding. */
+    const week = [{ date: day(2), sleepHours: 9 }, { date: day(4), sleepHours: 9 }]
+    const at = (baselineReadings: string[]) => weeklyChange(ctx({
+      history: { bench: weekly(20, 24) },
+      vitals: [...week, ...baselineReadings.map((d) => ({ date: d, sleepHours: 7 }))],
+    }))
+    expect(at([day(20)])).toBeNull()
+    const f = at([day(20), day(24)])
+    expect(f?.hypothesis).toBe('sleep_output')
+    expect(f?.driver?.current).toBe(9)
+    expect(f?.driver?.baseline).toBe(7)
+  })
+})
+
+describe('self-reported training that arrives malformed', () => {
+  it('ignores an empty slot rather than reaching through it', () => {
+    /* Same shape as the bodyweight list, and the same crash: a null in
+       an array the athlete fills in by hand. */
+    const entries = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        date: day(i + 1), activity: 'conditioning' as const,
+        minutes: i + 1 <= 7 ? 60 : 30, intensity: 3,
+      })),
+      null,
+    ] as unknown as WeeklyContext['otherTraining']
+    const f = weeklyChange(ctx({ history: { bench: weekly(20, 14) }, otherTraining: entries }))
+    expect(f?.hypothesis).toBe('other_load_volume')
+  })
+})
+
+describe('history that arrives with holes in it', () => {
+  it('steps over an empty slot in a lift\'s history', () => {
+    /* The bodyweight and other-training lists are both guarded against
+       this; history is the one that carries imported rows, so it is the
+       likeliest of the three to hold a null. */
+    const rows = [...weekly(20, 24), null] as never
+    expect(() => weeklyChange(ctx({ history: { bench: rows }, vitals: vitalsOf('sleepHours', 9, 8) }))).not.toThrow()
+    expect(weeklyChange(ctx({ history: { bench: rows }, vitals: vitalsOf('sleepHours', 9, 8) }))?.hypothesis)
+      .toBe('sleep_output')
+  })
+})
+
+describe('tonnage is the metric that catches a deload', () => {
+  /* The confounded chain tries hard sets, then tonnage, then sessions,
+     and only the first of those had ever been reached. A deload that
+     keeps the set count and drops the load moves nothing BUT tonnage —
+     which is precisely the week the athlete most needs explained. */
+  const sameSetsLighter = () => {
+    const out: ReturnType<typeof session>[] = []
+    for (let w = 1; w <= 4; w++) for (const i of [0, 2]) out.push(session(w * 7 + i, 225, 5))
+    for (const i of [1, 3]) out.push(session(i, 135, 5))
+    return out
+  }
+
+  it('reports the load drop when the set count did not move', () => {
+    const f = weeklyChange(ctx({ history: { bench: sameSetsLighter() }, deloadDates: [day(2)] }))
+    expect(f?.hypothesis).toBe('confounded_change')
+    expect(f?.outcome.metric).toBe('tonnage')
+    expect(f?.text).toMatch(/^Tonnage down 40% on the week/)
+  })
+
+  it('carries the real tonnage figures, not just the word', () => {
+    const f = weeklyChange(ctx({ history: { bench: sameSetsLighter() }, deloadDates: [day(2)] }))
+    /* 2 sessions x 5 sets x 5 reps: 225 lb gives 11,250 a week, 135 gives 6,750. */
+    expect(f?.outcome.baseline).toBe(11250)
+    expect(f?.outcome.current).toBe(6750)
+  })
+})

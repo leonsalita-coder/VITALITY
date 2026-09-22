@@ -351,6 +351,33 @@ is exercised only at its default), exercises with secondary muscles at the ratio
 boundaries, histories longer than about five sessions per lift, or any date
 range past 40 days.
 
+**weekly.** The grid had to be widened three times before it was worth
+trusting, and each widening found real bugs. Final shape: all six hypotheses
+driven to fire, plus the confounded-change path; outcome and driver moves
+above, below and exactly on each hypothesis's own thresholds; sleep and
+recovery series with the driver window shifted by its lag; rest derived from
+real `at` timestamps on sets; AMRAP reps around the ten-rep e1RM cap; bodyweight
+and other-training series; finished-session counts 0–3; deload, layoff and
+imported confounds alone and together; entries marked `off`, warm-up-only,
+failed, zero-rep and over-cap; malformed rows — a non-numeric bodyweight, a null
+slot, a reading outside the window; NaN and Infinity in vitals; and a missing
+context entirely. *Never varied:* more than one exercise id at a time, supersets,
+per-side logging, assisted sets, weeks containing both a deload and a layoff
+with a hypothesis also firing, or any window length other than the shipped 7
+and 28 days.
+
+The three widenings, because the pattern is the lesson. **First:** two of the six
+hypotheses never fired at all — `recovery_e1rm` because the fixture used one
+weight for both the week and the baseline so e1RM never moved, and
+`rest_compression_reps` because rest is derived from timestamps and the fixture
+set a `rest` field that nothing reads. A grid that cannot make a finding fire
+proves nothing about the gates guarding it. **Second:** no context was ever
+missing, so every "reaches through an absent list" mutant read as equivalent.
+**Third:** sample counts were never *asymmetric* — every fixture had a fat
+baseline and a two-session week, so a gate checking only one end passed all of
+them. That last one hid a real defect: a returning athlete with one baseline
+session would have had a change reported against a single observation.
+
 **A second way to be wrong, separate from the grid.** Twice I "confirmed" a
 survivor was real by hand-editing the source, and once that meant replacing both
 `||` operators on a line the sweep mutates one of. With the correct single

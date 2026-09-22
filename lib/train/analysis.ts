@@ -126,7 +126,11 @@ export function attribute(history: History, index: ExerciseIndex): Attribution[]
     const split = index[id]
     if (!split || (!split.primary.length && !split.secondary.length)) continue
     for (const entry of history[id] || []) {
-      if (entry.off) continue
+      /* A null row crashes this, and weekly.ts's reader of the same data
+         already steps over one. Two readers of one history disagreeing
+         about what is readable is how two screens come to disagree —
+         and imported rows are the likeliest place a hole appears. */
+      if (!entry || entry.off) continue
       const sets = workingSets(entry).length
       if (!sets) continue
       const spread = distribute(sets, split)

@@ -2953,7 +2953,7 @@ var TrainEngine = (() => {
       const split = index[id];
       if (!split || !split.primary.length && !split.secondary.length) continue;
       for (const entry of history[id] || []) {
-        if (entry.off) continue;
+        if (!entry || entry.off) continue;
         const sets = workingSets(entry).length;
         if (!sets) continue;
         const spread = distribute(sets, split);
