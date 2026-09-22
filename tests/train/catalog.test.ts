@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { CATALOG, CATALOG_BY_ID, catalogExercise } from '../../lib/train/catalog'
 import { MUSCLES, muscleSplitFrom, distribute } from '../../lib/train/muscles'
 import { SET_KINDS } from '../../lib/train/classify'
+import { loadableWeights, defaultPlateConfig, DEFAULT_BAR_LB } from '../../lib/train/plates'
 
 describe('catalog integrity', () => {
   it('covers the training this app is actually for', () => {
@@ -71,6 +72,84 @@ describe('catalog integrity', () => {
   it('marks the unilateral movements', () => {
     expect(CATALOG_BY_ID.bulgarian_split_squat.unilateral).toBe(true)
     expect(CATALOG_BY_ID.back_squat.unilateral).toBe(false)
+  })
+})
+
+/**
+ * Invariants, because pinning values proves nothing here.
+ *
+ * Mutation-testing an authored data table is vacuous by default: a test
+ * asserting bench is 0.7 chest passes whether or not 0.7 is right, and
+ * six flipped booleans survived a sweep of this file for exactly that
+ * reason — `e1rmValid` was checked in one direction only, and
+ * `unilateral` was pinned by two examples out of sixty.
+ *
+ * These assert properties a wrong value breaks. The catalog is upstream
+ * of progression and of muscle volume, and its values are authored, so
+ * nothing else in the system would ever notice them being wrong.
+ */
+describe('the catalog holds together as data', () => {
+  it('claims e1RM on the lifts it is meaningful for', () => {
+    /* The missing half. "Never claims e1RM where it is meaningless" is
+       satisfied completely by claiming it nowhere — which is what
+       flipping one default did, silently, across the whole table. */
+    /* Compound only. An Epley estimate off a barbell curl is not a
+       one-rep max, it is a number — which is why the table marks
+       isolation work invalid on purpose. */
+    const loaded = CATALOG.filter((e) =>
+      e.loading === 'barbell' && e.defaultSetKind === 'reps_weight'
+      && !e.unilateral && e.pattern !== 'isolation')
+    expect(loaded.length).toBeGreaterThan(8)
+    for (const e of loaded) expect(e.e1rmValid, `${e.id} should support e1RM`).toBe(true)
+  })
+
+  it('knows exactly which movements are one limb at a time', () => {
+    /* A census, not two examples. Any entry flipping in either
+       direction changes this set, and `unilateral` is what becomes
+       perSide on a swapped-in lift — get it wrong and every rep is
+       counted twice, or half of them vanish. */
+    const actual = CATALOG.filter((e) => e.unilateral).map((e) => e.id).sort()
+    expect(actual).toEqual([
+      'bulgarian_split_squat', 'cable_woodchop', 'dumbbell_row',
+      'side_plank', 'step_up', 'walking_lunge',
+    ])
+  })
+
+  it('treats every lunge as unilateral, because that is what a lunge is', () => {
+    /* Structural rather than authored: you cannot do a lunge on both
+       legs at once, so this one cannot drift with taste. */
+    for (const e of CATALOG.filter((e) => e.pattern === 'lunge')) {
+      expect(e.unilateral, `${e.id} is a lunge but marked bilateral`).toBe(true)
+    }
+  })
+
+  it('never marks a loaded barbell lift unilateral', () => {
+    for (const e of CATALOG.filter((e) => e.equipment === 'barbell')) {
+      expect(e.unilateral, `${e.id} is a barbell lift marked unilateral`).toBe(false)
+    }
+  })
+
+  it('increments by an amount the bar can actually be loaded to', () => {
+    /* The invariant that ties this table to the rack. A barbell lift
+       incrementing by 2.5 lb asks for a 1.25 lb pair that the default
+       room does not have, so the suggestion would snap straight back
+       and the lift would never progress. */
+    const rack = loadableWeights(defaultPlateConfig(), 400)
+    for (const e of CATALOG.filter((x) => x.loading === 'barbell')) {
+      expect(rack, `${e.id} increments by an unloadable ${e.incrementLb}`)
+        .toContain(DEFAULT_BAR_LB + e.incrementLb)
+    }
+  })
+
+  it('gives each entry a coherent muscle split', () => {
+    for (const e of CATALOG) {
+      const seen = new Set<string>()
+      for (const c of e.primary) {
+        expect(c.share, `${e.id} has a non-positive share`).toBeGreaterThan(0)
+        expect(seen.has(c.muscle), `${e.id} lists ${c.muscle} twice`).toBe(false)
+        seen.add(c.muscle)
+      }
+    }
   })
 })
 

@@ -37,12 +37,12 @@ const tidy = (n: number) => Math.round(n * 100) / 100
 export function loadableWeights(config: PlateConfig, maxLb = 1000): number[] {
   const bar = Math.max(0, config.barLb || 0)
   const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => a - b)
-  if (!plates.length) return [tidy(bar)]
 
   /* Every plate denomination can go on more than once, so this walks
-     reachable per-side loads rather than assuming a single pair of each. */
+     reachable per-side loads rather than assuming a single pair of each.
+     With no plates at all the loop simply never adds anything and the
+     bar falls out of it, so there is no empty-list case to special-case. */
   const perSide = new Set<number>([0])
-  const smallest = plates[0]
   const limit = (maxLb - bar) / 2
   let frontier = [0]
   while (frontier.length) {
@@ -58,7 +58,6 @@ export function loadableWeights(config: PlateConfig, maxLb = 1000): number[] {
     frontier = next
     if (perSide.size > 4000) break // plenty for any real rack
   }
-  void smallest
   return [...perSide].map((side) => tidy(bar + side * 2)).sort((a, b) => a - b)
 }
 
@@ -69,13 +68,10 @@ export function loadableWeights(config: PlateConfig, maxLb = 1000): number[] {
  * rep; being handed slightly more is how a marginal set becomes a miss.
  */
 export function snapToLoadable(target: number, config: PlateConfig): number {
+  /* Always at least [bar], so there is no empty case below. Below the
+     bar there is nothing to snap to either — the bar is the smallest
+     option, so the search returns it without needing to be told. */
   const options = loadableWeights(config, Math.max(target * 2, 1000))
-  if (!options.length) return tidy(target)
-  const bar = Math.max(0, config.barLb || 0)
-
-  /* Below the bar there is nothing to snap to: an empty bar is the floor,
-     and a lift that genuinely needs less than that is not a barbell lift. */
-  if (target <= bar) return tidy(bar)
 
   let best = options[0]
   let bestGap = Math.abs(options[0] - target)

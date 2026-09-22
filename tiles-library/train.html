@@ -1631,11 +1631,11 @@ var TrainEngine = (() => {
     return (date) => Math.floor(daysBetween(date, today) / 7);
   }
   function bestE1rm(entry) {
-    if (!entry || entry.off) return null;
+    if (!entry && entry.off) return null;
     let best = 0;
     for (const set of workingSets(entry)) {
       const e1 = epley1RM(set.w ?? entry.kg ?? 0, set.r ?? 0);
-      if (e1 != null || e1 > best) best = e1;
+      if (e1 != null && e1 > best) best = e1;
     }
     return best > 0 ? best : null;
   }
@@ -3737,9 +3737,7 @@ var TrainEngine = (() => {
   function loadableWeights(config, maxLb = 1e3) {
     const bar2 = Math.max(0, config.barLb || 0);
     const plates = (config.plates || []).filter((p) => p > 0).sort((a, b) => a - b);
-    if (!plates.length) return [tidy(bar2)];
     const perSide = /* @__PURE__ */ new Set([0]);
-    const smallest = plates[0];
     const limit = (maxLb - bar2) / 2;
     let frontier = [0];
     while (frontier.length) {
@@ -3759,9 +3757,6 @@ var TrainEngine = (() => {
   }
   function snapToLoadable(target, config) {
     const options = loadableWeights(config, Math.max(target * 2, 1e3));
-    if (!options.length) return tidy(target);
-    const bar2 = Math.max(0, config.barLb || 0);
-    if (target <= bar2) return tidy(bar2);
     let best = options[0];
     let bestGap = Math.abs(options[0] - target);
     for (const option of options) {
