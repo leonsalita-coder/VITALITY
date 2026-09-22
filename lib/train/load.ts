@@ -128,9 +128,15 @@ function weeklyRate(daily: number[]): number[] {
   return out
 }
 
-/** Exponentially weighted average of a daily series, most recent last. */
+/**
+ * Exponentially weighted average of a daily series, most recent last.
+ *
+ * No empty check: both call sites are fed weeklyRate(dailySeries(...)),
+ * and dailySeries always returns exactly `span` entries — absent days
+ * are zeroes, not gaps. An empty-array guard here was a branch nothing
+ * could reach.
+ */
 function ewma(daily: number[], days: number): number {
-  if (!daily.length) return 0
   const alpha = 2 / (days + 1)
   let value = daily[0]
   for (let i = 1; i < daily.length; i++) value = daily[i] * alpha + value * (1 - alpha)

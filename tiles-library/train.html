@@ -2822,7 +2822,6 @@ var TrainEngine = (() => {
     return out;
   }
   function ewma(daily, days) {
-    if (!daily.length) return 0;
     const alpha = 2 / (days + 1);
     let value = daily[0];
     for (let i = 1; i < daily.length; i++) value = daily[i] * alpha + value * (1 - alpha);
@@ -2953,7 +2952,7 @@ var TrainEngine = (() => {
       const split = index[id];
       if (!split || !split.primary.length && !split.secondary.length) continue;
       for (const entry of history[id] || []) {
-        if (!entry || entry.off) continue;
+        if (!entry || entry.off || !entry.date) continue;
         const sets = workingSets(entry).length;
         if (!sets) continue;
         const spread = distribute(sets, split);

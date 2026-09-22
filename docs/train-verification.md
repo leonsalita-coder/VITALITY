@@ -378,6 +378,31 @@ baseline and a two-session week, so a gate checking only one end passed all of
 them. That last one hid a real defect: a returning athlete with one baseline
 session would have had a change reported against a single observation.
 
+**load.** The grid was built to answer one question first: can every reading
+actually speak? Each of ten outputs was checked as firing at least once before
+any gate on it was trusted — findings above and below the band, systemic notes
+above and below, the estimated caveat, usable and unusable muscle readings, and
+the estimated systemic flag. Dimensions varied: steady blocks read on all seven
+weekdays with training continuing through each; recent-week volumes from 0 to 30
+sets against baselines of 3–24; chronic baselines of 1–12 weeks and 1–7 sessions
+a week; layoffs of 2, 4, 8, 10, 16 and 26 weeks; other-training from none to
+forty days at two hours; two muscles at once; and malformed rows — null, no
+date, marked `off`, dated in the future, dated 900 days back, a null other-
+training entry and an undated one. Band edges were found by search rather than
+by hand, because an EWMA ratio cannot be dialled to a round number: fixtures
+landing on exactly 0.80 and exactly 1.50 are in the suite. *Never varied:*
+supersets, per-side logging, assisted sets, more than two muscles, an index
+missing the lift entirely, `now` at a DST boundary, or histories longer than
+about 200 days.
+
+Two blind spots in the FIRST load grid, both caught before they were trusted.
+Its "read on each weekday" cases shifted the whole block backwards, which means
+the athlete stopped training — so the falling ratio at the later offsets was
+real, not a weekday artefact, and the fixture was measuring something other than
+the property it was named for. And it never placed a session on the oldest day
+inside the window, which is the only place the trailing-week mutant is visible
+at all.
+
 **A second way to be wrong, separate from the grid.** Twice I "confirmed" a
 survivor was real by hand-editing the source, and once that meant replacing both
 `||` operators on a line the sweep mutates one of. With the correct single
