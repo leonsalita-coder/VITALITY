@@ -723,3 +723,77 @@ describe('the tile build is inert until called', () => {
     expect(statSync('public/tiles/train.html').mtimeMs).not.toBe(before)
   })
 })
+
+/**
+ * A mutation lethal enough to stop a test file LOADING is a kill.
+ *
+ * vitest reports that as a failed SUITE, not a failed test: the summary
+ * reads `Test Files 1 failed | 1 passed` while `Tests 22 passed (22)`
+ * carries no failures at all, because the file never got far enough to
+ * have any. Reading only the `Tests` line sees zero failures and a short
+ * count, and the short-run guard then calls the tool broken.
+ *
+ * This is the same shape as the bug that hid lib/train/progression.ts
+ * from mutation testing entirely — a lethal mutation scored as HARNESS
+ * BROKEN rather than as the emphatic kill it is. That one was a mutation
+ * that aborted files while other tests failed; this is one that aborts a
+ * file while nothing fails. Found by it blocking a real sweep, on
+ * other.ts:122, where `typeof info.note === 'string'` inverted makes a
+ * fixture helper throw during collection.
+ */
+describe('a failed suite is a kill, not a broken harness', () => {
+  const suiteFailure = `
+ FAIL  tests/train/other.test.ts [ tests/train/other.test.ts ]
+TypeError: Cannot read properties of undefined (reading 'trim')
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  22 passed (22)
+`
+
+  it('scores it as killed', () => {
+    const v = verdictFrom(suiteFailure, { minFiles: 2, minTests: 73, baselineRan: true })
+    expect(v.ok).toBe(true)
+    expect(v.lethal).toBe(true)
+  })
+
+  it('does not call the tool broken', () => {
+    const v = verdictFrom(suiteFailure, { minFiles: 2, minTests: 73, baselineRan: true }) as Record<string, unknown>
+    expect(v.reason).toBeUndefined()
+  })
+
+  it('still calls a genuinely short run broken', () => {
+    /* The control. The short-run guard exists because a run that
+       resolved fewer tests than the baseline, with nothing failing and
+       nothing erroring, is the tool failing open — which is the failure
+       this whole harness was built for. */
+    const short = `
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+`
+    const v = verdictFrom(short, { minFiles: 2, minTests: 73, baselineRan: true }) as Record<string, unknown>
+    expect(v.ok).toBe(false)
+    expect(v.reason).toMatch(/expected at least/)
+  })
+
+  it('still scores an ordinary failing test as killed', () => {
+    const ordinary = `
+ Test Files  1 failed | 1 passed (2)
+      Tests  3 failed | 70 passed (73)
+`
+    const v = verdictFrom(ordinary, { minFiles: 2, minTests: 73, baselineRan: true })
+    expect(v.ok).toBe(true)
+    expect(v.failed).toBe(3)
+    expect(v.lethal).toBe(true)
+  })
+
+  it('still scores a clean run as a survivor', () => {
+    const clean = `
+ Test Files  2 passed (2)
+      Tests  73 passed (73)
+`
+    const v = verdictFrom(clean, { minFiles: 2, minTests: 73, baselineRan: true })
+    expect(v.ok).toBe(true)
+    expect(v.failed).toBe(0)
+    expect(v.lethal).toBe(false)
+  })
+})

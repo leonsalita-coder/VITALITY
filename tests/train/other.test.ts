@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  normalizeOtherEntry, otherLoadOf, recentOtherLoad,
+  normalizeOtherEntry, otherLoadOf, recentOtherLoad, describeOther,
   trainingDates, otherTrainingLines,
   HARD_OTHER_LOAD, MODERATE_OTHER_LOAD, SYSTEMIC_WINDOW_DAYS,
   type OtherEntry,
@@ -313,5 +313,164 @@ describe('it does count as having trained', () => {
     const lifted = [back(1), back(3)]
     trainingDates(lifted, [entry({ date: back(5) })])
     expect(lifted).toEqual([back(1), back(3)])
+  })
+})
+
+/**
+ * The flat-append model, examined before it is copied.
+ *
+ * Two-a-days work on this side of the app and not on the lifting side:
+ * otherTraining is appended with no date key, so a morning lift and an
+ * evening taekwondo session already coexist and their load sums. The
+ * session-id fix for lifting copies that model, which makes these
+ * guarantees load-bearing rather than incidental — and 14 of 28
+ * mutations survived here, the worst rate in the engine, so almost none
+ * of them were actually asserted.
+ *
+ * Nothing below found a defect in the model. What it found was that the
+ * model's promises were untested, which is the same risk wearing a
+ * calmer face.
+ */
+describe('the guarantees the two-a-day design rests on', () => {
+  const at = (date: string, minutes: number, intensity: number): OtherEntry =>
+    ({ date, activity: 'martial_arts', minutes, intensity })
+
+  describe('several sessions on one day', () => {
+    it('counts each one, rather than collapsing them by date', () => {
+      /* The property lifting does not have. Two entries, one date. */
+      const s = recentOtherLoad([at('2026-09-22', 60, 8), at('2026-09-22', 30, 6)], '2026-09-22')
+      expect(s.sessions).toBe(2)
+      expect(s.load).toBe(60 * 8 + 30 * 6)
+    })
+
+    it('counts a session logged today at all', () => {
+      /* `age >= 0` — the boundary that decides whether THIS EVENING is
+         in the window. Excluding today would make the whole two-a-day
+         case invisible on the one path where it already works. */
+      expect(recentOtherLoad([at('2026-09-22', 60, 8)], '2026-09-22').sessions).toBe(1)
+    })
+
+    it('names the hardest of them, not merely one of them', () => {
+      const s = recentOtherLoad([at('2026-09-22', 20, 3), at('2026-09-22', 90, 9)], '2026-09-22')
+      expect(s.hardest?.minutes).toBe(90)
+    })
+  })
+
+  describe('the window edges', () => {
+    const days = SYSTEMIC_WINDOW_DAYS
+    it('includes the oldest day inside the window', () => {
+      const old = `2026-09-${String(22 - (days - 1)).padStart(2, '0')}`
+      expect(recentOtherLoad([at(old, 60, 8)], '2026-09-22').sessions).toBe(1)
+    })
+
+    it('excludes the day past it', () => {
+      const past = `2026-09-${String(22 - days).padStart(2, '0')}`
+      expect(recentOtherLoad([at(past, 60, 8)], '2026-09-22').sessions).toBe(0)
+    })
+
+    it('reads a date as the day it says, not a day either side', () => {
+      /* daysBetween parses YYYY-MM-DD by hand. A month read one off
+         silently moves every entry by thirty days. */
+      expect(recentOtherLoad([at('2026-08-22', 60, 8)], '2026-09-22').sessions).toBe(0)
+      expect(recentOtherLoad([at('2026-09-22', 60, 8)], '2026-09-22').sessions).toBe(1)
+    })
+  })
+
+  describe('the estimated flag, which everything downstream inherits', () => {
+    it('is set on a summary that has sessions in it', () => {
+      /* metrics.ts turns this into the provenance on load_ratio. If it
+         were ever false, a self-reported guess would be published to
+         other tiles as a measurement. Nothing asserted it. */
+      expect(recentOtherLoad([at('2026-09-22', 60, 8)], '2026-09-22').estimated).toBe(true)
+    })
+
+    it('is set on an empty one too', () => {
+      expect(recentOtherLoad([], '2026-09-22').estimated).toBe(true)
+    })
+  })
+
+  describe('entries that arrive malformed', () => {
+    it('steps over an empty slot rather than reaching through it', () => {
+      const s = recentOtherLoad([null as never, at('2026-09-22', 60, 8)], '2026-09-22')
+      expect(s.sessions).toBe(1)
+    })
+
+    it('steps over one with no date', () => {
+      const s = recentOtherLoad([{ activity: 'sport', minutes: 60, intensity: 8 } as never,
+        at('2026-09-22', 60, 8)], '2026-09-22')
+      expect(s.sessions).toBe(1)
+    })
+
+    it('refuses to normalise something that is not an entry', () => {
+      for (const junk of [null, undefined, 7, 'run', [], [{ date: '2026-09-22' }]]) {
+        expect(normalizeOtherEntry(junk), String(junk)).toBeNull()
+      }
+    })
+
+    it('falls back rather than storing a number that is not one', () => {
+      /* clamp takes `typeof raw === 'number' && isFinite`. NaN passes
+         the first half alone, and a NaN minutes makes the load NaN —
+         which then propagates into the systemic index. */
+      const e = normalizeOtherEntry({ date: '2026-09-22', activity: 'sport', minutes: Number.NaN, intensity: 8 })
+      expect(Number.isFinite(e!.minutes)).toBe(true)
+      expect(Number.isFinite(otherLoadOf(e!))).toBe(true)
+    })
+  })
+
+  describe('the reads that describe it', () => {
+    it('describes nothing when there is no hardest entry', () => {
+      /* describeOther is exported and reachable directly, so its null
+         guard is not merely the internal one otherTrainingLines never
+         exercises — a caller with an empty window hits it. */
+      expect(describeOther(null)).toBe('other training')
+    })
+
+    it('describes the entry when there is one', () => {
+      expect(describeOther({ date: '2026-09-22', activity: 'martial_arts', minutes: 60, intensity: 8 }))
+        .toMatch(/60 minutes of martial arts at 8\/10/)
+    })
+
+    it('keeps the FIRST of two equally hard sessions', () => {
+      /* A tie has to break somewhere, and it breaks toward the earlier
+         entry. The load is the same either way; the sentence the athlete
+         reads is not, because the two can be different activities. */
+      const s = recentOtherLoad([
+        { date: '2026-09-22', activity: 'martial_arts', minutes: 60, intensity: 8 },
+        { date: '2026-09-22', activity: 'endurance', minutes: 60, intensity: 8 },
+      ], '2026-09-22')
+      expect(s.hardest?.activity).toBe('martial_arts')
+    })
+
+    it('says nothing at all from an empty summary', () => {
+      expect(otherTrainingLines(recentOtherLoad([], '2026-09-22'))).toEqual([])
+      /* Beside it: a summary WITH sessions does speak. */
+      expect(otherTrainingLines(recentOtherLoad([at('2026-09-22', 60, 8)], '2026-09-22')).length)
+        .toBeGreaterThan(0)
+    })
+
+    it('survives a summary that is missing entirely', () => {
+      expect(otherTrainingLines(null as never)).toEqual([])
+    })
+  })
+
+  describe('training days count everything the athlete did', () => {
+    it('merges lifting days and other-training days', () => {
+      const all = trainingDates(['2026-09-20'], [at('2026-09-22', 60, 8)])
+      expect(all).toEqual(['2026-09-20', '2026-09-22'])
+    })
+
+    it('keeps the lifting days when other training is empty', () => {
+      /* `finishedDates || []` — an && here silently drops every lifting
+         day and the streak collapses to conditioning only. */
+      expect(trainingDates(['2026-09-20', '2026-09-21'], [])).toEqual(['2026-09-20', '2026-09-21'])
+    })
+
+    it('counts a day trained twice once', () => {
+      expect(trainingDates(['2026-09-22'], [at('2026-09-22', 60, 8)])).toEqual(['2026-09-22'])
+    })
+
+    it('steps over an empty slot in the entry list', () => {
+      expect(trainingDates(['2026-09-20'], [null as never])).toEqual(['2026-09-20'])
+    })
   })
 })

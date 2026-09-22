@@ -71,7 +71,7 @@ function runTests(patterns, expect = {}) {
        longer terminates, which is a behaviour change the suite noticed
        in the most emphatic way available. */
     if (err && (err.killed || err.code === 'ETIMEDOUT')) {
-      return { ok: true, failed: 1, total: 1, fileCount: 1, timedOut: true }
+      return { ok: true, failed: 1, suitesFailed: 0, lethal: true, total: 1, fileCount: 1, timedOut: true }
     }
     stdout = String(err.stdout || '') + String(err.stderr || '')
   }
@@ -99,13 +99,31 @@ function verdictFrom(stdout, expect = {}) {
        was no baseline, the tool is being misused and must say so rather
        than score it. */
     if (expect.baselineRan) {
-      return { ok: true, failed: 1, total: expect.minTests || 1, fileCount: expect.minFiles || 1, collapsed: true }
+      return { ok: true, failed: 1, suitesFailed: 1, lethal: true, total: expect.minTests || 1, fileCount: expect.minFiles || 1, collapsed: true }
     }
     return { ok: false, reason: `no test summary in output (${firstLine(stdout)})`, failed: 0, total: 0, fileCount: 0 }
   }
+  /**
+   * A FAILED SUITE is a kill, and it does not appear in the Tests line.
+   *
+   * A mutation lethal enough to stop a file LOADING is reported as
+   * `Test Files 1 failed | 1 passed` while `Tests` carries no failures
+   * at all — the file never got far enough to have any. Counting only
+   * test failures then sees a short run with nothing wrong, and the
+   * guard below calls the tool broken. That is exactly how
+   * progression.ts stayed unmutated for as long as it did.
+   *
+   * `failed` keeps meaning test failures, because callers and tests read
+   * it that way. `lethal` is the question a sweep actually asks: did
+   * anything at all go wrong?
+   */
+  const suitesFailed = Number(files[1] || 0)
+  const testsFailed = Number(tests[1] || 0)
   const result = {
     ok: true,
-    failed: Number(tests[1] || 0),
+    failed: testsFailed,
+    suitesFailed,
+    lethal: testsFailed > 0 || suitesFailed > 0,
     total: Number(tests[3]),
     fileCount: Number(files[3]),
   }
@@ -130,10 +148,10 @@ function verdictFrom(stdout, expect = {}) {
    * A run where tests failed cannot be mistaken for a survivor, so the
    * count only matters when nothing failed.
    */
-  if (result.failed === 0 && expect.minFiles && result.fileCount < expect.minFiles) {
+  if (!result.lethal && expect.minFiles && result.fileCount < expect.minFiles) {
     return { ...result, ok: false, reason: `ran ${result.fileCount} files, expected at least ${expect.minFiles}` }
   }
-  if (result.failed === 0 && expect.minTests && result.total < expect.minTests) {
+  if (!result.lethal && expect.minTests && result.total < expect.minTests) {
     return { ...result, ok: false, reason: `ran ${result.total} tests, expected at least ${expect.minTests}` }
   }
   return result
@@ -391,7 +409,7 @@ function modeMutate(opts) {
         const r = runTests(scope, { minFiles: scope.length, minTests: base.total, baselineRan: true })
         snap.restore()
         if (!r.ok) return harnessFailure(`${name}:${m.line} — ${r.reason}`)
-        if (r.failed > 0) killed++
+        if (r.lethal) killed++
         else survivors.push({ ...m, scope: scope.length })
       }
     } finally {
@@ -462,7 +480,7 @@ function modeCallsites(opts) {
       const r = runTests(scope, { minFiles: scope.length, minTests: base.total, baselineRan: true })
       snap.restore()
       if (!r.ok) return harnessFailure(`callsite ${call.name}: ${r.reason}`)
-      if (r.failed > 0) killed++
+      if (r.lethal) killed++
       else survivors.push({ file: tile, line: call.line, id: 'unguarded-callsite', name: call.name })
     }
   } finally {
@@ -494,7 +512,10 @@ function modeFuzz(opts) {
       considered++
       const r = runTests(dated, { minFiles: dated.length, env: { TZ: zone, MUTATE_HOUR: hour } })
       if (!r.ok) return harnessFailure(`fuzz ${zone} ${hour}: ${r.reason}`)
-      if (r.failed > 0) {
+      /* Lethal, not merely `failed`: a timezone that stops a test file
+         LOADING is as time-dependent as one that makes an assertion go
+         red, and reporting only the latter would miss it. */
+      if (r.lethal) {
         survivors.push({ file: `${zone} @ ${hour}`, line: 0, id: 'time-dependent', failed: r.failed })
       }
     }
