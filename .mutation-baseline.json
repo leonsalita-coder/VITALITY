@@ -1,7 +1,7 @@
 {
-  "_note": "Survivor counts already present when the harness was built. The gate fails when a number goes UP. These are meant to fall; lower one with --bless.",
+  "_note": "Survivor counts the gate refuses to let RISE. These are meant to fall; lower one with --bless. `mutate` was 69 until 2026-09-21, a number no full sweep ever produced — every attempt aborted partway, so the figure came from whatever prefix of the modules had run. 492 is the first complete count: 1527 mutations across all 44 modules, 1035 killed.",
   "lint": 57,
   "callsites": 20,
   "fuzz": 0,
-  "mutate": 69
+  "mutate": 492
 }

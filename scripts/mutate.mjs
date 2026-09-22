@@ -51,7 +51,14 @@ const TILES = ['public/tiles/train.html', 'tiles-library/train.html']
 function runTests(patterns, expect = {}) {
   let stdout = ''
   try {
-    stdout = execFileSync('npx', ['vitest', 'run', ...patterns], {
+    /* Single-process, deliberately. The harness spawns one `vitest run`
+       per mutation — thousands across a full sweep — and vitest forks a
+       worker per CPU by default. That saturated the machine, and a
+       saturated machine is how a clean module's baseline comes back
+       "1 failing": the abort that stopped two sweeps was resource
+       starvation, not a real red test. Slower per run, and the only
+       version that finishes. */
+    stdout = execFileSync('npx', ['vitest', 'run', '--no-file-parallelism', ...patterns], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...(expect.env || {}) },
       /* A mutation can turn a loop condition into a non-terminating one.
