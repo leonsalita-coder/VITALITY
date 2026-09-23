@@ -205,8 +205,13 @@ describe('fail means a missed set and nothing else', () => {
 describe('the glow is gone', () => {
   it('leaves no signal-coloured shadow anywhere', () => {
     /* Signal on near-black is already maximum contrast. The glow made
-       every primary shout, and several are on screen at once. */
-    const glows = [...css().matchAll(/box-shadow:[^;]*rgba\(110,\s*231,\s*183[^;]*/g)].map((m) => m[0])
+       every primary shout, and several are on screen at once.
+
+       box-shadow only, once: .railStatVal.lit carried the same
+       signal-tinted glow as a text-shadow and slipped past a check that
+       only knew the word "box". A shadow is the same claim on a lit
+       surface whichever property spells it. */
+    const glows = [...css().matchAll(/(?:box|text)-shadow:[^;]*rgba\(110,\s*231,\s*183[^;]*/g)].map((m) => m[0])
     expect(glows).toEqual([])
   })
 

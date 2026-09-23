@@ -464,6 +464,78 @@ ${sec('verdicts', '13 · Engine-driven states', 'Classes the engine composes by 
   </div>
 `)}
 
+${sec('frame', '14 · The frame', 'Recovered from 731e891 with documented deviations — see the comment block above .shell in the tile stylesheet. rail is shown at rest; its position:sticky only shows itself against a real scrolling page.', `
+  <div class="cs-stack">
+    ${cell('shell', '<div class="shell" style="background:var(--e1);border:1px dashed var(--hair-strong)">page content lives here, max 600px, var(--sp5) gutter</div>')}
+    ${cell('trainBar + wordmark', '<div class="trainBar"><span class="wordmark">TRAIN<span class="wmDot"> · </span><span id="sessionNum">Session 214</span></span></div>')}
+  </div>
+  <div class="cs-grid" style="margin-top:18px">
+    ${cell('rail', `<div class="rail" style="position:relative"><span class="railDate">TUE SEP 22</span><span class="railSpacer"></span>
+      <span class="railStat"><span class="railStatVal">4</span><span class="railStatLbl">sets</span></span>
+      <span class="railDivider"></span>
+      <span class="railStat"><span class="railStatVal lit">1,240</span><span class="railStatLbl">lb</span></span>
+    </div>`)}
+    ${cell('daydots', '<div class="daydots"><span class="dd done"></span><span class="dd done"></span><span class="dd pr"></span><span class="dd miss"></span><span class="dd"></span><span class="dd"></span><span class="dd"></span></div>')}
+    ${cell('daytitle', '<div class="daytitle">Day 214</div>')}
+  </div>
+`)}
+
+${sec('fan', '15 · Fan browser', 'Two unrelated surfaces share the fan- prefix: a paginated photo stepper (fanWrap/fanNav/fanArrow/fanDots/fanCount) and an SVG line-and-dot chart with a hover tooltip (fan/fanHit/fanDot/fanLabel/fanCard). Colours reuse --gold/--signal/--muted-2 for high/mid/low, the same meaning they carry everywhere else.', `
+  <div class="cs-stack">
+    ${cell('photo stepper', '<div class="fanWrap" style="height:auto"><div class="fanStage" style="position:relative;height:0"></div><div class="fanCaption"><div class="capRow"><span class="photoDate">SEP 22</span></div></div><div class="fanNav"><button class="fanArrow" aria-label="Previous">‹</button><div class="fanDots"><span class="fanCount">3 / 12</span></div><button class="fanArrow" aria-label="Next">›</button></div></div>')}
+    ${cell('SVG line + dots + labels', '<svg width="220" height="90" viewBox="0 0 220 90"><path class="fanHit" d="M10 70 L110 30 L210 50"/><path class="fan high" d="M10 70 L110 30 L210 50"/><circle class="fanDot high" cx="10" cy="70" r="3.4"/><circle class="fanDot mid" cx="110" cy="30" r="3.4"/><circle class="fanDot low" cx="210" cy="50" r="3.4"/><text class="fanLabel high" x="17" y="73">225</text><text class="fanLabel mid" x="117" y="33">245</text><text class="fanLabel low" x="217" y="53">210</text></svg>')}
+    ${cell('fanCard tooltip', '<div class="fanCard on" style="position:relative;opacity:1"><div class="v">245 lb</div><div class="c">Feb 14</div></div>')}
+  </div>
+`)}
+
+${sec('photos', '16 · Progress photos', '.photoCard already exists — recovered earlier with the card primitive. These are the pieces added since.', `
+  <div class="cs-grid">
+    ${cell('photoImg (pending)', '<div class="photoImg photoImg--pending skeleton-shimmer" style="position:relative;width:88px;height:124px;border-radius:var(--r-sm)"></div>')}
+    ${cell('capRow: photoDate', '<div class="capRow"><span class="photoDate">SEP 22</span></div>')}
+    ${cell('photoNote', '<p class="photoNote">Good lighting, same angle as last time.</p>')}
+    ${cell('photoNote muted', '<p class="photoNote muted">No analysis available for this one.</p>')}
+    ${cell('photoStatus', '<div class="photoStatus">Saved</div>')}
+    ${cell('photoBtnRow', '<div class="photoBtnRow"><button class="pbtn ghost">Skip</button><button class="pbtn save addLift">Save photo</button></div>')}
+  </div>
+`)}
+
+${sec('settings', '17 · Settings row', 'settingsBtn opens the popup; settingsRow and settingsNote are used repeatedly inside it.', `
+  <div class="cs-stack">
+    ${cell('settingsBtn', '<button class="settingsBtn" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/></svg></button>')}
+    ${cell('settingsRow', '<div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal">4</span><button class="step" data-t="1">+</button></div></div>')}
+    ${cell('settingsNote', '<p class="settingsNote">Pull-ups, dips and push-ups move a known share of you, so this is what turns them into real volume.</p>')}
+  </div>
+`)}
+
+${sec('calendar', '18 · The calendar', 'Rounded per tests/tools/recovered-primitives.test.ts, "the calendar came back". .ctLbl used to read two lines ("LB" / "THIS QTR") that only fit the 42px box at a below-floor 7px — the second line was dropped as redundant with .calTitle above it, rather than the box resized or the text shrunk back down.', `
+  <div class="cs-stack">
+    <div class="calShell">
+      <button class="fanArrow calArrow dis" aria-label="Previous quarter" disabled>‹</button>
+      <div class="calBody">
+        <div class="calHead"><span class="calTitle">Q3 2026 <b class="hv">· Jul–Sep</b></span></div>
+        <div class="calGridRow">
+          <div class="calDayLbls"><span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span></div>
+          <div class="calMain">
+            <div class="calMonths" style="grid-template-columns:repeat(3,13px)"><span>Jul</span><span>Aug</span><span>Sep</span></div>
+            <div class="cal hot" style="grid-template-columns:repeat(3,13px)">
+              <span class="cd pad"></span><span class="cd l1"></span><span class="cd l2 hotcell"></span>
+              <span class="cd l3"></span><span class="cd l4"></span><span class="cd pad"></span>
+              <span class="cd l2"></span><span class="cd l1"></span><span class="cd l4"></span>
+            </div>
+          </div>
+          <div class="calTotal"><div class="ctNum">2.4k</div><div class="ctLbl">lb</div></div>
+        </div>
+      </div>
+      <button class="fanArrow calArrow" aria-label="Next quarter">›</button>
+    </div>
+    <div class="calLegend">Less<i class="l0"></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i>More</div>
+    <div class="cs-row">
+      ${cell('calTotal.hot', '<div class="calTotal hot"><div class="ctNum">2.4k</div><div class="ctLbl">lb</div></div>')}
+      <div style="position:relative;width:132px;height:70px">${cell('calPop', '<div class="calPop on" style="position:relative;right:auto;top:auto;transform:none;opacity:1"><div class="cpCap">growth this quarter</div></div>')}</div>
+    </div>
+  </div>
+`)}
+
 </div>
 </body>
 </html>

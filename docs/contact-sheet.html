@@ -72,6 +72,17 @@
     --fs-title:20px; --lh-title:26px; --fw-title:700;
     --fs-display:22px; --lh-display:27px; --fw-display:800; --ls-display:-.02em;
     --fs-hero:27px; --lh-hero:31px; --fw-hero:800; --ls-hero:-.02em;
+    /* ---- the one step above hero ----------------------------------------
+       .daytitle is the only rule that may use --fs-giant. It predates the
+       ramp — 731e891 shipped it at 39px, an outlier even by the pre-ramp
+       stylesheet's own ad hoc range (the 8px-27px documented above), so
+       the 27px hero ceiling was measured from a sheet that had already
+       lost .daytitle, not a considered cap on it. Extending the ramp for
+       one deliberate exception is honest; quietly shrinking the number to
+       fit inside it would not be. A second consumer means this stopped
+       being an exception and started being an undocumented second ramp —
+       don't add one without renaming this comment. */
+    --fs-giant:39px; --lh-giant:.96; --fw-giant:800; --ls-giant:-.03em;
     /* ---- glyphs ---------------------------------------------------------
        NOT part of the ramp, and deliberately below its floor. These are
        icons that happen to be characters, sized to the box that holds
@@ -758,6 +769,170 @@
   .bouncyTrack { border:1px solid var(--hair); }
   #moonbtn.on .bouncyTrack, .deloadRow.on .bouncyTrack { border-width:2px; }
   #moonbtn .bouncyThumb, .deloadRow .bouncyThumb { box-shadow:0 2px 6px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.18); }
+
+  /* ====================================================================
+     RECOVERED — the frame, lifted from 731e891 with three documented
+     deviations from the byte-for-byte rule the nine primitives above
+     followed.
+
+     .shell's padding is var(--sp5), not the original var(--sp4) — sp5 is
+     the documented page gutter and sp4 is card padding; the August rule
+     used sp4 because the token ladder hadn't been named yet.
+
+     .wordmark, .railDate and .railStatLbl shipped at 10px, 10.5px and
+     9.5px. All three are below the type ramp's documented 11px floor, so
+     they round up to var(--fs-micro) instead of porting the raw number.
+
+     .railStatVal.lit's text-shadow glow is dropped entirely, matching
+     the box-shadow glow removed everywhere else in this file — see
+     tests/tools/hierarchy.test.ts, "the glow is gone".
+
+     .daytitle keeps its original 39px, formalised as --fs-giant at
+     :root instead of shrunk to fit inside --fs-hero. See the comment on
+     that token for why.
+
+     position:sticky on .rail was verified against the actual host
+     nesting before this section was written, not assumed: the tile is
+     an iframe pinned to a bounded, overflow:hidden stage inside a fixed
+     full-screen overlay (app/app/DashboardGrid.tsx, .openFrame /
+     .openStage in components/veeTiles.css), so the tile's own document
+     owns its scroll and sticky resolves inside it.
+
+     tests/tools/recovered-primitives.test.ts, "the frame came back"
+     onward, holds all four deviations to account.
+     ================================================================= */
+  .shell { width:100%; max-width:600px; margin:0 auto; padding:0 var(--sp5); }
+
+  .trainBar { display:flex; align-items:center; justify-content:space-between; }
+  .wordmark { font-family:var(--mono); font-size:var(--fs-micro); font-weight:700; letter-spacing:.22em; text-transform:uppercase; color:var(--muted); }
+  .wordmark .wmDot { color:var(--hair-strong); margin:0 1px; }
+  .wordmark #sessionNum { color:var(--text); }
+
+  .rail { position:sticky; top:0; z-index:40; display:flex; align-items:center; gap:var(--sp4); padding:calc(10px + env(safe-area-inset-top)) var(--sp5) 10px; background:linear-gradient(180deg, rgba(3,3,4,.92) 60%, rgba(3,3,4,0)); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+  .railDate { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.14em; text-transform:uppercase; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .railDivider { width:1px; height:14px; background:var(--hair-strong); flex:none; }
+  .railStat { display:flex; align-items:baseline; gap:5px; flex:none; }
+  .railStatVal { font-family:var(--mono); font-size:var(--fs-caption); font-weight:600; color:var(--text); letter-spacing:-0.01em; }
+  .railStatVal.lit { color:var(--signal); }
+  .railStatLbl { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.1em; text-transform:uppercase; color:var(--muted-2); }
+  .railSpacer { flex:1; }
+
+  .daydots { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:7px; margin-top:16px; min-height:8px; }
+  .daydots .dd { width:6px; height:6px; border-radius:2px; border:1.5px solid var(--e4); transition:background var(--d2), border-color var(--d2); }
+  .daydots .dd.done { background:var(--signal); border-color:var(--signal); }
+  .daydots .dd.pr { background:var(--gold); border-color:var(--gold); }
+  .daydots .dd.miss { border-color:var(--fail); }
+
+  .daytitle { font-family:var(--sans); font-weight:var(--fw-giant); font-size:var(--fs-giant); line-height:var(--lh-giant); letter-spacing:var(--ls-giant); }
+
+  @media (max-width:480px) {
+    .rail { padding-left:var(--sp4); padding-right:var(--sp4); }
+    .daytitle { font-size:var(--fs-hero); }
+  }
+
+  /* ====================================================================
+     RECOVERED — fan, photos, settings, lifted from 731e891 with the same
+     kind of deviation as the frame: sub-floor and near-miss sizes round
+     to the nearest ramp token (.fanLabel, .fanCard .c, .photoDate,
+     .photoNote, .photoNote.muted), and every size that already equalled
+     a token's value is tokenised too (.fanCount, .fanCard .v,
+     .photoStatus, .settingsNote) — the style-lint gate treats a raw
+     13px the same whether or not it happens to match --fs-caption.
+
+     high/mid/low keep the meaning they carry everywhere else in this
+     file: gold is a record, signal is positive, muted-2 is neutral.
+     Nothing here is a new colour decision.
+
+     tests/tools/recovered-primitives.test.ts, "the fan browser, photos
+     and settings came back", holds this account.
+     ================================================================= */
+  .fanWrap { position:relative; width:100%; height:192px; }
+  .fanStage { position:absolute; inset:0; }
+  .fanCaption { margin-top:16px; text-align:center; min-height:22px; }
+  .fanCaption .capRow { display:flex; align-items:center; justify-content:center; gap:6px; }
+  .fanNav { display:flex; align-items:center; justify-content:center; gap:16px; margin-top:16px; }
+  .fanArrow { width:32px; height:32px; flex:none; border-radius:50%; border:2px solid var(--hair-strong); border-bottom-width:4px; transform-origin:bottom; background:var(--e2); color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:color var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .fanDots { display:flex; align-items:center; gap:5px; }
+  .fanCount { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); font-variant-numeric:tabular-nums; }
+  .fan { fill:none; stroke-width:1.5; stroke-dasharray:2.5 4; pointer-events:none; }
+  .fan.high { stroke:var(--gold); }
+  .fan.mid { stroke:var(--signal); opacity:.82; }
+  .fan.low { stroke:var(--muted-2); }
+  .fanHit { fill:none; stroke:transparent; stroke-width:14; cursor:pointer; }
+  .fanDot { stroke-width:1.6; fill:var(--e1); cursor:pointer; }
+  .fanDot.high { stroke:var(--gold); }
+  .fanDot.mid { stroke:var(--signal); }
+  .fanDot.low { stroke:var(--muted-2); }
+  .fanLabel { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; }
+  .fanLabel.high { fill:var(--gold); }
+  .fanLabel.mid { fill:var(--signal); }
+  .fanLabel.low { fill:var(--muted-2); }
+  .fanCard { position:absolute; z-index:4; pointer-events:none; width:114px; background:var(--e3); border:1px solid var(--hair-strong); border-radius:var(--r-sm); padding:7px 10px; box-shadow:0 14px 30px -14px rgba(0,0,0,.6); opacity:0; }
+  .fanCard.on { opacity:1; }
+  @media (prefers-reduced-motion:no-preference){ .fanCard { transition:opacity var(--d2) var(--ease-out); } }
+  .fanCard .v { font-family:var(--mono); font-weight:700; font-size:var(--fs-caption); font-variant-numeric:tabular-nums; }
+  .fanCard .c { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); margin-top:2px; }
+
+  /* .photoCard already exists — recovered earlier as part of the card
+     primitive (.ex, .miniCard, .ovCard, .chart-card, .photoCard). */
+  .photoImg { width:100%; height:100%; object-fit:cover; display:block; background:var(--e3); }
+  .photoDate { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+  .photoNote { padding:6px 10px 0; font-size:var(--fs-caption); color:var(--text); line-height:1.55; max-width:340px; margin:0 auto; }
+  .photoNote.muted { color:var(--muted); font-size:var(--fs-label); }
+  .photoStatus { text-align:center; font-size:var(--fs-label); color:var(--muted); margin-top:8px; min-height:14px; }
+  .photoBtnRow { display:flex; gap:10px; }
+  .photoBtnRow .addLift { flex:1; }
+
+  .settingsBtn { width:32px; height:32px; flex:none; align-self:center; border-radius:50%; border:2px solid var(--hair-strong); border-bottom-width:4px; transform-origin:bottom; background:var(--e2); color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:color var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .settingsRow { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+  .settingsNote { font-size:var(--fs-label); color:var(--muted); line-height:1.5; margin-top:16px; }
+
+  /* ====================================================================
+     RECOVERED — the calendar, lifted from 731e891 with rounding on
+     three sizes (.calTitle, .ctNum, .calLegend) and one resolved
+     question about a fourth.
+
+     .calTotal .ctLbl used to read two lines — "LB" / "THIS QTR" — which
+     only fit inside the fixed 42px box at the original 7px, below the
+     ramp's readable floor. At --fs-micro (11px) "THIS QTR" ran roughly
+     48-57px wide by character-count arithmetic against a ~40px box: a
+     real overflow, not a close call. The fix was the copy, not the box
+     or the size: "this qtr" was already redundant with .calTitle
+     directly above it (which names the quarter on screen), so it was
+     dropped rather than kept and shrunk. "LB" alone at --fs-micro fits
+     with room to spare — confirmed against the tile's real font stack
+     and the exact 42px box, not estimated. .calTotal's 42px/109px are
+     untouched.
+     ================================================================= */
+  @keyframes calIn { from{ opacity:0; transform:scale(.5); } to{ opacity:1; transform:scale(1); } }
+  .calShell { display:flex; align-items:center; gap:8px; }
+  .calArrow.dis { opacity:.3; pointer-events:none; }
+  .calBody { flex:1; min-width:0; }
+  .calHead { text-align:center; margin-bottom:10px; min-height:14px; }
+  .calTitle { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.04em; color:var(--muted); }
+  .calTitle .hv { color:var(--signal); font-weight:700; }
+  .calGridRow { display:flex; align-items:flex-start; justify-content:center; gap:7px; }
+  .calDayLbls { display:grid; grid-template-rows:repeat(7,13px); gap:3px; margin-top:17px; flex:none; }
+  .calMain { flex:none; }
+  .calMonths { display:grid; gap:3px; margin-bottom:4px; height:12px; }
+  .cal { display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,13px); gap:3px; }
+  .cal .cd { width:13px; height:13px; border-radius:50%; background:var(--e2); border:1px solid var(--hair); cursor:default; animation:calIn .3s var(--ease-out) backwards; transition:opacity var(--d2) var(--ease-out), transform var(--d1) var(--spring); }
+  .cal .cd.pad { background:transparent; border-color:transparent; animation:none; }
+  .cal .cd.l1 { background:color-mix(in srgb, var(--signal) 26%, var(--e2)); border-color:transparent; }
+  .cal .cd.l2 { background:color-mix(in srgb, var(--signal) 50%, var(--e2)); border-color:transparent; }
+  .cal .cd.l3 { background:color-mix(in srgb, var(--signal) 74%, var(--e2)); border-color:transparent; }
+  .cal .cd.l4 { background:var(--signal); border-color:var(--signal); }
+  .cal.hot .cd:not(.hotcell) { opacity:.32; }
+  .cal.hot .cd.hotcell { opacity:1; transform:scale(1.2); }
+  .calTotal { position:relative; flex:none; width:42px; height:109px; border-radius:8px; background:var(--e2); border:1px solid var(--hair-strong); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; margin-top:17px; transition:border-color var(--d2) var(--ease-out), background var(--d2) var(--ease-out); }
+  .calTotal.hot { border-color:color-mix(in srgb, var(--signal) 55%, black); background:rgba(110,231,183,.08); }
+  .calTotal .ctNum { font-family:var(--mono); font-weight:700; font-size:var(--fs-caption); color:var(--signal); }
+  .calTotal .ctLbl { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.05em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:1.3; }
+  .calPop { position:absolute; right:calc(100% + 8px); top:50%; transform:translateY(-50%) scale(.94); z-index:5; width:132px; background:var(--e3); border:1px solid var(--hair-strong); border-radius:var(--r-sm); padding:9px 10px 8px; opacity:0; pointer-events:none; transition:opacity var(--d2) var(--ease-out), transform var(--d2) var(--ease-out); box-shadow:0 14px 30px -14px rgba(0,0,0,.6); }
+  .calPop.on { opacity:1; transform:translateY(-50%) scale(1); }
+  .calPop .cpCap { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); margin-bottom:6px; }
+  .calLegend { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); }
+  @media (prefers-reduced-motion:reduce){ .cal .cd { animation:none; } }
 </style>
 <style>
   .cs-page { max-width:1100px; margin:0 auto; padding:32px 20px 120px; }
@@ -1031,6 +1206,78 @@
     <div class="cs-cell"><div class="cs-lbl">verdict-reduced_intensity</div><div class="readinessNote verdict-reduced_intensity">Hard conditioning yesterday — same sets, 10% off the bar.</div></div>
     <div class="cs-cell"><div class="cs-lbl">weeklyReview</div><div class="weeklyReview"><div class="wrHead">This week</div><div class="wrLine">Four sessions, 28,400 lb, two personal records.</div><div class="wrLine mu">chest 26 sets (over band) · quads 4 sets (under band)</div><div class="wrLine mu">Quiet: hamstrings, calves</div></div></div>
     <div class="cs-cell"><div class="cs-lbl">muscle bands</div><div class="muscleBars"><div class="mbRow"><span class="mbLbl">chest</span><span class="mbTrack"><span class="mbFill band-over" style="width:88%"></span></span><span class="mbVal">26</span></div><div class="mbRow"><span class="mbLbl">back</span><span class="mbTrack"><span class="mbFill ok band-in" style="width:62%"></span></span><span class="mbVal">18</span></div><div class="mbRow"><span class="mbLbl">quads</span><span class="mbTrack"><span class="mbFill band-under" style="width:14%"></span></span><span class="mbVal">4</span></div></div></div>
+  </div>
+</section>
+
+<section class="cs-sec" id="frame"><h2>14 · The frame</h2><p class="cs-note">Recovered from 731e891 with documented deviations — see the comment block above .shell in the tile stylesheet. rail is shown at rest; its position:sticky only shows itself against a real scrolling page.</p>
+  <div class="cs-stack">
+    <div class="cs-cell"><div class="cs-lbl">shell</div><div class="shell" style="background:var(--e1);border:1px dashed var(--hair-strong)">page content lives here, max 600px, var(--sp5) gutter</div></div>
+    <div class="cs-cell"><div class="cs-lbl">trainBar + wordmark</div><div class="trainBar"><span class="wordmark">TRAIN<span class="wmDot"> · </span><span id="sessionNum">Session 214</span></span></div></div>
+  </div>
+  <div class="cs-grid" style="margin-top:18px">
+    <div class="cs-cell"><div class="cs-lbl">rail</div><div class="rail" style="position:relative"><span class="railDate">TUE SEP 22</span><span class="railSpacer"></span>
+      <span class="railStat"><span class="railStatVal">4</span><span class="railStatLbl">sets</span></span>
+      <span class="railDivider"></span>
+      <span class="railStat"><span class="railStatVal lit">1,240</span><span class="railStatLbl">lb</span></span>
+    </div></div>
+    <div class="cs-cell"><div class="cs-lbl">daydots</div><div class="daydots"><span class="dd done"></span><span class="dd done"></span><span class="dd pr"></span><span class="dd miss"></span><span class="dd"></span><span class="dd"></span><span class="dd"></span></div></div>
+    <div class="cs-cell"><div class="cs-lbl">daytitle</div><div class="daytitle">Day 214</div></div>
+  </div>
+</section>
+
+<section class="cs-sec" id="fan"><h2>15 · Fan browser</h2><p class="cs-note">Two unrelated surfaces share the fan- prefix: a paginated photo stepper (fanWrap/fanNav/fanArrow/fanDots/fanCount) and an SVG line-and-dot chart with a hover tooltip (fan/fanHit/fanDot/fanLabel/fanCard). Colours reuse --gold/--signal/--muted-2 for high/mid/low, the same meaning they carry everywhere else.</p>
+  <div class="cs-stack">
+    <div class="cs-cell"><div class="cs-lbl">photo stepper</div><div class="fanWrap" style="height:auto"><div class="fanStage" style="position:relative;height:0"></div><div class="fanCaption"><div class="capRow"><span class="photoDate">SEP 22</span></div></div><div class="fanNav"><button class="fanArrow" aria-label="Previous">‹</button><div class="fanDots"><span class="fanCount">3 / 12</span></div><button class="fanArrow" aria-label="Next">›</button></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">SVG line + dots + labels</div><svg width="220" height="90" viewBox="0 0 220 90"><path class="fanHit" d="M10 70 L110 30 L210 50"/><path class="fan high" d="M10 70 L110 30 L210 50"/><circle class="fanDot high" cx="10" cy="70" r="3.4"/><circle class="fanDot mid" cx="110" cy="30" r="3.4"/><circle class="fanDot low" cx="210" cy="50" r="3.4"/><text class="fanLabel high" x="17" y="73">225</text><text class="fanLabel mid" x="117" y="33">245</text><text class="fanLabel low" x="217" y="53">210</text></svg></div>
+    <div class="cs-cell"><div class="cs-lbl">fanCard tooltip</div><div class="fanCard on" style="position:relative;opacity:1"><div class="v">245 lb</div><div class="c">Feb 14</div></div></div>
+  </div>
+</section>
+
+<section class="cs-sec" id="photos"><h2>16 · Progress photos</h2><p class="cs-note">.photoCard already exists — recovered earlier with the card primitive. These are the pieces added since.</p>
+  <div class="cs-grid">
+    <div class="cs-cell"><div class="cs-lbl">photoImg (pending)</div><div class="photoImg photoImg--pending skeleton-shimmer" style="position:relative;width:88px;height:124px;border-radius:var(--r-sm)"></div></div>
+    <div class="cs-cell"><div class="cs-lbl">capRow: photoDate</div><div class="capRow"><span class="photoDate">SEP 22</span></div></div>
+    <div class="cs-cell"><div class="cs-lbl">photoNote</div><p class="photoNote">Good lighting, same angle as last time.</p></div>
+    <div class="cs-cell"><div class="cs-lbl">photoNote muted</div><p class="photoNote muted">No analysis available for this one.</p></div>
+    <div class="cs-cell"><div class="cs-lbl">photoStatus</div><div class="photoStatus">Saved</div></div>
+    <div class="cs-cell"><div class="cs-lbl">photoBtnRow</div><div class="photoBtnRow"><button class="pbtn ghost">Skip</button><button class="pbtn save addLift">Save photo</button></div></div>
+  </div>
+</section>
+
+<section class="cs-sec" id="settings"><h2>17 · Settings row</h2><p class="cs-note">settingsBtn opens the popup; settingsRow and settingsNote are used repeatedly inside it.</p>
+  <div class="cs-stack">
+    <div class="cs-cell"><div class="cs-lbl">settingsBtn</div><button class="settingsBtn" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/></svg></button></div>
+    <div class="cs-cell"><div class="cs-lbl">settingsRow</div><div class="settingsRow"><span class="bouncyLabel on">Target</span><div class="stepper"><button class="step minus" data-t="-1">−</button><span class="stepVal">4</span><button class="step" data-t="1">+</button></div></div></div>
+    <div class="cs-cell"><div class="cs-lbl">settingsNote</div><p class="settingsNote">Pull-ups, dips and push-ups move a known share of you, so this is what turns them into real volume.</p></div>
+  </div>
+</section>
+
+<section class="cs-sec" id="calendar"><h2>18 · The calendar</h2><p class="cs-note">Rounded per tests/tools/recovered-primitives.test.ts, "the calendar came back". .ctLbl used to read two lines ("LB" / "THIS QTR") that only fit the 42px box at a below-floor 7px — the second line was dropped as redundant with .calTitle above it, rather than the box resized or the text shrunk back down.</p>
+  <div class="cs-stack">
+    <div class="calShell">
+      <button class="fanArrow calArrow dis" aria-label="Previous quarter" disabled>‹</button>
+      <div class="calBody">
+        <div class="calHead"><span class="calTitle">Q3 2026 <b class="hv">· Jul–Sep</b></span></div>
+        <div class="calGridRow">
+          <div class="calDayLbls"><span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span></div>
+          <div class="calMain">
+            <div class="calMonths" style="grid-template-columns:repeat(3,13px)"><span>Jul</span><span>Aug</span><span>Sep</span></div>
+            <div class="cal hot" style="grid-template-columns:repeat(3,13px)">
+              <span class="cd pad"></span><span class="cd l1"></span><span class="cd l2 hotcell"></span>
+              <span class="cd l3"></span><span class="cd l4"></span><span class="cd pad"></span>
+              <span class="cd l2"></span><span class="cd l1"></span><span class="cd l4"></span>
+            </div>
+          </div>
+          <div class="calTotal"><div class="ctNum">2.4k</div><div class="ctLbl">lb</div></div>
+        </div>
+      </div>
+      <button class="fanArrow calArrow" aria-label="Next quarter">›</button>
+    </div>
+    <div class="calLegend">Less<i class="l0"></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i>More</div>
+    <div class="cs-row">
+      <div class="cs-cell"><div class="cs-lbl">calTotal.hot</div><div class="calTotal hot"><div class="ctNum">2.4k</div><div class="ctLbl">lb</div></div></div>
+      <div style="position:relative;width:132px;height:70px"><div class="cs-cell"><div class="cs-lbl">calPop</div><div class="calPop on" style="position:relative;right:auto;top:auto;transform:none;opacity:1"><div class="cpCap">growth this quarter</div></div></div></div>
+    </div>
   </div>
 </section>
 

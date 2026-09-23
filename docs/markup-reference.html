@@ -81,6 +81,17 @@
     --fs-title:20px; --lh-title:26px; --fw-title:700;
     --fs-display:22px; --lh-display:27px; --fw-display:800; --ls-display:-.02em;
     --fs-hero:27px; --lh-hero:31px; --fw-hero:800; --ls-hero:-.02em;
+    /* ---- the one step above hero ----------------------------------------
+       .daytitle is the only rule that may use --fs-giant. It predates the
+       ramp — 731e891 shipped it at 39px, an outlier even by the pre-ramp
+       stylesheet's own ad hoc range (the 8px-27px documented above), so
+       the 27px hero ceiling was measured from a sheet that had already
+       lost .daytitle, not a considered cap on it. Extending the ramp for
+       one deliberate exception is honest; quietly shrinking the number to
+       fit inside it would not be. A second consumer means this stopped
+       being an exception and started being an undocumented second ramp —
+       don't add one without renaming this comment. */
+    --fs-giant:39px; --lh-giant:.96; --fw-giant:800; --ls-giant:-.03em;
     /* ---- glyphs ---------------------------------------------------------
        NOT part of the ramp, and deliberately below its floor. These are
        icons that happen to be characters, sized to the box that holds
@@ -767,6 +778,170 @@
   .bouncyTrack { border:1px solid var(--hair); }
   #moonbtn.on .bouncyTrack, .deloadRow.on .bouncyTrack { border-width:2px; }
   #moonbtn .bouncyThumb, .deloadRow .bouncyThumb { box-shadow:0 2px 6px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.18); }
+
+  /* ====================================================================
+     RECOVERED — the frame, lifted from 731e891 with three documented
+     deviations from the byte-for-byte rule the nine primitives above
+     followed.
+
+     .shell's padding is var(--sp5), not the original var(--sp4) — sp5 is
+     the documented page gutter and sp4 is card padding; the August rule
+     used sp4 because the token ladder hadn't been named yet.
+
+     .wordmark, .railDate and .railStatLbl shipped at 10px, 10.5px and
+     9.5px. All three are below the type ramp's documented 11px floor, so
+     they round up to var(--fs-micro) instead of porting the raw number.
+
+     .railStatVal.lit's text-shadow glow is dropped entirely, matching
+     the box-shadow glow removed everywhere else in this file — see
+     tests/tools/hierarchy.test.ts, "the glow is gone".
+
+     .daytitle keeps its original 39px, formalised as --fs-giant at
+     :root instead of shrunk to fit inside --fs-hero. See the comment on
+     that token for why.
+
+     position:sticky on .rail was verified against the actual host
+     nesting before this section was written, not assumed: the tile is
+     an iframe pinned to a bounded, overflow:hidden stage inside a fixed
+     full-screen overlay (app/app/DashboardGrid.tsx, .openFrame /
+     .openStage in components/veeTiles.css), so the tile's own document
+     owns its scroll and sticky resolves inside it.
+
+     tests/tools/recovered-primitives.test.ts, "the frame came back"
+     onward, holds all four deviations to account.
+     ================================================================= */
+  .shell { width:100%; max-width:600px; margin:0 auto; padding:0 var(--sp5); }
+
+  .trainBar { display:flex; align-items:center; justify-content:space-between; }
+  .wordmark { font-family:var(--mono); font-size:var(--fs-micro); font-weight:700; letter-spacing:.22em; text-transform:uppercase; color:var(--muted); }
+  .wordmark .wmDot { color:var(--hair-strong); margin:0 1px; }
+  .wordmark #sessionNum { color:var(--text); }
+
+  .rail { position:sticky; top:0; z-index:40; display:flex; align-items:center; gap:var(--sp4); padding:calc(10px + env(safe-area-inset-top)) var(--sp5) 10px; background:linear-gradient(180deg, rgba(3,3,4,.92) 60%, rgba(3,3,4,0)); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+  .railDate { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.14em; text-transform:uppercase; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .railDivider { width:1px; height:14px; background:var(--hair-strong); flex:none; }
+  .railStat { display:flex; align-items:baseline; gap:5px; flex:none; }
+  .railStatVal { font-family:var(--mono); font-size:var(--fs-caption); font-weight:600; color:var(--text); letter-spacing:-0.01em; }
+  .railStatVal.lit { color:var(--signal); }
+  .railStatLbl { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.1em; text-transform:uppercase; color:var(--muted-2); }
+  .railSpacer { flex:1; }
+
+  .daydots { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:7px; margin-top:16px; min-height:8px; }
+  .daydots .dd { width:6px; height:6px; border-radius:2px; border:1.5px solid var(--e4); transition:background var(--d2), border-color var(--d2); }
+  .daydots .dd.done { background:var(--signal); border-color:var(--signal); }
+  .daydots .dd.pr { background:var(--gold); border-color:var(--gold); }
+  .daydots .dd.miss { border-color:var(--fail); }
+
+  .daytitle { font-family:var(--sans); font-weight:var(--fw-giant); font-size:var(--fs-giant); line-height:var(--lh-giant); letter-spacing:var(--ls-giant); }
+
+  @media (max-width:480px) {
+    .rail { padding-left:var(--sp4); padding-right:var(--sp4); }
+    .daytitle { font-size:var(--fs-hero); }
+  }
+
+  /* ====================================================================
+     RECOVERED — fan, photos, settings, lifted from 731e891 with the same
+     kind of deviation as the frame: sub-floor and near-miss sizes round
+     to the nearest ramp token (.fanLabel, .fanCard .c, .photoDate,
+     .photoNote, .photoNote.muted), and every size that already equalled
+     a token's value is tokenised too (.fanCount, .fanCard .v,
+     .photoStatus, .settingsNote) — the style-lint gate treats a raw
+     13px the same whether or not it happens to match --fs-caption.
+
+     high/mid/low keep the meaning they carry everywhere else in this
+     file: gold is a record, signal is positive, muted-2 is neutral.
+     Nothing here is a new colour decision.
+
+     tests/tools/recovered-primitives.test.ts, "the fan browser, photos
+     and settings came back", holds this account.
+     ================================================================= */
+  .fanWrap { position:relative; width:100%; height:192px; }
+  .fanStage { position:absolute; inset:0; }
+  .fanCaption { margin-top:16px; text-align:center; min-height:22px; }
+  .fanCaption .capRow { display:flex; align-items:center; justify-content:center; gap:6px; }
+  .fanNav { display:flex; align-items:center; justify-content:center; gap:16px; margin-top:16px; }
+  .fanArrow { width:32px; height:32px; flex:none; border-radius:50%; border:2px solid var(--hair-strong); border-bottom-width:4px; transform-origin:bottom; background:var(--e2); color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:color var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .fanDots { display:flex; align-items:center; gap:5px; }
+  .fanCount { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); font-variant-numeric:tabular-nums; }
+  .fan { fill:none; stroke-width:1.5; stroke-dasharray:2.5 4; pointer-events:none; }
+  .fan.high { stroke:var(--gold); }
+  .fan.mid { stroke:var(--signal); opacity:.82; }
+  .fan.low { stroke:var(--muted-2); }
+  .fanHit { fill:none; stroke:transparent; stroke-width:14; cursor:pointer; }
+  .fanDot { stroke-width:1.6; fill:var(--e1); cursor:pointer; }
+  .fanDot.high { stroke:var(--gold); }
+  .fanDot.mid { stroke:var(--signal); }
+  .fanDot.low { stroke:var(--muted-2); }
+  .fanLabel { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; }
+  .fanLabel.high { fill:var(--gold); }
+  .fanLabel.mid { fill:var(--signal); }
+  .fanLabel.low { fill:var(--muted-2); }
+  .fanCard { position:absolute; z-index:4; pointer-events:none; width:114px; background:var(--e3); border:1px solid var(--hair-strong); border-radius:var(--r-sm); padding:7px 10px; box-shadow:0 14px 30px -14px rgba(0,0,0,.6); opacity:0; }
+  .fanCard.on { opacity:1; }
+  @media (prefers-reduced-motion:no-preference){ .fanCard { transition:opacity var(--d2) var(--ease-out); } }
+  .fanCard .v { font-family:var(--mono); font-weight:700; font-size:var(--fs-caption); font-variant-numeric:tabular-nums; }
+  .fanCard .c { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); margin-top:2px; }
+
+  /* .photoCard already exists — recovered earlier as part of the card
+     primitive (.ex, .miniCard, .ovCard, .chart-card, .photoCard). */
+  .photoImg { width:100%; height:100%; object-fit:cover; display:block; background:var(--e3); }
+  .photoDate { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+  .photoNote { padding:6px 10px 0; font-size:var(--fs-caption); color:var(--text); line-height:1.55; max-width:340px; margin:0 auto; }
+  .photoNote.muted { color:var(--muted); font-size:var(--fs-label); }
+  .photoStatus { text-align:center; font-size:var(--fs-label); color:var(--muted); margin-top:8px; min-height:14px; }
+  .photoBtnRow { display:flex; gap:10px; }
+  .photoBtnRow .addLift { flex:1; }
+
+  .settingsBtn { width:32px; height:32px; flex:none; align-self:center; border-radius:50%; border:2px solid var(--hair-strong); border-bottom-width:4px; transform-origin:bottom; background:var(--e2); color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:color var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .settingsRow { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+  .settingsNote { font-size:var(--fs-label); color:var(--muted); line-height:1.5; margin-top:16px; }
+
+  /* ====================================================================
+     RECOVERED — the calendar, lifted from 731e891 with rounding on
+     three sizes (.calTitle, .ctNum, .calLegend) and one resolved
+     question about a fourth.
+
+     .calTotal .ctLbl used to read two lines — "LB" / "THIS QTR" — which
+     only fit inside the fixed 42px box at the original 7px, below the
+     ramp's readable floor. At --fs-micro (11px) "THIS QTR" ran roughly
+     48-57px wide by character-count arithmetic against a ~40px box: a
+     real overflow, not a close call. The fix was the copy, not the box
+     or the size: "this qtr" was already redundant with .calTitle
+     directly above it (which names the quarter on screen), so it was
+     dropped rather than kept and shrunk. "LB" alone at --fs-micro fits
+     with room to spare — confirmed against the tile's real font stack
+     and the exact 42px box, not estimated. .calTotal's 42px/109px are
+     untouched.
+     ================================================================= */
+  @keyframes calIn { from{ opacity:0; transform:scale(.5); } to{ opacity:1; transform:scale(1); } }
+  .calShell { display:flex; align-items:center; gap:8px; }
+  .calArrow.dis { opacity:.3; pointer-events:none; }
+  .calBody { flex:1; min-width:0; }
+  .calHead { text-align:center; margin-bottom:10px; min-height:14px; }
+  .calTitle { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.04em; color:var(--muted); }
+  .calTitle .hv { color:var(--signal); font-weight:700; }
+  .calGridRow { display:flex; align-items:flex-start; justify-content:center; gap:7px; }
+  .calDayLbls { display:grid; grid-template-rows:repeat(7,13px); gap:3px; margin-top:17px; flex:none; }
+  .calMain { flex:none; }
+  .calMonths { display:grid; gap:3px; margin-bottom:4px; height:12px; }
+  .cal { display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,13px); gap:3px; }
+  .cal .cd { width:13px; height:13px; border-radius:50%; background:var(--e2); border:1px solid var(--hair); cursor:default; animation:calIn .3s var(--ease-out) backwards; transition:opacity var(--d2) var(--ease-out), transform var(--d1) var(--spring); }
+  .cal .cd.pad { background:transparent; border-color:transparent; animation:none; }
+  .cal .cd.l1 { background:color-mix(in srgb, var(--signal) 26%, var(--e2)); border-color:transparent; }
+  .cal .cd.l2 { background:color-mix(in srgb, var(--signal) 50%, var(--e2)); border-color:transparent; }
+  .cal .cd.l3 { background:color-mix(in srgb, var(--signal) 74%, var(--e2)); border-color:transparent; }
+  .cal .cd.l4 { background:var(--signal); border-color:var(--signal); }
+  .cal.hot .cd:not(.hotcell) { opacity:.32; }
+  .cal.hot .cd.hotcell { opacity:1; transform:scale(1.2); }
+  .calTotal { position:relative; flex:none; width:42px; height:109px; border-radius:8px; background:var(--e2); border:1px solid var(--hair-strong); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; margin-top:17px; transition:border-color var(--d2) var(--ease-out), background var(--d2) var(--ease-out); }
+  .calTotal.hot { border-color:color-mix(in srgb, var(--signal) 55%, black); background:rgba(110,231,183,.08); }
+  .calTotal .ctNum { font-family:var(--mono); font-weight:700; font-size:var(--fs-caption); color:var(--signal); }
+  .calTotal .ctLbl { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.05em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:1.3; }
+  .calPop { position:absolute; right:calc(100% + 8px); top:50%; transform:translateY(-50%) scale(.94); z-index:5; width:132px; background:var(--e3); border:1px solid var(--hair-strong); border-radius:var(--r-sm); padding:9px 10px 8px; opacity:0; pointer-events:none; transition:opacity var(--d2) var(--ease-out), transform var(--d2) var(--ease-out); box-shadow:0 14px 30px -14px rgba(0,0,0,.6); }
+  .calPop.on { opacity:1; transform:translateY(-50%) scale(1); }
+  .calPop .cpCap { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); margin-bottom:6px; }
+  .calLegend { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); }
+  @media (prefers-reduced-motion:reduce){ .cal .cd { animation:none; } }
 </style>
 <style>
   body { margin:0; background:var(--e0); color:var(--text); font-family:var(--sans); }
@@ -2546,7 +2721,7 @@
   <p class="mr-when">Always, above the sheet.</p>
   <div class="mr-live">
 <div class="rail" id="statusRail">
-  <div class="railDate" id="railDate">Tuesday, Sep 22</div>
+  <div class="railDate" id="railDate">Wednesday, Sep 23</div>
   <div class="railSpacer"></div>
   <div class="railStat">
     <span class="railStatVal num" id="railStreak" data-val="0">0</span>
@@ -2560,7 +2735,7 @@
 </div>
   </div>
   <details class="mr-src"><summary>markup</summary><pre>&lt;div class="rail" id="statusRail"&gt;
-  &lt;div class="railDate" id="railDate"&gt;Tuesday, Sep 22&lt;/div&gt;
+  &lt;div class="railDate" id="railDate"&gt;Wednesday, Sep 23&lt;/div&gt;
   &lt;div class="railSpacer"&gt;&lt;/div&gt;
   &lt;div class="railStat"&gt;
     &lt;span class="railStatVal num" id="railStreak" data-val="0"&gt;0&lt;/span&gt;
@@ -2701,33 +2876,6 @@
       </svg>
     </button>
   </div>
-  <div class="secLbl">Theme</div>
-  <div class="settingsRow">
-    <span class="bouncyLabel on">Dark</span>
-    <label class="theme-switch skyToggle">
-      <input type="checkbox" class="theme-switch__checkbox" checked="" />
-      <div class="theme-switch__container">
-        <div class="theme-switch__clouds"></div>
-        <div class="theme-switch__stars-container">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 55" fill="none">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M135.831 3.00688C135.055 3.85027 134.111 4.29946 133 4.35447C134.111 4.40947 135.055 4.85867 135.831 5.71123C136.607 6.55462 136.996 7.56303 136.996 8.72727C136.996 7.95722 137.172 7.25134 137.525 6.59129C137.886 5.93124 138.372 5.39954 138.98 5.00535C139.598 4.60199 140.268 4.39114 141 4.35447C139.88 4.2903 138.936 3.85027 138.16 3.00688C137.384 2.16348 136.996 1.16425 136.996 0C136.996 1.16425 136.607 2.16348 135.831 3.00688ZM31 23.3545C32.1114 23.2995 33.0551 22.8503 33.8313 22.0069C34.6075 21.1635 34.9956 20.1642 34.9956 19C34.9956 20.1642 35.3837 21.1635 36.1599 22.0069C36.9361 22.8503 37.8798 23.2903 39 23.3545C38.2679 23.3911 37.5976 23.602 36.9802 24.0053C36.3716 24.3995 35.8864 24.9312 35.5248 25.5913C35.172 26.2513 34.9956 26.9572 34.9956 27.7273C34.9956 26.563 34.6075 25.5546 33.8313 24.7112C33.0551 23.8587 32.1114 23.4095 31 23.3545ZM0 36.3545C1.11136 36.2995 2.05513 35.8503 2.83131 35.0069C3.6075 34.1635 3.99559 33.1642 3.99559 32C3.99559 33.1642 4.38368 34.1635 5.15987 35.0069C5.93605 35.8503 6.87982 36.2903 8 36.3545C7.26792 36.3911 6.59757 36.602 5.98015 37.0053C5.37155 37.3995 4.88644 37.9312 4.52481 38.5913C4.172 39.2513 3.99559 39.9572 3.99559 40.7273C3.99559 39.563 3.6075 38.5546 2.83131 37.7112C2.05513 36.8587 1.11136 36.4095 0 36.3545ZM56.8313 24.0069C56.0551 24.8503 55.1114 25.2995 54 25.3545C55.1114 25.4095 56.0551 25.8587 56.8313 26.7112C57.6075 27.5546 57.9956 28.563 57.9956 29.7273C57.9956 28.9572 58.172 28.2513 58.5248 27.5913C58.8864 26.9312 59.3716 26.3995 59.9802 26.0053C60.5976 25.602 61.2679 25.3911 62 25.3545C60.8798 25.2903 59.9361 24.8503 59.1599 24.0069C58.3837 23.1635 57.9956 22.1642 57.9956 21C57.9956 22.1642 57.6075 23.1635 56.8313 24.0069ZM81 25.3545C82.1114 25.2995 83.0551 24.8503 83.8313 24.0069C84.6075 23.1635 84.9956 22.1642 84.9956 21C84.9956 22.1642 85.3837 23.1635 86.1599 24.0069C86.9361 24.8503 87.8798 25.2903 89 25.3545C88.2679 25.3911 87.5976 25.602 86.9802 26.0053C86.3716 26.3995 85.8864 26.9312 85.5248 27.5913C85.172 28.2513 84.9956 28.9572 84.9956 29.7273C84.9956 28.563 84.6075 27.5546 83.8313 26.7112C83.0551 25.8587 82.1114 25.4095 81 25.3545ZM136 36.3545C137.111 36.2995 138.055 35.8503 138.831 35.0069C139.607 34.1635 139.996 33.1642 139.996 32C139.996 33.1642 140.384 34.1635 141.16 35.0069C141.936 35.8503 142.88 36.2903 144 36.3545C143.268 36.3911 142.598 36.602 141.98 37.0053C141.372 37.3995 140.886 37.9312 140.525 38.5913C140.172 39.2513 139.996 39.9572 139.996 40.7273C139.996 39.563 139.607 38.5546 138.831 37.7112C138.055 36.8587 137.111 36.4095 136 36.3545ZM101.831 49.0069C101.055 49.8503 100.111 50.2995 99 50.3545C100.111 50.4095 101.055 50.8587 101.831 51.7112C102.607 52.5546 102.996 53.563 102.996 54.7273C102.996 53.9572 103.172 53.2513 103.525 52.5913C103.886 51.9312 104.372 51.3995 104.98 51.0053C105.598 50.602 106.268 50.3911 107 50.3545C105.88 50.2903 104.936 49.8503 104.16 49.0069C103.384 48.1635 102.996 47.1642 102.996 46C102.996 47.1642 102.607 48.1635 101.831 49.0069Z" fill="currentColor"></path>
-          </svg>
-        </div>
-        <div class="theme-switch__circle-container">
-          <div class="theme-switch__sun-moon-container">
-            <div class="theme-switch__moon">
-              <div class="theme-switch__spot"></div>
-              <div class="theme-switch__spot"></div>
-              <div class="theme-switch__spot"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </label>
-  </div>
-  <p class="settingsNote">
-    Just a preview for now — not wired to a real light mode yet.
-  </p>
   <div class="secLbl">Bodyweight</div>
   <p class="settingsNote" id="bwNote">Currently 178 lb, 1 reading(s) on record.</p>
   <div class="searchRow">
@@ -2816,33 +2964,6 @@
       &lt;/svg&gt;
     &lt;/button&gt;
   &lt;/div&gt;
-  &lt;div class="secLbl"&gt;Theme&lt;/div&gt;
-  &lt;div class="settingsRow"&gt;
-    &lt;span class="bouncyLabel on"&gt;Dark&lt;/span&gt;
-    &lt;label class="theme-switch skyToggle"&gt;
-      &lt;input type="checkbox" class="theme-switch__checkbox" checked="" /&gt;
-      &lt;div class="theme-switch__container"&gt;
-        &lt;div class="theme-switch__clouds"&gt;&lt;/div&gt;
-        &lt;div class="theme-switch__stars-container"&gt;
-          &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 55" fill="none"&gt;
-            &lt;path fill-rule="evenodd" clip-rule="evenodd" d="M135.831 3.00688C135.055 3.85027 134.111 4.29946 133 4.35447C134.111 4.40947 135.055 4.85867 135.831 5.71123C136.607 6.55462 136.996 7.56303 136.996 8.72727C136.996 7.95722 137.172 7.25134 137.525 6.59129C137.886 5.93124 138.372 5.39954 138.98 5.00535C139.598 4.60199 140.268 4.39114 141 4.35447C139.88 4.2903 138.936 3.85027 138.16 3.00688C137.384 2.16348 136.996 1.16425 136.996 0C136.996 1.16425 136.607 2.16348 135.831 3.00688ZM31 23.3545C32.1114 23.2995 33.0551 22.8503 33.8313 22.0069C34.6075 21.1635 34.9956 20.1642 34.9956 19C34.9956 20.1642 35.3837 21.1635 36.1599 22.0069C36.9361 22.8503 37.8798 23.2903 39 23.3545C38.2679 23.3911 37.5976 23.602 36.9802 24.0053C36.3716 24.3995 35.8864 24.9312 35.5248 25.5913C35.172 26.2513 34.9956 26.9572 34.9956 27.7273C34.9956 26.563 34.6075 25.5546 33.8313 24.7112C33.0551 23.8587 32.1114 23.4095 31 23.3545ZM0 36.3545C1.11136 36.2995 2.05513 35.8503 2.83131 35.0069C3.6075 34.1635 3.99559 33.1642 3.99559 32C3.99559 33.1642 4.38368 34.1635 5.15987 35.0069C5.93605 35.8503 6.87982 36.2903 8 36.3545C7.26792 36.3911 6.59757 36.602 5.98015 37.0053C5.37155 37.3995 4.88644 37.9312 4.52481 38.5913C4.172 39.2513 3.99559 39.9572 3.99559 40.7273C3.99559 39.563 3.6075 38.5546 2.83131 37.7112C2.05513 36.8587 1.11136 36.4095 0 36.3545ZM56.8313 24.0069C56.0551 24.8503 55.1114 25.2995 54 25.3545C55.1114 25.4095 56.0551 25.8587 56.8313 26.7112C57.6075 27.5546 57.9956 28.563 57.9956 29.7273C57.9956 28.9572 58.172 28.2513 58.5248 27.5913C58.8864 26.9312 59.3716 26.3995 59.9802 26.0053C60.5976 25.602 61.2679 25.3911 62 25.3545C60.8798 25.2903 59.9361 24.8503 59.1599 24.0069C58.3837 23.1635 57.9956 22.1642 57.9956 21C57.9956 22.1642 57.6075 23.1635 56.8313 24.0069ZM81 25.3545C82.1114 25.2995 83.0551 24.8503 83.8313 24.0069C84.6075 23.1635 84.9956 22.1642 84.9956 21C84.9956 22.1642 85.3837 23.1635 86.1599 24.0069C86.9361 24.8503 87.8798 25.2903 89 25.3545C88.2679 25.3911 87.5976 25.602 86.9802 26.0053C86.3716 26.3995 85.8864 26.9312 85.5248 27.5913C85.172 28.2513 84.9956 28.9572 84.9956 29.7273C84.9956 28.563 84.6075 27.5546 83.8313 26.7112C83.0551 25.8587 82.1114 25.4095 81 25.3545ZM136 36.3545C137.111 36.2995 138.055 35.8503 138.831 35.0069C139.607 34.1635 139.996 33.1642 139.996 32C139.996 33.1642 140.384 34.1635 141.16 35.0069C141.936 35.8503 142.88 36.2903 144 36.3545C143.268 36.3911 142.598 36.602 141.98 37.0053C141.372 37.3995 140.886 37.9312 140.525 38.5913C140.172 39.2513 139.996 39.9572 139.996 40.7273C139.996 39.563 139.607 38.5546 138.831 37.7112C138.055 36.8587 137.111 36.4095 136 36.3545ZM101.831 49.0069C101.055 49.8503 100.111 50.2995 99 50.3545C100.111 50.4095 101.055 50.8587 101.831 51.7112C102.607 52.5546 102.996 53.563 102.996 54.7273C102.996 53.9572 103.172 53.2513 103.525 52.5913C103.886 51.9312 104.372 51.3995 104.98 51.0053C105.598 50.602 106.268 50.3911 107 50.3545C105.88 50.2903 104.936 49.8503 104.16 49.0069C103.384 48.1635 102.996 47.1642 102.996 46C102.996 47.1642 102.607 48.1635 101.831 49.0069Z" fill="currentColor"&gt;&lt;/path&gt;
-          &lt;/svg&gt;
-        &lt;/div&gt;
-        &lt;div class="theme-switch__circle-container"&gt;
-          &lt;div class="theme-switch__sun-moon-container"&gt;
-            &lt;div class="theme-switch__moon"&gt;
-              &lt;div class="theme-switch__spot"&gt;&lt;/div&gt;
-              &lt;div class="theme-switch__spot"&gt;&lt;/div&gt;
-              &lt;div class="theme-switch__spot"&gt;&lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/label&gt;
-  &lt;/div&gt;
-  &lt;p class="settingsNote"&gt;
-    Just a preview for now — not wired to a real light mode yet.
-  &lt;/p&gt;
   &lt;div class="secLbl"&gt;Bodyweight&lt;/div&gt;
   &lt;p class="settingsNote" id="bwNote"&gt;Currently 178 lb, 1 reading(s) on record.&lt;/p&gt;
   &lt;div class="searchRow"&gt;
@@ -3455,7 +3576,7 @@
         <circle class="dot" cx="542.0379146919431" cy="47.27777777777777" r="5"></circle>
         <circle class="dot" cx="559.7535545023698" cy="42.22222222222223" r="5"></circle>
         <circle class="dot best" cx="580" cy="32.111111111111114" r="5"></circle>
-        <text class="xlab" x="46" y="234" text-anchor="start">Feb 23</text>
+        <text class="xlab" x="46" y="234" text-anchor="start">Feb 24</text>
         <text class="xlab" x="580" y="234" text-anchor="end">today</text>
       </svg>
     </div>
@@ -3490,7 +3611,7 @@
     </thead>
     <tbody id="hbody">
       <tr>
-        <td>Sep 22</td>
+        <td>Sep 23</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3505,7 +3626,7 @@
         <td class="prog">+5</td>
       </tr>
       <tr>
-        <td>Sep 14</td>
+        <td>Sep 15</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3515,7 +3636,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Sep 7</td>
+        <td>Sep 8</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3525,7 +3646,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Aug 31</td>
+        <td>Sep 1</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3535,7 +3656,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Aug 24</td>
+        <td>Aug 25</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3545,7 +3666,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Aug 17</td>
+        <td>Aug 18</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3555,7 +3676,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Aug 10</td>
+        <td>Aug 11</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3565,7 +3686,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Aug 3</td>
+        <td>Aug 4</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3575,7 +3696,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Jul 27</td>
+        <td>Jul 28</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3585,7 +3706,7 @@
         <td class="prog">+2.5</td>
       </tr>
       <tr>
-        <td>Jul 20</td>
+        <td>Jul 21</td>
         <td>3</td>
         <td>5</td>
         <td>
@@ -3681,7 +3802,7 @@
         &lt;circle class="dot" cx="542.0379146919431" cy="47.27777777777777" r="5"&gt;&lt;/circle&gt;
         &lt;circle class="dot" cx="559.7535545023698" cy="42.22222222222223" r="5"&gt;&lt;/circle&gt;
         &lt;circle class="dot best" cx="580" cy="32.111111111111114" r="5"&gt;&lt;/circle&gt;
-        &lt;text class="xlab" x="46" y="234" text-anchor="start"&gt;Feb 23&lt;/text&gt;
+        &lt;text class="xlab" x="46" y="234" text-anchor="start"&gt;Feb 24&lt;/text&gt;
         &lt;text class="xlab" x="580" y="234" text-anchor="end"&gt;today&lt;/text&gt;
       &lt;/svg&gt;
     &lt;/div&gt;
@@ -3716,7 +3837,7 @@
     &lt;/thead&gt;
     &lt;tbody id="hbody"&gt;
       &lt;tr&gt;
-        &lt;td&gt;Sep 22&lt;/td&gt;
+        &lt;td&gt;Sep 23&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3731,7 +3852,7 @@
         &lt;td class="prog"&gt;+5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Sep 14&lt;/td&gt;
+        &lt;td&gt;Sep 15&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3741,7 +3862,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Sep 7&lt;/td&gt;
+        &lt;td&gt;Sep 8&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3751,7 +3872,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Aug 31&lt;/td&gt;
+        &lt;td&gt;Sep 1&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3761,7 +3882,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Aug 24&lt;/td&gt;
+        &lt;td&gt;Aug 25&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3771,7 +3892,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Aug 17&lt;/td&gt;
+        &lt;td&gt;Aug 18&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3781,7 +3902,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Aug 10&lt;/td&gt;
+        &lt;td&gt;Aug 11&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3791,7 +3912,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Aug 3&lt;/td&gt;
+        &lt;td&gt;Aug 4&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3801,7 +3922,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Jul 27&lt;/td&gt;
+        &lt;td&gt;Jul 28&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -3811,7 +3932,7 @@
         &lt;td class="prog"&gt;+2.5&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
-        &lt;td&gt;Jul 20&lt;/td&gt;
+        &lt;td&gt;Jul 21&lt;/td&gt;
         &lt;td&gt;3&lt;/td&gt;
         &lt;td&gt;5&lt;/td&gt;
         &lt;td&gt;
@@ -4164,7 +4285,7 @@
   <div class="swapList" id="otList">
     <button class="swapItem" data-del="0">
       <span class="nm">other</span>
-      <span class="mu">2026-09-21 · 35m · moderate/10</span>
+      <span class="mu">2026-09-22 · 35m · moderate/10</span>
     </button>
   </div>
   <div class="popBtns">
@@ -4237,7 +4358,7 @@
   &lt;div class="swapList" id="otList"&gt;
     &lt;button class="swapItem" data-del="0"&gt;
       &lt;span class="nm"&gt;other&lt;/span&gt;
-      &lt;span class="mu"&gt;2026-09-21 · 35m · moderate/10&lt;/span&gt;
+      &lt;span class="mu"&gt;2026-09-22 · 35m · moderate/10&lt;/span&gt;
     &lt;/button&gt;
   &lt;/div&gt;
   &lt;div class="popBtns"&gt;
@@ -4464,7 +4585,7 @@
     Fill in a day you forgot. It counts toward volume, plateaus and your records exactly as if you had logged it then.
   </p>
   <div class="searchRow">
-    <input id="bdDate" type="date" max="2026-09-22" value="2026-09-21" aria-label="Date" />
+    <input id="bdDate" type="date" max="2026-09-23" value="2026-09-22" aria-label="Date" />
   </div>
   <div class="secLbl">Which lift</div>
   <div class="swapList">
@@ -4503,7 +4624,7 @@
     Fill in a day you forgot. It counts toward volume, plateaus and your records exactly as if you had logged it then.
   &lt;/p&gt;
   &lt;div class="searchRow"&gt;
-    &lt;input id="bdDate" type="date" max="2026-09-22" value="2026-09-21" aria-label="Date" /&gt;
+    &lt;input id="bdDate" type="date" max="2026-09-23" value="2026-09-22" aria-label="Date" /&gt;
   &lt;/div&gt;
   &lt;div class="secLbl"&gt;Which lift&lt;/div&gt;
   &lt;div class="swapList"&gt;
@@ -5005,36 +5126,36 @@
   <div class="chart-card">
     <div class="plot" id="statsPlot">
       <div class="sChart">
-        <button class="sPoint" data-date="2026-02-23" title="Feb 23 — 166.3 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-03-02" title="Mar 2 — 169.2 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-03-09" title="Mar 9 — 172.1 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-03-16" title="Mar 16 — 175 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-03-23" title="Mar 23 — 177.9 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-03-30" title="Mar 30 — 180.8 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-04-06" title="Apr 6 — 183.8 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-04-13" title="Apr 13 — 186.7 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-04-20" title="Apr 20 — 189.6 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-04-27" title="Apr 27 — 192.5 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-05-04" title="May 4 — 195.4 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-05-11" title="May 11 — 198.3 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-05-18" title="May 18 — 201.3 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-05-25" title="May 25 — 204.2 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-06-01" title="Jun 1 — 207.1 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-06-08" title="Jun 8 — 210 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-06-15" title="Jun 15 — 212.9 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-06-22" title="Jun 22 — 215.8 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-06-29" title="Jun 29 — 218.8 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-07-06" title="Jul 6 — 221.7 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-07-13" title="Jul 13 — 224.6 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-07-20" title="Jul 20 — 227.5 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-07-27" title="Jul 27 — 230.4 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-08-03" title="Aug 3 — 233.3 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-08-10" title="Aug 10 — 236.3 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-08-17" title="Aug 17 — 239.2 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-08-24" title="Aug 24 — 242.1 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-08-31" title="Aug 31 — 245 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-09-07" title="Sep 7 — 247.9 lb e1RM"></button>
-        <button class="sPoint" data-date="2026-09-14" title="Sep 14 — 250.8 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-02-24" title="Feb 24 — 166.3 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-03-03" title="Mar 3 — 169.2 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-03-10" title="Mar 10 — 172.1 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-03-17" title="Mar 17 — 175 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-03-24" title="Mar 24 — 177.9 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-03-31" title="Mar 31 — 180.8 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-04-07" title="Apr 7 — 183.8 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-04-14" title="Apr 14 — 186.7 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-04-21" title="Apr 21 — 189.6 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-04-28" title="Apr 28 — 192.5 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-05-05" title="May 5 — 195.4 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-05-12" title="May 12 — 198.3 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-05-19" title="May 19 — 201.3 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-05-26" title="May 26 — 204.2 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-06-02" title="Jun 2 — 207.1 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-06-09" title="Jun 9 — 210 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-06-16" title="Jun 16 — 212.9 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-06-23" title="Jun 23 — 215.8 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-06-30" title="Jun 30 — 218.8 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-07-07" title="Jul 7 — 221.7 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-07-14" title="Jul 14 — 224.6 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-07-21" title="Jul 21 — 227.5 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-07-28" title="Jul 28 — 230.4 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-08-04" title="Aug 4 — 233.3 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-08-11" title="Aug 11 — 236.3 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-08-18" title="Aug 18 — 239.2 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-08-25" title="Aug 25 — 242.1 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-09-01" title="Sep 1 — 245 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-09-08" title="Sep 8 — 247.9 lb e1RM"></button>
+        <button class="sPoint" data-date="2026-09-15" title="Sep 15 — 250.8 lb e1RM"></button>
       </div>
     </div>
     <div class="delta-cap" id="statsCap">
@@ -5131,36 +5252,36 @@
   &lt;div class="chart-card"&gt;
     &lt;div class="plot" id="statsPlot"&gt;
       &lt;div class="sChart"&gt;
-        &lt;button class="sPoint" data-date="2026-02-23" title="Feb 23 — 166.3 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-03-02" title="Mar 2 — 169.2 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-03-09" title="Mar 9 — 172.1 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-03-16" title="Mar 16 — 175 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-03-23" title="Mar 23 — 177.9 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-03-30" title="Mar 30 — 180.8 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-04-06" title="Apr 6 — 183.8 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-04-13" title="Apr 13 — 186.7 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-04-20" title="Apr 20 — 189.6 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-04-27" title="Apr 27 — 192.5 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-05-04" title="May 4 — 195.4 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-05-11" title="May 11 — 198.3 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-05-18" title="May 18 — 201.3 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-05-25" title="May 25 — 204.2 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-06-01" title="Jun 1 — 207.1 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-06-08" title="Jun 8 — 210 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-06-15" title="Jun 15 — 212.9 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-06-22" title="Jun 22 — 215.8 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-06-29" title="Jun 29 — 218.8 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-07-06" title="Jul 6 — 221.7 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-07-13" title="Jul 13 — 224.6 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-07-20" title="Jul 20 — 227.5 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-07-27" title="Jul 27 — 230.4 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-08-03" title="Aug 3 — 233.3 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-08-10" title="Aug 10 — 236.3 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-08-17" title="Aug 17 — 239.2 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-08-24" title="Aug 24 — 242.1 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-08-31" title="Aug 31 — 245 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-09-07" title="Sep 7 — 247.9 lb e1RM"&gt;&lt;/button&gt;
-        &lt;button class="sPoint" data-date="2026-09-14" title="Sep 14 — 250.8 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-02-24" title="Feb 24 — 166.3 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-03-03" title="Mar 3 — 169.2 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-03-10" title="Mar 10 — 172.1 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-03-17" title="Mar 17 — 175 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-03-24" title="Mar 24 — 177.9 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-03-31" title="Mar 31 — 180.8 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-04-07" title="Apr 7 — 183.8 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-04-14" title="Apr 14 — 186.7 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-04-21" title="Apr 21 — 189.6 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-04-28" title="Apr 28 — 192.5 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-05-05" title="May 5 — 195.4 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-05-12" title="May 12 — 198.3 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-05-19" title="May 19 — 201.3 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-05-26" title="May 26 — 204.2 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-06-02" title="Jun 2 — 207.1 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-06-09" title="Jun 9 — 210 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-06-16" title="Jun 16 — 212.9 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-06-23" title="Jun 23 — 215.8 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-06-30" title="Jun 30 — 218.8 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-07-07" title="Jul 7 — 221.7 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-07-14" title="Jul 14 — 224.6 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-07-21" title="Jul 21 — 227.5 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-07-28" title="Jul 28 — 230.4 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-08-04" title="Aug 4 — 233.3 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-08-11" title="Aug 11 — 236.3 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-08-18" title="Aug 18 — 239.2 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-08-25" title="Aug 25 — 242.1 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-09-01" title="Sep 1 — 245 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-09-08" title="Sep 8 — 247.9 lb e1RM"&gt;&lt;/button&gt;
+        &lt;button class="sPoint" data-date="2026-09-15" title="Sep 15 — 250.8 lb e1RM"&gt;&lt;/button&gt;
       &lt;/div&gt;
     &lt;/div&gt;
     &lt;div class="delta-cap" id="statsCap"&gt;
@@ -5191,73 +5312,73 @@
   <div class="mr-live">
 <div class="plot" id="statsPlot">
   <div class="sChart">
-    <button class="sPoint" data-date="2026-02-23" title="Feb 23 — 166.3 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-03-02" title="Mar 2 — 169.2 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-03-09" title="Mar 9 — 172.1 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-03-16" title="Mar 16 — 175 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-03-23" title="Mar 23 — 177.9 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-03-30" title="Mar 30 — 180.8 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-04-06" title="Apr 6 — 183.8 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-04-13" title="Apr 13 — 186.7 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-04-20" title="Apr 20 — 189.6 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-04-27" title="Apr 27 — 192.5 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-05-04" title="May 4 — 195.4 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-05-11" title="May 11 — 198.3 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-05-18" title="May 18 — 201.3 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-05-25" title="May 25 — 204.2 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-06-01" title="Jun 1 — 207.1 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-06-08" title="Jun 8 — 210 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-06-15" title="Jun 15 — 212.9 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-06-22" title="Jun 22 — 215.8 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-06-29" title="Jun 29 — 218.8 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-07-06" title="Jul 6 — 221.7 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-07-13" title="Jul 13 — 224.6 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-07-20" title="Jul 20 — 227.5 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-07-27" title="Jul 27 — 230.4 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-08-03" title="Aug 3 — 233.3 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-08-10" title="Aug 10 — 236.3 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-08-17" title="Aug 17 — 239.2 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-08-24" title="Aug 24 — 242.1 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-08-31" title="Aug 31 — 245 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-09-07" title="Sep 7 — 247.9 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-09-14" title="Sep 14 — 250.8 lb e1RM"></button>
-    <button class="sPoint" data-date="2026-09-22" title="Sep 22 — 256.7 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-02-24" title="Feb 24 — 166.3 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-03-03" title="Mar 3 — 169.2 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-03-10" title="Mar 10 — 172.1 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-03-17" title="Mar 17 — 175 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-03-24" title="Mar 24 — 177.9 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-03-31" title="Mar 31 — 180.8 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-04-07" title="Apr 7 — 183.8 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-04-14" title="Apr 14 — 186.7 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-04-21" title="Apr 21 — 189.6 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-04-28" title="Apr 28 — 192.5 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-05-05" title="May 5 — 195.4 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-05-12" title="May 12 — 198.3 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-05-19" title="May 19 — 201.3 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-05-26" title="May 26 — 204.2 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-06-02" title="Jun 2 — 207.1 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-06-09" title="Jun 9 — 210 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-06-16" title="Jun 16 — 212.9 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-06-23" title="Jun 23 — 215.8 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-06-30" title="Jun 30 — 218.8 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-07-07" title="Jul 7 — 221.7 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-07-14" title="Jul 14 — 224.6 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-07-21" title="Jul 21 — 227.5 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-07-28" title="Jul 28 — 230.4 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-08-04" title="Aug 4 — 233.3 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-08-11" title="Aug 11 — 236.3 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-08-18" title="Aug 18 — 239.2 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-08-25" title="Aug 25 — 242.1 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-09-01" title="Sep 1 — 245 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-09-08" title="Sep 8 — 247.9 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-09-15" title="Sep 15 — 250.8 lb e1RM"></button>
+    <button class="sPoint" data-date="2026-09-23" title="Sep 23 — 256.7 lb e1RM"></button>
   </div>
 </div>
   </div>
   <details class="mr-src"><summary>markup</summary><pre>&lt;div class="plot" id="statsPlot"&gt;
   &lt;div class="sChart"&gt;
-    &lt;button class="sPoint" data-date="2026-02-23" title="Feb 23 — 166.3 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-03-02" title="Mar 2 — 169.2 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-03-09" title="Mar 9 — 172.1 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-03-16" title="Mar 16 — 175 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-03-23" title="Mar 23 — 177.9 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-03-30" title="Mar 30 — 180.8 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-04-06" title="Apr 6 — 183.8 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-04-13" title="Apr 13 — 186.7 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-04-20" title="Apr 20 — 189.6 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-04-27" title="Apr 27 — 192.5 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-05-04" title="May 4 — 195.4 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-05-11" title="May 11 — 198.3 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-05-18" title="May 18 — 201.3 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-05-25" title="May 25 — 204.2 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-06-01" title="Jun 1 — 207.1 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-06-08" title="Jun 8 — 210 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-06-15" title="Jun 15 — 212.9 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-06-22" title="Jun 22 — 215.8 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-06-29" title="Jun 29 — 218.8 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-07-06" title="Jul 6 — 221.7 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-07-13" title="Jul 13 — 224.6 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-07-20" title="Jul 20 — 227.5 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-07-27" title="Jul 27 — 230.4 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-08-03" title="Aug 3 — 233.3 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-08-10" title="Aug 10 — 236.3 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-08-17" title="Aug 17 — 239.2 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-08-24" title="Aug 24 — 242.1 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-08-31" title="Aug 31 — 245 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-09-07" title="Sep 7 — 247.9 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-09-14" title="Sep 14 — 250.8 lb e1RM"&gt;&lt;/button&gt;
-    &lt;button class="sPoint" data-date="2026-09-22" title="Sep 22 — 256.7 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-02-24" title="Feb 24 — 166.3 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-03-03" title="Mar 3 — 169.2 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-03-10" title="Mar 10 — 172.1 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-03-17" title="Mar 17 — 175 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-03-24" title="Mar 24 — 177.9 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-03-31" title="Mar 31 — 180.8 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-04-07" title="Apr 7 — 183.8 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-04-14" title="Apr 14 — 186.7 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-04-21" title="Apr 21 — 189.6 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-04-28" title="Apr 28 — 192.5 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-05-05" title="May 5 — 195.4 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-05-12" title="May 12 — 198.3 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-05-19" title="May 19 — 201.3 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-05-26" title="May 26 — 204.2 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-06-02" title="Jun 2 — 207.1 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-06-09" title="Jun 9 — 210 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-06-16" title="Jun 16 — 212.9 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-06-23" title="Jun 23 — 215.8 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-06-30" title="Jun 30 — 218.8 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-07-07" title="Jul 7 — 221.7 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-07-14" title="Jul 14 — 224.6 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-07-21" title="Jul 21 — 227.5 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-07-28" title="Jul 28 — 230.4 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-08-04" title="Aug 4 — 233.3 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-08-11" title="Aug 11 — 236.3 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-08-18" title="Aug 18 — 239.2 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-08-25" title="Aug 25 — 242.1 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-09-01" title="Sep 1 — 245 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-09-08" title="Sep 8 — 247.9 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-09-15" title="Sep 15 — 250.8 lb e1RM"&gt;&lt;/button&gt;
+    &lt;button class="sPoint" data-date="2026-09-23" title="Sep 23 — 256.7 lb e1RM"&gt;&lt;/button&gt;
   &lt;/div&gt;
 &lt;/div&gt;</pre></details>
 </section>
@@ -5312,84 +5433,84 @@
 <div class="plot" id="statsPlot">
   <div class="muscleBars">
     <div class="mbRow">
-      <span class="mbLbl">Jul 1</span>
+      <span class="mbLbl">Jul 2</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Jul 8</span>
+      <span class="mbLbl">Jul 9</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Jul 15</span>
+      <span class="mbLbl">Jul 16</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Jul 22</span>
+      <span class="mbLbl">Jul 23</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Jul 29</span>
+      <span class="mbLbl">Jul 30</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Aug 5</span>
+      <span class="mbLbl">Aug 6</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Aug 12</span>
+      <span class="mbLbl">Aug 13</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Aug 19</span>
+      <span class="mbLbl">Aug 20</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Aug 26</span>
+      <span class="mbLbl">Aug 27</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="0"></div>
       </div>
       <span class="mbVal">0</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Sep 2</span>
+      <span class="mbLbl">Sep 3</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="25"></div>
       </div>
       <span class="mbVal">1</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Sep 9</span>
+      <span class="mbLbl">Sep 10</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="75"></div>
       </div>
       <span class="mbVal">3</span>
     </div>
     <div class="mbRow">
-      <span class="mbLbl">Sep 16</span>
+      <span class="mbLbl">Sep 17</span>
       <div class="mbTrack">
         <div class="mbFill" data-w="50"></div>
       </div>
@@ -5401,84 +5522,84 @@
   <details class="mr-src"><summary>markup</summary><pre>&lt;div class="plot" id="statsPlot"&gt;
   &lt;div class="muscleBars"&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Jul 1&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Jul 2&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Jul 8&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Jul 9&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Jul 15&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Jul 16&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Jul 22&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Jul 23&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Jul 29&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Jul 30&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Aug 5&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Aug 6&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Aug 12&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Aug 13&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Aug 19&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Aug 20&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Aug 26&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Aug 27&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="0"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;0&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Sep 2&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Sep 3&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="25"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;1&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Sep 9&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Sep 10&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="75"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="mbVal"&gt;3&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="mbRow"&gt;
-      &lt;span class="mbLbl"&gt;Sep 16&lt;/span&gt;
+      &lt;span class="mbLbl"&gt;Sep 17&lt;/span&gt;
       &lt;div class="mbTrack"&gt;
         &lt;div class="mbFill" data-w="50"&gt;&lt;/div&gt;
       &lt;/div&gt;
@@ -5587,86 +5708,86 @@
             <span class="cd l0" data-date="2026-07-03" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-04" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-05" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-07-06" data-label="9600 lb"></span>
-            <span class="cd l0" data-date="2026-07-07" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-07-06" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-07-07" data-label="9600 lb"></span>
             <span class="cd l0" data-date="2026-07-08" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-09" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-10" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-11" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-12" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-07-13" data-label="9713 lb"></span>
-            <span class="cd l0" data-date="2026-07-14" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-07-13" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-07-14" data-label="9713 lb"></span>
             <span class="cd l0" data-date="2026-07-15" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-16" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-17" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-18" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-19" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-07-20" data-label="9825 lb"></span>
-            <span class="cd l0" data-date="2026-07-21" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-07-20" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-07-21" data-label="9825 lb"></span>
             <span class="cd l0" data-date="2026-07-22" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-23" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-24" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-25" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-26" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-07-27" data-label="9938 lb"></span>
-            <span class="cd l0" data-date="2026-07-28" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-07-27" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-07-28" data-label="9938 lb"></span>
             <span class="cd l0" data-date="2026-07-29" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-30" data-label="rest"></span>
             <span class="cd l0" data-date="2026-07-31" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-01" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-02" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-08-03" data-label="10050 lb"></span>
-            <span class="cd l0" data-date="2026-08-04" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-08-03" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-08-04" data-label="10050 lb"></span>
             <span class="cd l0" data-date="2026-08-05" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-06" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-07" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-08" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-09" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-08-10" data-label="10163 lb"></span>
-            <span class="cd l0" data-date="2026-08-11" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-08-10" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-08-11" data-label="10163 lb"></span>
             <span class="cd l0" data-date="2026-08-12" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-13" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-14" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-15" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-16" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-08-17" data-label="10275 lb"></span>
-            <span class="cd l0" data-date="2026-08-18" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-08-17" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-08-18" data-label="10275 lb"></span>
             <span class="cd l0" data-date="2026-08-19" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-20" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-21" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-22" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-23" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-08-24" data-label="10388 lb"></span>
-            <span class="cd l0" data-date="2026-08-25" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-08-24" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-08-25" data-label="10388 lb"></span>
             <span class="cd l0" data-date="2026-08-26" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-27" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-28" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-29" data-label="rest"></span>
             <span class="cd l0" data-date="2026-08-30" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-08-31" data-label="10500 lb"></span>
-            <span class="cd l0" data-date="2026-09-01" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-08-31" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-09-01" data-label="10500 lb"></span>
             <span class="cd l0" data-date="2026-09-02" data-label="rest"></span>
             <span class="cd l0" data-date="2026-09-03" data-label="rest"></span>
             <span class="cd l0" data-date="2026-09-04" data-label="rest"></span>
             <span class="cd l0" data-date="2026-09-05" data-label="rest"></span>
             <span class="cd l0" data-date="2026-09-06" data-label="rest"></span>
-            <span class="cd l4" data-date="2026-09-07" data-label="10613 lb"></span>
-            <span class="cd l0" data-date="2026-09-08" data-label="trained"></span>
-            <span class="cd l0" data-date="2026-09-09" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-09-07" data-label="rest"></span>
+            <span class="cd l4" data-date="2026-09-08" data-label="10613 lb"></span>
+            <span class="cd l0" data-date="2026-09-09" data-label="trained"></span>
             <span class="cd l0" data-date="2026-09-10" data-label="rest"></span>
-            <span class="cd l0" data-date="2026-09-11" data-label="trained"></span>
-            <span class="cd l0" data-date="2026-09-12" data-label="rest"></span>
-            <span class="cd l0" data-date="2026-09-13" data-label="trained"></span>
-            <span class="cd l4" data-date="2026-09-14" data-label="10725 lb"></span>
-            <span class="cd l0" data-date="2026-09-15" data-label="trained"></span>
-            <span class="cd l0" data-date="2026-09-16" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-09-11" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-09-12" data-label="trained"></span>
+            <span class="cd l0" data-date="2026-09-13" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-09-14" data-label="trained"></span>
+            <span class="cd l4" data-date="2026-09-15" data-label="10725 lb"></span>
+            <span class="cd l0" data-date="2026-09-16" data-label="trained"></span>
             <span class="cd l0" data-date="2026-09-17" data-label="rest"></span>
-            <span class="cd l0" data-date="2026-09-18" data-label="trained"></span>
-            <span class="cd l0" data-date="2026-09-19" data-label="rest"></span>
-            <span class="cd l0" data-date="2026-09-20" data-label="trained"></span>
-            <span class="cd l0" data-date="2026-09-21" data-label="rest"></span>
-            <span class="cd l1" data-date="2026-09-22" data-label="1100 lb"></span>
-            <span class="cd l0" data-date="2026-09-23" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-09-18" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-09-19" data-label="trained"></span>
+            <span class="cd l0" data-date="2026-09-20" data-label="rest"></span>
+            <span class="cd l0" data-date="2026-09-21" data-label="trained"></span>
+            <span class="cd l0" data-date="2026-09-22" data-label="rest"></span>
+            <span class="cd l1" data-date="2026-09-23" data-label="1100 lb"></span>
             <span class="cd l0" data-date="2026-09-24" data-label="rest"></span>
             <span class="cd l0" data-date="2026-09-25" data-label="rest"></span>
             <span class="cd l0" data-date="2026-09-26" data-label="rest"></span>
@@ -5681,11 +5802,7 @@
         </div>
         <div class="calTotal" id="calTotal">
           <div class="ctNum">112.9k</div>
-          <div class="ctLbl">
-            lb
-            <br />
-            this qtr
-          </div>
+          <div class="ctLbl">lb</div>
           <div class="calPop" id="calPop">
             <div class="cpCap">growth this quarter</div>
             <svg width="112" height="38">
@@ -5713,25 +5830,25 @@
   <div class="wdBars" id="calWdBars">
     <div class="wdBar">
       <div class="wdTrack">
-        <div class="wdFill" data-h="100"></div>
+        <div class="wdFill" data-h="3"></div>
       </div>
       <span class="wdLbl">Sun</span>
     </div>
     <div class="wdBar">
       <div class="wdTrack">
-        <div class="wdFill" data-h="3"></div>
+        <div class="wdFill" data-h="100"></div>
       </div>
       <span class="wdLbl">Mon</span>
     </div>
     <div class="wdBar">
       <div class="wdTrack">
-        <div class="wdFill" data-h="100"></div>
+        <div class="wdFill" data-h="3"></div>
       </div>
       <span class="wdLbl">Tue</span>
     </div>
     <div class="wdBar">
       <div class="wdTrack">
-        <div class="wdFill" data-h="3"></div>
+        <div class="wdFill" data-h="100"></div>
       </div>
       <span class="wdLbl">Wed</span>
     </div>
@@ -5743,13 +5860,13 @@
     </div>
     <div class="wdBar">
       <div class="wdTrack">
-        <div class="wdFill" data-h="100"></div>
+        <div class="wdFill" data-h="3"></div>
       </div>
       <span class="wdLbl">Fri</span>
     </div>
     <div class="wdBar">
       <div class="wdTrack">
-        <div class="wdFill" data-h="3"></div>
+        <div class="wdFill" data-h="100"></div>
       </div>
       <span class="wdLbl">Sat</span>
     </div>
@@ -5806,86 +5923,86 @@
             &lt;span class="cd l0" data-date="2026-07-03" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-04" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-05" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-07-06" data-label="9600 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-07-07" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-07-06" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-07-07" data-label="9600 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-08" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-09" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-10" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-11" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-12" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-07-13" data-label="9713 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-07-14" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-07-13" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-07-14" data-label="9713 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-15" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-16" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-17" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-18" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-19" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-07-20" data-label="9825 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-07-21" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-07-20" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-07-21" data-label="9825 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-22" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-23" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-24" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-25" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-26" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-07-27" data-label="9938 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-07-28" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-07-27" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-07-28" data-label="9938 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-29" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-30" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-07-31" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-01" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-02" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-08-03" data-label="10050 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-08-04" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-08-03" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-08-04" data-label="10050 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-05" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-06" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-07" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-08" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-09" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-08-10" data-label="10163 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-08-11" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-08-10" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-08-11" data-label="10163 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-12" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-13" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-14" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-15" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-16" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-08-17" data-label="10275 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-08-18" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-08-17" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-08-18" data-label="10275 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-19" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-20" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-21" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-22" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-23" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-08-24" data-label="10388 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-08-25" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-08-24" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-08-25" data-label="10388 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-26" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-27" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-28" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-29" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-08-30" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-08-31" data-label="10500 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-01" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-08-31" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-09-01" data-label="10500 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-02" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-03" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-04" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-05" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-06" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-09-07" data-label="10613 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-08" data-label="trained"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-09" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-07" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-09-08" data-label="10613 lb"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-09" data-label="trained"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-10" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-11" data-label="trained"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-12" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-13" data-label="trained"&gt;&lt;/span&gt;
-            &lt;span class="cd l4" data-date="2026-09-14" data-label="10725 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-15" data-label="trained"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-16" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-11" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-12" data-label="trained"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-13" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-14" data-label="trained"&gt;&lt;/span&gt;
+            &lt;span class="cd l4" data-date="2026-09-15" data-label="10725 lb"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-16" data-label="trained"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-17" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-18" data-label="trained"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-19" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-20" data-label="trained"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-21" data-label="rest"&gt;&lt;/span&gt;
-            &lt;span class="cd l1" data-date="2026-09-22" data-label="1100 lb"&gt;&lt;/span&gt;
-            &lt;span class="cd l0" data-date="2026-09-23" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-18" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-19" data-label="trained"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-20" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-21" data-label="trained"&gt;&lt;/span&gt;
+            &lt;span class="cd l0" data-date="2026-09-22" data-label="rest"&gt;&lt;/span&gt;
+            &lt;span class="cd l1" data-date="2026-09-23" data-label="1100 lb"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-24" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-25" data-label="rest"&gt;&lt;/span&gt;
             &lt;span class="cd l0" data-date="2026-09-26" data-label="rest"&gt;&lt;/span&gt;
@@ -5900,11 +6017,7 @@
         &lt;/div&gt;
         &lt;div class="calTotal" id="calTotal"&gt;
           &lt;div class="ctNum"&gt;112.9k&lt;/div&gt;
-          &lt;div class="ctLbl"&gt;
-            lb
-            &lt;br /&gt;
-            this qtr
-          &lt;/div&gt;
+          &lt;div class="ctLbl"&gt;lb&lt;/div&gt;
           &lt;div class="calPop" id="calPop"&gt;
             &lt;div class="cpCap"&gt;growth this quarter&lt;/div&gt;
             &lt;svg width="112" height="38"&gt;
@@ -5932,25 +6045,25 @@
   &lt;div class="wdBars" id="calWdBars"&gt;
     &lt;div class="wdBar"&gt;
       &lt;div class="wdTrack"&gt;
-        &lt;div class="wdFill" data-h="100"&gt;&lt;/div&gt;
+        &lt;div class="wdFill" data-h="3"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="wdLbl"&gt;Sun&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="wdBar"&gt;
       &lt;div class="wdTrack"&gt;
-        &lt;div class="wdFill" data-h="3"&gt;&lt;/div&gt;
+        &lt;div class="wdFill" data-h="100"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="wdLbl"&gt;Mon&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="wdBar"&gt;
       &lt;div class="wdTrack"&gt;
-        &lt;div class="wdFill" data-h="100"&gt;&lt;/div&gt;
+        &lt;div class="wdFill" data-h="3"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="wdLbl"&gt;Tue&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="wdBar"&gt;
       &lt;div class="wdTrack"&gt;
-        &lt;div class="wdFill" data-h="3"&gt;&lt;/div&gt;
+        &lt;div class="wdFill" data-h="100"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="wdLbl"&gt;Wed&lt;/span&gt;
     &lt;/div&gt;
@@ -5962,13 +6075,13 @@
     &lt;/div&gt;
     &lt;div class="wdBar"&gt;
       &lt;div class="wdTrack"&gt;
-        &lt;div class="wdFill" data-h="100"&gt;&lt;/div&gt;
+        &lt;div class="wdFill" data-h="3"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="wdLbl"&gt;Fri&lt;/span&gt;
     &lt;/div&gt;
     &lt;div class="wdBar"&gt;
       &lt;div class="wdTrack"&gt;
-        &lt;div class="wdFill" data-h="3"&gt;&lt;/div&gt;
+        &lt;div class="wdFill" data-h="100"&gt;&lt;/div&gt;
       &lt;/div&gt;
       &lt;span class="wdLbl"&gt;Sat&lt;/span&gt;
     &lt;/div&gt;
@@ -6007,7 +6120,7 @@
     <circle class="dot" cx="313" cy="23.99301025163095" r="4.5"></circle>
     <circle class="dot" cx="437.6" cy="22.0848089468779" r="4.5"></circle>
     <circle class="dot" cx="580" cy="185.3420316868593" r="4.5"></circle>
-    <text class="xlab" x="46" y="234" text-anchor="start">Aug 24</text>
+    <text class="xlab" x="46" y="234" text-anchor="start">Aug 25</text>
     <text class="xlab" x="580" y="234" text-anchor="end">today</text>
     <g class="fanGroup">
       <path class="fanHit" d="M580,185.3420316868593 Q643,189.07362534948743 706,204" data-val="0" data-label="High" data-cls="high"></path>
@@ -6058,7 +6171,7 @@
     &lt;circle class="dot" cx="313" cy="23.99301025163095" r="4.5"&gt;&lt;/circle&gt;
     &lt;circle class="dot" cx="437.6" cy="22.0848089468779" r="4.5"&gt;&lt;/circle&gt;
     &lt;circle class="dot" cx="580" cy="185.3420316868593" r="4.5"&gt;&lt;/circle&gt;
-    &lt;text class="xlab" x="46" y="234" text-anchor="start"&gt;Aug 24&lt;/text&gt;
+    &lt;text class="xlab" x="46" y="234" text-anchor="start"&gt;Aug 25&lt;/text&gt;
     &lt;text class="xlab" x="580" y="234" text-anchor="end"&gt;today&lt;/text&gt;
     &lt;g class="fanGroup"&gt;
       &lt;path class="fanHit" d="M580,185.3420316868593 Q643,189.07362534948743 706,204" data-val="0" data-label="High" data-cls="high"&gt;&lt;/path&gt;
@@ -6103,7 +6216,7 @@
           <span class="num">220</span>
           <span class="u">lb</span>
         </td>
-        <td>Sep 22</td>
+        <td>Sep 23</td>
       </tr>
       <tr>
         <td>Barbell Row</td>
@@ -6111,7 +6224,7 @@
           <span class="num">190</span>
           <span class="u">lb</span>
         </td>
-        <td>Sep 14</td>
+        <td>Sep 15</td>
       </tr>
       <tr>
         <td>Barbell Curl</td>
@@ -6119,7 +6232,7 @@
           <span class="num">170</span>
           <span class="u">lb</span>
         </td>
-        <td>Sep 14</td>
+        <td>Sep 15</td>
       </tr>
       <tr>
         <td>Back Squat</td>
@@ -6127,7 +6240,7 @@
           <span class="num">140</span>
           <span class="u">lb</span>
         </td>
-        <td>Mar 23</td>
+        <td>Mar 24</td>
       </tr>
     </tbody>
   </table>
@@ -6149,7 +6262,7 @@
           &lt;span class="num"&gt;220&lt;/span&gt;
           &lt;span class="u"&gt;lb&lt;/span&gt;
         &lt;/td&gt;
-        &lt;td&gt;Sep 22&lt;/td&gt;
+        &lt;td&gt;Sep 23&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
         &lt;td&gt;Barbell Row&lt;/td&gt;
@@ -6157,7 +6270,7 @@
           &lt;span class="num"&gt;190&lt;/span&gt;
           &lt;span class="u"&gt;lb&lt;/span&gt;
         &lt;/td&gt;
-        &lt;td&gt;Sep 14&lt;/td&gt;
+        &lt;td&gt;Sep 15&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
         &lt;td&gt;Barbell Curl&lt;/td&gt;
@@ -6165,7 +6278,7 @@
           &lt;span class="num"&gt;170&lt;/span&gt;
           &lt;span class="u"&gt;lb&lt;/span&gt;
         &lt;/td&gt;
-        &lt;td&gt;Sep 14&lt;/td&gt;
+        &lt;td&gt;Sep 15&lt;/td&gt;
       &lt;/tr&gt;
       &lt;tr&gt;
         &lt;td&gt;Back Squat&lt;/td&gt;
@@ -6173,7 +6286,7 @@
           &lt;span class="num"&gt;140&lt;/span&gt;
           &lt;span class="u"&gt;lb&lt;/span&gt;
         &lt;/td&gt;
-        &lt;td&gt;Mar 23&lt;/td&gt;
+        &lt;td&gt;Mar 24&lt;/td&gt;
       &lt;/tr&gt;
     &lt;/tbody&gt;
   &lt;/table&gt;
@@ -6246,7 +6359,7 @@
     <circle class="dot" cx="313" cy="39.42553191489361" r="4.5"></circle>
     <circle class="dot" cx="437.6" cy="37.48936170212767" r="4.5"></circle>
     <circle class="dot" cx="580" cy="33.61702127659575" r="4.5"></circle>
-    <text class="xlab" x="46" y="234" text-anchor="start">Aug 24</text>
+    <text class="xlab" x="46" y="234" text-anchor="start">Aug 25</text>
     <text class="xlab" x="580" y="234" text-anchor="end">today</text>
     <g class="fanGroup">
       <path class="fanHit" d="M580,33.61702127659575 Q643,32.06808510638298 706,25.872340425531917" data-val="230" data-label="High" data-cls="high"></path>
@@ -6297,7 +6410,7 @@
     &lt;circle class="dot" cx="313" cy="39.42553191489361" r="4.5"&gt;&lt;/circle&gt;
     &lt;circle class="dot" cx="437.6" cy="37.48936170212767" r="4.5"&gt;&lt;/circle&gt;
     &lt;circle class="dot" cx="580" cy="33.61702127659575" r="4.5"&gt;&lt;/circle&gt;
-    &lt;text class="xlab" x="46" y="234" text-anchor="start"&gt;Aug 24&lt;/text&gt;
+    &lt;text class="xlab" x="46" y="234" text-anchor="start"&gt;Aug 25&lt;/text&gt;
     &lt;text class="xlab" x="580" y="234" text-anchor="end"&gt;today&lt;/text&gt;
     &lt;g class="fanGroup"&gt;
       &lt;path class="fanHit" d="M580,33.61702127659575 Q643,32.06808510638298 706,25.872340425531917" data-val="230" data-label="High" data-cls="high"&gt;&lt;/path&gt;

@@ -105,17 +105,24 @@ describe('the type ramp', () => {
 
   it('has a floor of 11px', () => {
     /* 8px text on a dimmed screen at arm's length in a gym is
-       decoration, not information. */
+       decoration, not information. Nine sizes, not eight: --fs-giant is
+       the one deliberate step above hero (.daytitle only, see its
+       comment at :root), not a ninth ordinary role — the ramp itself is
+       still the same eight, and the floor claim still holds regardless
+       of a token that only ever raises the ceiling. */
     const sizes = [...tokens().matchAll(/--fs-\w+:\s*([\d.]+)px/g)].map((m) => parseFloat(m[1]))
-    expect(sizes).toHaveLength(8)
+    expect(sizes).toHaveLength(9)
     expect(Math.min(...sizes)).toBe(11)
   })
 
-  it('uses only role tokens for size in the stylesheet', () => {
+  it('uses only role tokens for size in the stylesheet, plus the one named exception', () => {
     const { rules } = splitCss(readFileSync(TILE, 'utf8'))
     const used = [...rules.matchAll(/font-size\s*:\s*var\(--fs-([\w-]+)\)/g)].map((m) => m[1])
     expect(used.length).toBeGreaterThan(30)
-    expect([...new Set(used)].filter((u) => !ROLES.includes(u))).toEqual([])
+    /* giant is the only token allowed outside ROLES, and only because
+       :root documents it as the sole exception above hero. A second
+       unlisted name here is still a value that escaped the ramp. */
+    expect([...new Set(used)].filter((u) => !ROLES.includes(u))).toEqual(['giant'])
   })
 
   it('sizes every font from the ramp or the glyph scale, and nothing else', () => {

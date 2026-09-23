@@ -63,3 +63,36 @@ site — `doseNote` and `transferNote` exist, closed, for exactly that.
 
 See `lib/train/dose.ts`, `lib/train/transfer.ts`, `lib/train/resample.ts`,
 `lib/train/shadow.ts`.
+
+## The coach overlay — still deferred, needs a design pass not a rounding pass
+
+`.coachFab`, `.coachOverlay`, `.coachMorph` and the ten `.cv*` classes
+(`.cvSend`/`.cvInputRow` excepted — they came back earlier as button/input
+primitives) were part of the August loss and have not been recovered,
+unlike the frame, the fan browser, progress photos, settings and the
+calendar, which all were in this same pass.
+
+**It is a different kind of gap.** Every other recovered group ported onto
+the current token set with nothing worse than a sub-floor size needing to
+round up. The coach overlay does not: every colour in it is a bespoke raw
+`rgba()` — `rgba(10,20,17,.92)`, `rgba(2,3,3,.98)`, `rgba(16,22,20,.95)`,
+`rgba(4,5,5,.98)`, plus `rgba(110,231,183,.2)` and `.03` for its border and
+inset glow — describing a 28px-blur, saturated glass panel. None of it maps
+onto `--e0`–`--e4`, and none of it should: it is a second visual language,
+not a token gap.
+
+**This was a deliberate move, not an oversight, and the record of that
+decision already exists in the tile.** The comment above `#vt-backdrop`
+(`public/tiles/train.html`, near the top of the `<style>` block) says the
+rest of the design moved away from heavy blur and glass toward flat
+elevation steps, and kept the backdrop only "as-is per request." Recovering
+the coach overlay verbatim would reintroduce exactly what that move left
+behind — same blur-and-glass instinct, just on a different surface.
+
+**Recommendation for whoever picks this up:** treat it as a redesign
+brief, not a recovery task. The markup and JS (`openCoach`/`closeCoach`,
+`lib/train/insight.ts`, `lib/train/review.ts`) are live and unaffected —
+this is styling only. `git show 731e891:public/tiles/train.html` still has
+the original rules if the old shape is useful as a reference, but porting
+its colours is very likely repeating the thing `#vt-backdrop`'s comment
+already says was corrected once.
