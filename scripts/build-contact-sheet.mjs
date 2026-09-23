@@ -536,6 +536,75 @@ ${sec('calendar', '18 · The calendar', 'Rounded per tests/tools/recovered-primi
   </div>
 `)}
 
+${sec('overview', '19 · Overview cards &amp; weekday bars', 'Signal shows up twice here — .ovNum.mint and .wdFill’s gradient — flagged, not changed, in the same pass that ported these.', `
+  <div class="ovGrid" style="margin-top:0">
+    ${cell('ovCard, gold', '<div class="ovCard"><div class="ovNum gold">6</div><div class="ovLbl">Longest run</div><div class="ovDesc">weeks at 3+ sessions</div></div>')}
+    ${cell('ovCard, mint + chart', '<div class="ovCard"><div class="ovNum mint">128,400</div><div class="ovLbl">Total lb lifted</div><div class="ovChart"><div class="ovBar" style="height:40%"></div><div class="ovBar" style="height:65%"></div><div class="ovBar" style="height:50%"></div><div class="ovBar now" style="height:80%"></div></div><div class="ovCap">8-week trend</div></div>')}
+  </div>
+  <div class="cs-stack">
+    ${cell('wdBars', '<div class="wdBars">'+['M','T','W','T','F','S','S'].map((d,i)=>'<div class="wdBar"><div class="wdTrack"><div class="wdFill" style="height:'+[30,55,20,70,45,10,0][i]+'%"></div></div><span class="wdLbl">'+d+'</span></div>').join('')+'</div>')}
+    ${cell('stats / stat', '<div class="stats"><div class="stat"><div class="k">Week streak</div><div class="v gold">4</div></div><div class="stat"><div class="k">Total sessions</div><div class="v">86</div></div><div class="stat"><div class="k">Lifts tracked</div><div class="v up">12</div></div></div>')}
+    ${cell('statStrip', '<div class="statStrip"><div class="stat"><div class="k">Sets</div><div class="v">4</div></div><div class="stat"><div class="k">Volume</div><div class="v">1,240</div></div><div class="stat"><div class="k">PRs</div><div class="v gold">1</div></div></div>')}
+  </div>
+`)}
+
+${sec('hero', '20 · Hero &amp; progress ring', 'The circular "today’s session" completion ring, separate from .daytitle/.daydots. --signal is the ring fill (.prFill) and the streak figure inside .heroSub.', `
+  <div class="cs-stack">
+    <div class="heroCap">Today&rsquo;s session<span class="streakPill" style="display:inline-block">4 day streak</span></div>
+    <div class="heroRow">
+      <div class="progRing">
+        <svg viewBox="0 0 88 88"><circle class="prTrack" cx="44" cy="44" r="38"/><circle class="prFill pulse" cx="44" cy="44" r="38" style="stroke-dasharray:238.8;stroke-dashoffset:80"/></svg>
+        <div class="prCenter"><div class="prPct">66%</div><div class="plabel"><b class="num">4</b> of 6 logged</div></div>
+      </div>
+      <div class="heroText">
+        <div class="daytitle" style="font-size:28px">Push Day</div>
+        <div class="heroSub">Longest set streak: <b>12</b></div>
+      </div>
+    </div>
+  </div>
+`)}
+
+${sec('trend', '21 · Trend-chart SVG primitives', 'A weight/volume-over-time chart, separate from the fan browser’s SVG. --signal is the line, the unqualified dot, and the area fill (var(--mint) in the markup that builds this).', `
+  ${cell('the full chart', '<div class="plot" style="height:160px"><svg viewBox="0 0 300 160" preserveAspectRatio="none"><defs><linearGradient id="cs-fill-demo" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--mint);stop-opacity:.22"/><stop offset="1" style="stop-color:var(--mint);stop-opacity:0"/></linearGradient></defs><line class="grid" x1="30" y1="30" x2="290" y2="30"/><text class="axis-label" x="20" y="34" text-anchor="end">225</text><line class="grid" x1="30" y1="90" x2="290" y2="90"/><text class="axis-label" x="20" y="94" text-anchor="end">185</text><path class="area" fill="url(#cs-fill-demo)" d="M30,120 L100,90 L180,60 L260,40 L260,140 L30,140 Z"/><polyline class="line" points="30,120 100,90 180,60 260,40"/><circle class="dot off" cx="30" cy="120" r="5"/><circle class="dot" cx="100" cy="90" r="5"/><circle class="dot best" cx="260" cy="40" r="5"/><text class="xlab" x="30" y="154" text-anchor="start">Jan 1</text><text class="xlab best" x="260" y="154" text-anchor="end">today</text></svg></div>')}
+`)}
+
+${sec('form', '22 · Step-by-step form flow', 'formGist is the lede under a popup title; formSteps/formStep number a short how-it-works list. .formStep .n is signal-coloured.', `
+  <div class="cs-stack">
+    ${cell('formEquip', '<div class="formEquip">Barbell &middot; Rack</div>')}
+    ${cell('formGist', '<p class="formGist">Built from your own lifts, over eight weeks, starting from your real history.</p>')}
+    ${cell('formSteps', '<div class="formSteps"><div class="formStep"><span class="n">I</span><span class="t">Pick the lifts you want to change.</span></div><div class="formStep"><span class="n">II</span><span class="t">Choose a direction &mdash; more volume, less, or a deload.</span></div><div class="formStep"><span class="n">III</span><span class="t">Review the projection before you accept it.</span></div></div>')}
+  </div>
+`)}
+
+${sec('addlift', '23 · Add-lift label &amp; ring', '.addLift itself already has a rule (ported with the photos group); these are its icon ring and text label. Both are signal-coloured.', `
+  <div class="cs-row">
+    ${cell('addLift, take a photo', '<button class="addLift"><span class="addLiftRing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span class="addLiftLabel">Take a photo</span></button>')}
+    ${cell('addLift, add a lift', '<button class="addLift"><span class="addLiftRing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><span class="addLiftLabel">Add a lift</span></button>')}
+  </div>
+`)}
+
+${sec('misc', '24 · Miscellaneous', 'No shared theme &mdash; small pieces from across the tile. streakPill, best-w, noteEdit’s focus/button states, miniSpinner and miniCheck all carry --signal.', `
+  <div class="cs-stack">
+    ${cell('starterTag', '<div class="starterTag">&#10022; starter &mdash; the value is what you build</div>')}
+    ${cell('streakPill', '<span class="streakPill" style="display:inline-block">4 day streak</span>')}
+    ${cell('chrome', '<div class="chrome"><span class="wordmark">TRAIN</span></div>')}
+    ${cell('exwrap (holds .ex cards)', '<div class="exwrap" style="min-height:8px;border:1px dashed var(--hair-strong);border-radius:8px"></div>')}
+    ${cell('restPanel', '<div class="restPanel"><div class="moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></div><h3>Today is a rest day.</h3><p>You marked today off. Tap below to bring your session back.</p><button class="undo">bring the session back</button></div>')}
+    ${cell('finishRow', '<div class="finishRow"><button class="finishBtn">Finish session</button></div>')}
+    ${cell('store-note', '<p class="store-note">Saved to your Vitality dashboard.</p>')}
+    ${cell('chipRow', '<div class="chipRow"><button class="chip">7D</button><button class="chip">1M</button><button class="chip">All</button></div>')}
+    ${cell('goalTop (inside goalRow)', '<div class="goalRow"><div class="goalTop"><span>Bench Press</span><span>185 / 225 lb</span></div></div>')}
+    ${cell('insightBox', '<div class="insightBox">You’re 12 lb from a squat PR at this rep range.</div>')}
+    ${cell('best-w', '<span class="best-w"><svg viewBox="0 0 24 24" fill="var(--gold)"><path d="M12 3.5l2.5 5.1 5.6.8-4 3.9 1 5.6L12 16.9 6.9 18.9l1-5.6-4-3.9 5.6-.8z"/></svg><span class="num">225</span> <span class="u">lb</span></span>')}
+    ${cell('emptyHist', '<p class="emptyHist">No saved templates yet.</p>')}
+    ${cell('secLbl', '<div class="secLbl">Bodyweight</div>')}
+    ${cell('swapList / swapItem', '<div class="swapList">'+swapItem('Barbell', '—')+swapItem('Dumbbells', 'yes', true)+'</div>')}
+    ${cell('noteEdit', '<div class="noteEdit"><input value="Left shoulder, keep elbows tucked" /><button>Save</button></div>')}
+    ${cell('miniSpinner / miniCheck', '<div><span class="miniSpinner"></span>Uploading&hellip;</div><div style="margin-top:6px"><span class="miniCheck">&#10003;</span>Saved</div>')}
+    ${cell('skeleton-shimmer', '<div class="photoImg photoImg--pending skeleton-shimmer" style="width:88px;height:60px;border-radius:var(--r-sm)"></div>')}
+  </div>
+`)}
+
 </div>
 </body>
 </html>

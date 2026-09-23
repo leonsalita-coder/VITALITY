@@ -171,7 +171,7 @@ const FRAME_MARK = 'RECOVERED — the frame'
 /* A function, not an array built now — RECOVER_2_MARK and CAL_MARK are
    declared further down the file, and this is only ever called from
    inside a test body, by which point every mark below has its value. */
-const sectionMarks = () => [MARK, FRAME_MARK, RECOVER_2_MARK, CAL_MARK]
+const sectionMarks = () => [MARK, FRAME_MARK, RECOVER_2_MARK, CAL_MARK, REST_MARK]
 const sectionCss = (mark: string) => {
   const all = css()
   const start = all.indexOf(mark)
@@ -395,6 +395,114 @@ describe('the calendar came back', () => {
       const rule = new RegExp(`${sel.replace(/[.[\]]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(cal)![1]
       expect(rule, sel).toMatch(/--signal/)
     }
+  })
+})
+
+/**
+ * The rest of the tile: overview/weekday stats, the hero progress ring,
+ * the trend-chart SVG primitives, the step-by-step form flow, the
+ * add-lift button's label and ring, and a miscellaneous set with no
+ * shared theme. 57 of the original 59 still-missing classes — .odo and
+ * .odoDigit are excluded on purpose, see the "removed" describe block
+ * below and docs/train-missing-stylesheet.md.
+ */
+const REST_MARK = 'RECOVERED — the remaining 59'
+const restCss = () => sectionCss(REST_MARK)
+
+const REST_GROUPS: Array<[string, string[]]> = [
+  ['overview & weekday stats', [
+    'ovGrid', 'ovNum', 'ovLbl', 'ovDesc', 'ovChart', 'ovBar', 'ovCap',
+    'wdBars', 'wdBar', 'wdTrack', 'wdFill', 'wdLbl',
+    'stats', 'stat', 'statStrip',
+  ]],
+  ['hero & progress ring', [
+    'heroCap', 'heroRow', 'progRing', 'prTrack', 'prFill', 'prCenter', 'prPct', 'heroText', 'heroSub',
+  ]],
+  ['trend-chart SVG primitives', [
+    'plabel', 'plot', 'grid', 'axis-label', 'xlab', 'area', 'line', 'dot',
+  ]],
+  ['step-by-step form flow', ['formEquip', 'formGist', 'formSteps', 'formStep']],
+  ['add-lift label & ring', ['addLiftRing', 'addLiftLabel']],
+  ['miscellaneous', [
+    'starterTag', 'streakPill', 'chrome', 'exwrap', 'restPanel', 'finishRow',
+    'store-note', 'photoImg--pending', 'chipRow', 'goalTop', 'insightBox',
+    'best-w', 'emptyHist', 'secLbl', 'swapList', 'noteEdit', 'miniSpinner',
+    'miniCheck', 'skeleton-shimmer',
+  ]],
+]
+
+describe('the rest of the tile came back', () => {
+  it.each(REST_GROUPS)('%s: has a rule for every class', (_name, classes) => {
+    const all = css()
+    for (const c of classes) {
+      expect(new RegExp(`\\.${c.replace(/[.[\]]/g, '\\$&')}\\b`).test(all), c).toBe(true)
+    }
+  })
+
+  it('is appended after the calendar, not interleaved', () => {
+    const all = css()
+    expect(all.indexOf(REST_MARK)).toBeGreaterThan(all.indexOf(CAL_MARK))
+  })
+
+  it('shares no selector with what came before it', () => {
+    const all = css()
+    const before = all.slice(0, all.indexOf(REST_MARK))
+    const older = new Set(selectorsOf(before))
+    const clashes = selectorsOf(restCss()).filter((s) => older.has(s))
+    expect(clashes).toEqual([])
+  })
+
+  it('rounds every sub-floor or near-miss size instead of porting it raw', () => {
+    const rest = restCss()
+    for (const raw of [
+      '24px', '9px', '10.5px', '8px', '9.5px', '20px',
+      '19px', '11px', '8.5px', '16px', '12px', '14.5px',
+      '14px', '25px',
+    ]) {
+      expect(rest, raw).not.toContain(`font-size:${raw}`)
+    }
+  })
+
+  it('breaks its four genuine ties toward --fs-body, and addLiftLabel toward --fs-caption', () => {
+    const rest = restCss()
+    for (const sel of ['.formGist', '.formStep .t', '.restPanel p', '.restPanel .undo', '.noteEdit input']) {
+      const rule = new RegExp(`${sel.replace(/[.[\]]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(rest)![1]
+      expect(rule, sel).toContain('font-size:var(--fs-body)')
+    }
+    const addLiftLabel = /\.addLiftLabel\s*\{([^}]*)\}/.exec(rest)![1]
+    expect(addLiftLabel).toContain('font-size:var(--fs-caption)')
+  })
+
+  it("drops .wdFill's signal-coloured glow", () => {
+    const rule = /\.wdFill\s*\{([^}]*)\}/.exec(restCss())![1]
+    expect(rule).not.toContain('box-shadow')
+  })
+
+  it('confirms .area has real markup to fill — url(#fill) is defined, not dangling', () => {
+    const tile = readFileSync(TILE, 'utf8')
+    expect(tile).toContain('id="fill"')
+  })
+})
+
+describe('.odo and .odoDigit are removed, not recovered', () => {
+  it('has no rule for either, and no markup anywhere', () => {
+    const tile = readFileSync(TILE, 'utf8')
+    /* selectorsOf, not a raw string search — the section comment above
+       names both classes in prose, which a raw search would catch. */
+    const selectors = selectorsOf(css())
+    expect(selectors).not.toContain('.odo')
+    expect(selectors).not.toContain('.odoDigit')
+    expect(tile).not.toContain('class="odo')
+  })
+
+  it('records the removal alongside the theme switch', () => {
+    const doc = readFileSync('docs/train-missing-stylesheet.md', 'utf8')
+    const at = doc.indexOf('Removed, not recovered')
+    expect(at).toBeGreaterThan(-1)
+    const next = doc.indexOf('\n## ', at + 1)
+    const section = doc.slice(at, next > -1 ? next : undefined)
+    expect(section).toMatch(/theme switch/i)
+    expect(section).toContain('odoDigit')
   })
 })
 

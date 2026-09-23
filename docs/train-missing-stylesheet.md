@@ -64,6 +64,33 @@ site — `doseNote` and `transferNote` exist, closed, for exactly that.
 See `lib/train/dose.ts`, `lib/train/transfer.ts`, `lib/train/resample.ts`,
 `lib/train/shadow.ts`.
 
+## Removed, not recovered
+
+Two pieces of the August stylesheet are not coming back, for the same
+underlying reason in both cases: the thing they styled no longer exists,
+either as behaviour or as markup. Recorded together because they were
+found the same way — checking liveness before porting, rather than
+assuming a class name still meant something because it used to.
+
+**The theme switch** (`.theme-switch` and its eight `__`-scoped parts) was
+a real, reachable control — a "Dark" row in Settings — but its checkbox
+had no change handler, and the code inserting it said so directly: "Just
+a preview for now — not wired to a real light mode yet." A control that
+does nothing is a bug, not a missing style. `SKY_TOGGLE_HTML`,
+`SKY_STARS_SVG`, and their insertion in `openSettings()` were removed
+entirely, with one comment left pointing at `.bouncyToggle` (already
+recovered, already used by `#moonbtn`) as the primitive for a real toggle
+once a light mode exists to switch to.
+
+**`.odo` / `.odoDigit`** never had a functioning replacement to remove —
+they simply have no markup anywhere in the tile, not hidden, not inert,
+absent. The digit-reel effect they were built for (numbers counting up
+instead of snapping when a value changes) was rebuilt as `countTo()`,
+which animates via interpolated `textContent` and the already-styled
+`.num` class. The explanatory comment above `countTo()` still describes
+the odometer concept in prose; the classes it used to mean are gone.
+Recovering CSS for `.odo`/`.odoDigit` would style nothing.
+
 ## The coach overlay — still deferred, needs a design pass not a rounding pass
 
 `.coachFab`, `.coachOverlay`, `.coachMorph` and the ten `.cv*` classes

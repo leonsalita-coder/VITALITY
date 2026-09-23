@@ -942,6 +942,139 @@
   .calPop .cpCap { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); margin-bottom:6px; }
   .calLegend { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); }
   @media (prefers-reduced-motion:reduce){ .cal .cd { animation:none; } }
+
+  /* ====================================================================
+     RECOVERED — the remaining 59, lifted from 731e891 in six groups
+     (overview/weekday stats, the hero progress ring, the trend-chart
+     SVG primitives, the step-by-step form flow, the add-lift button's
+     label/ring, and a miscellaneous set with no shared theme). Two
+     classes from the original 61 are NOT here — .odo and .odoDigit have
+     no markup anywhere in this tile (the digit-reel effect they styled
+     was replaced by countTo()'s plain text interpolation) — see
+     docs/train-missing-stylesheet.md, "Removed, not recovered".
+
+     Same deviations as the last two rounds: sub-floor and near-miss
+     sizes round to the nearest ramp token, and every size is tokenised
+     even where the raw number already equalled a token's value. Four
+     genuine ties (two candidates equally close) were broken by
+     judgement, not arithmetic, and are called out at the rule:
+     .formGist/.formStep .t/.restPanel p/.restPanel .undo/.noteEdit
+     input (16px and 14px, tied between --fs-body and its neighbour)
+     went to --fs-body as flowing sentence text, matching how .photoNote
+     was already decided; .addLiftLabel (14px, tied between --fs-caption
+     and --fs-body) went to --fs-caption, the closer-reading half of the
+     tie for a compact button label.
+
+     .wdFill's box-shadow:0 0 8px rgba(110,231,183,.25) is a
+     signal-coloured glow and is dropped, per the same rule that removed
+     it everywhere else — tests/tools/hierarchy.test.ts, "the glow is
+     gone", covers it now that this rule exists for it to check.
+
+     --signal ends up carrying colour in many places across this batch —
+     .ovNum.mint, .wdFill's fill, .prFill, .line, .dot (unqualified),
+     .xlab.best, .heroSub b, .formStep .n, .addLiftRing, .restPanel
+     .undo, .noteEdit's focus/button states, .miniSpinner, .miniCheck,
+     .insightBox's tinted background, .skeleton-shimmer's highlight
+     stop, and the trend chart's area fill (var(--mint), the --signal
+     alias, set in the markup that builds this chart). This is reported,
+     not fixed — see the commit message and PR notes for the full list
+     and the composition call this batch defers.
+
+     tests/tools/recovered-primitives.test.ts, "the rest of the tile
+     came back", holds this account.
+     ================================================================= */
+  .ovGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:10px; align-items:start; }
+  .ovNum { position:relative; z-index:1; font-family:var(--mono); font-size:var(--fs-display); font-weight:700; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-0.02em; }
+  .ovNum.gold { color:var(--gold); }
+  .ovNum.mint { color:var(--signal); }
+  .ovLbl { position:relative; z-index:1; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-top:8px; }
+  .ovDesc { position:relative; z-index:1; font-size:var(--fs-micro); color:var(--muted-2); margin-top:5px; line-height:1.4; }
+  .ovDesc b { color:var(--text); font-weight:600; }
+  .ovChart { position:relative; z-index:1; display:flex; align-items:flex-end; justify-content:center; gap:2.5px; height:26px; margin-top:12px; }
+  .ovBar { width:100%; max-width:8px; height:0%; border-radius:2px 2px 0 0; background:rgba(110,231,183,.35); transition:height var(--d5) var(--ease-out); }
+  .ovBar.now { background:var(--gold); }
+  .ovCap { position:relative; z-index:1; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.08em; text-transform:uppercase; color:var(--muted-2); margin-top:6px; }
+  .wdBars { display:flex; gap:8px; margin-top:18px; align-items:flex-end; height:72px; }
+  .wdBar { flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; }
+  .wdTrack { flex:1; width:100%; display:flex; align-items:flex-end; }
+  .wdFill { width:100%; background:linear-gradient(180deg, rgba(167,243,208,.9), var(--signal)); border-radius:4px 4px 0 0; min-height:2px; transition:height var(--d5) var(--ease-out); }
+  .wdLbl { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); text-transform:uppercase; }
+  .stats { display:flex; margin-top:20px; padding-top:18px; border-top:1px solid var(--hair); }
+  .stat { flex:1; text-align:center; }
+  .stat .k { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.12em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .stat .v { font-family:var(--mono); font-size:var(--fs-title); font-weight:700; margin-top:8px; font-variant-numeric:tabular-nums; letter-spacing:-0.01em; }
+  .stat .v.up { color:var(--signal); } .stat .v.gold { color:var(--gold); }
+  .statStrip { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:20px; }
+
+  .heroCap { display:flex; align-items:center; gap:8px; margin-top:22px; }
+  .heroRow { display:flex; align-items:center; gap:18px; margin-top:14px; }
+  .progRing { position:relative; width:88px; height:88px; flex:none; }
+  .progRing svg { width:100%; height:100%; transform:rotate(-90deg); }
+  .prTrack { fill:none; stroke:var(--hair-strong); stroke-width:6; }
+  .prFill { fill:none; stroke:var(--signal); stroke-width:6; stroke-linecap:round; stroke-dasharray:238.8; stroke-dashoffset:238.8; transition:stroke-dashoffset var(--d4) var(--ease-momentum); }
+  .prFill.pulse { animation:rulerPulse .6s var(--ease-out); }
+  @keyframes rulerPulse { 0% { filter:brightness(1); } 35% { filter:brightness(1.6); } 100% { filter:brightness(1); } }
+  .prCenter { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; }
+  .prPct { font-family:var(--sans); font-weight:800; font-size:var(--fs-title); letter-spacing:-0.02em; color:var(--text); line-height:1; }
+  .heroText { flex:1; min-width:0; }
+  .heroSub { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); margin-top:9px; letter-spacing:.01em; }
+  .heroSub b { color:var(--signal); font-weight:700; }
+
+  .plabel { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); letter-spacing:.03em; text-align:center; line-height:1.4; }
+  .plabel b { color:var(--text); font-weight:700; }
+  .plot { position:relative; width:100%; aspect-ratio:600/240; }
+  .plot svg { width:100%; height:100%; display:block; overflow:visible; }
+  .grid { stroke:var(--hair); stroke-width:1; }
+  .axis-label,.xlab { fill:var(--muted); font-family:var(--mono); font-size:var(--fs-micro); }
+  .xlab.best { fill:var(--signal); font-weight:500; }
+  .area { fill:url(#fill); }
+  .line { fill:none; stroke:var(--signal); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+  .dot { fill:var(--signal); stroke:var(--e1); stroke-width:3; }
+  .dot.best { fill:var(--gold); }
+  .dot.off { fill:var(--muted); }
+
+  .formEquip { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-top:7px; }
+  .formGist { font-size:var(--fs-body); font-weight:500; line-height:1.4; margin:18px 0 0; }
+  .formSteps { display:flex; flex-direction:column; gap:13px; margin-top:18px; }
+  .formStep { display:flex; gap:15px; align-items:baseline; }
+  .formStep .n { font-family:var(--mono); font-size:var(--fs-label); color:var(--signal); width:22px; flex:none; }
+  .formStep .t { font-size:var(--fs-body); font-weight:500; line-height:1.45; }
+
+  .addLiftRing { width:42px; height:42px; border-radius:50%; border:2px solid rgba(110,231,183,.4); border-bottom-width:4px; transform-origin:bottom; display:grid; place-items:center; color:var(--signal); transition:background var(--d2), transform var(--d1) var(--spring), box-shadow var(--d3), border-bottom-width var(--d1) var(--spring); }
+  .addLiftRing svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; }
+  .addLiftLabel { font-family:var(--sans); font-weight:600; font-size:var(--fs-caption); color:var(--signal); }
+
+  .starterTag { width:max-content; max-width:92%; margin:var(--sp5) auto var(--sp5); padding:6px 14px; border:1px solid var(--hair-strong); border-radius:999px; font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.16em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:1.6; }
+  .streakPill { font-family:var(--mono); font-size:var(--fs-micro); font-weight:700; color:var(--gold); background:rgba(245,166,35,.08); border:1px solid rgba(245,166,35,.28); border-radius:999px; padding:4px 10px; display:none; letter-spacing:.02em; }
+  .chrome { display:flex; align-items:center; gap:10px; }
+  .exwrap { margin-top:8px; display:flex; flex-direction:column; gap:2px; }
+  .restPanel { text-align:center; padding:38px 16px 30px; }
+  .restPanel .moon { width:44px; height:44px; margin:0 auto; color:var(--muted); }
+  .restPanel .moon svg { width:100%; height:100%; fill:currentColor; }
+  .restPanel h3 { font-family:var(--sans); font-weight:800; font-size:var(--fs-hero); letter-spacing:-0.015em; margin:16px 0 0; }
+  .restPanel p { font-size:var(--fs-body); line-height:1.6; color:var(--muted-2); max-width:340px; margin:12px auto 0; }
+  .restPanel .undo { margin-top:18px; background:none; border:none; color:var(--signal); font-weight:600; font-size:var(--fs-body); cursor:pointer; }
+  .finishRow { margin-top:22px; }
+  .store-note { text-align:center; color:var(--muted-2); font-size:var(--fs-micro); font-weight:500; margin-top:8px; }
+  .photoImg--pending { background:var(--e3); }
+  .chipRow { display:flex; gap:8px; overflow-x:auto; padding:2px 2px 6px; margin:16px -2px 0; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  .chipRow::-webkit-scrollbar { display:none; }
+  .goalTop { display:flex; justify-content:space-between; font-size:var(--fs-caption); margin-bottom:9px; }
+  .insightBox { margin-top:14px; padding:14px 16px; background:rgba(110,231,183,.05); border:1px solid rgba(110,231,183,.18); border-radius:var(--r-md); text-align:left; font-size:var(--fs-caption); color:var(--text); line-height:1.55; }
+  .best-w { color:var(--gold); display:inline-flex; align-items:center; gap:5px; justify-content:flex-end; }
+  .best-w svg { width:12px; height:12px; fill:var(--gold); }
+  .emptyHist { text-align:center; color:var(--muted); padding:34px 0; font-family:var(--sans); font-size:var(--fs-body); }
+  .secLbl { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:20px 0 10px; }
+  .swapList { display:flex; flex-direction:column; gap:8px; }
+  .noteEdit { padding-left:29px; margin-top:12px; display:flex; gap:8px; }
+  .noteEdit input { flex:1; background:var(--e2); border:1px solid var(--hair-strong); border-radius:10px; color:var(--text); font:inherit; font-size:var(--fs-body); padding:9px 11px; }
+  .noteEdit input:focus { outline:none; border-color:var(--signal); }
+  .noteEdit button { background:var(--signal); color:var(--signal-ink); border:none; border-radius:10px; padding:0 16px; font-weight:700; cursor:pointer; }
+  .miniSpinner { display:inline-block; width:11px; height:11px; margin-right:6px; border:2px solid rgba(255,255,255,.18); border-top-color:var(--signal); border-radius:50%; vertical-align:-1.5px; animation:btnSpin .6s linear infinite; }
+  .miniCheck { display:inline-block; margin-right:6px; color:var(--signal); font-weight:700; }
+  .skeleton-shimmer { position:relative; overflow:hidden; }
+  .skeleton-shimmer::after { content:''; position:absolute; inset:0; background:linear-gradient(110deg, transparent 20%, rgba(255,255,255,.06) 45%, rgba(110,231,183,.14) 50%, rgba(255,255,255,.06) 55%, transparent 80%); background-size:200% 100%; animation:skShimmer 1.6s ease-in-out infinite; }
+  @keyframes skShimmer { 0%{background-position:160% 0;} 100%{background-position:-60% 0;} }
 </style>
 <style>
   body { margin:0; background:var(--e0); color:var(--text); font-family:var(--sans); }
