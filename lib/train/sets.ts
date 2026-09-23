@@ -126,6 +126,19 @@ export interface HistoryEntry {
    * logged before this existed reads — and correctly so.
    */
   group?: string
+  /**
+   * Which session on this date wrote this row.
+   *
+   * A date alone cannot tell two sessions on the same day apart — a
+   * morning lift and an evening one both read `date: '2026-09-22'`, and
+   * a write keyed only by date silently replaces whichever row was
+   * there. Absent means the row predates this field, which
+   * readableEntries resolves to the date itself: the only identity an
+   * old row ever had, and the correct one to compare against — it makes
+   * every pre-existing row group with every OTHER row on its own date,
+   * exactly as history has always behaved.
+   */
+  sessionId?: string
 }
 
 export interface VolumeOptions {
@@ -245,7 +258,12 @@ export function* readableEntries(
     if (!entry || typeof entry !== 'object') continue
     if (typeof entry.date !== 'string' || !entry.date) continue
     if (entry.off && !opts.includeOff) continue
-    yield entry
+    /* The migration, done once, here, rather than scattered across
+       every caller: a row with no sessionId is exactly as old as this
+       field, and its date IS its only identity. Yielded as a copy —
+       this is a read, and mutating the caller's own stored array on
+       the way past it would be a write nobody asked for. */
+    yield entry.sessionId ? entry : { ...entry, sessionId: entry.date }
   }
 }
 
@@ -319,6 +337,13 @@ export function workingVolume(entry: HistoryEntry, opts: VolumeOptions = {}): Vo
     const sides = isPerSide(set, opts) ? 2 : 1
     const reps = (set.r || 0) * sides
     const bw = typeof opts.bodyweightLb === 'number' && opts.bodyweightLb > 0 ? opts.bodyweightLb : null
+    /* This validity check is never seen: `factor` only ever feeds into
+       bodyweightLoad(), which re-validates with the identical check
+       before using it. A garbage value that slips past here (0, a
+       negative, a string) is caught there instead — confirmed by
+       feeding every mutant's output through the real function. Left in
+       rather than trusting the duplicate: the call site should not have
+       to know bodyweightLoad guards its own input. */
     const factor = typeof opts.bodyweightFactor === 'number' && opts.bodyweightFactor > 0
       ? opts.bodyweightFactor : 1
 
@@ -420,6 +445,9 @@ export function entryScore(
       /* Once bodyweight is known these score on real load like any other
          lift; without it, reps are the only honest measure. */
       const bw = typeof opts.bodyweightLb === 'number' && opts.bodyweightLb > 0 ? opts.bodyweightLb : null
+      /* Same redundancy as workingVolume's copy of this check, and the
+         same reason: factor only reaches bodyweightLoad(), never direct
+         arithmetic, so this local guard cannot diverge from that one. */
       const factor = typeof opts.bodyweightFactor === 'number' && opts.bodyweightFactor > 0
         ? opts.bodyweightFactor : 1
       if (bw == null) return { kind, primary: best((s) => s.r || 0), secondary: best((s) => s.r || 0) }

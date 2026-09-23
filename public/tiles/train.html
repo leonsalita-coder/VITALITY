@@ -1308,7 +1308,7 @@ var TrainEngine = (() => {
       if (!entry || typeof entry !== "object") continue;
       if (typeof entry.date !== "string" || !entry.date) continue;
       if (entry.off && !opts.includeOff) continue;
-      yield entry;
+      yield entry.sessionId ? entry : { ...entry, sessionId: entry.date };
     }
   }
   function workingSets(entry) {
@@ -6418,6 +6418,29 @@ function migrateDeloadOverrides(){
   delete STATE.deloadOverrides;
   saveState();
 }
+/* A row written before session ids existed has no way to tell a second
+   same-day session apart from the first — which is exactly the bug this
+   whole feature closes. True by construction, every such row gets its
+   OWN date as its session id: that is the only identity it ever had,
+   and it groups the row with every other row on that date exactly as
+   history already behaved. Run once here rather than trusted to every
+   comparison site — a snapshot restored after an eviction, or a JSON
+   backup restored mid-session, both land in STATE.history through a
+   DIFFERENT path than an ordinary boot, and either one skipping this
+   would silently reopen the collision on whatever it brought back. */
+function migrateHistorySessionIds(){
+  const history = STATE.history;
+  if(!history || typeof history!=='object') return;
+  for(const id of Object.keys(history)){
+    const rows = history[id];
+    if(!Array.isArray(rows)) continue;
+    for(const row of rows){
+      if(row && typeof row==='object' && !row.sessionId && typeof row.date==='string'){
+        row.sessionId = row.date;
+      }
+    }
+  }
+}
 
 /* ---- build / load state ---------------------------------------------
    ONE session, keyed by today's real date — rolls over to a fresh, empty
@@ -6429,7 +6452,7 @@ function migrateDeloadOverrides(){
 function buildState(){
   return {
     unit:'lb', submitted:false,
-    session:{ date:today, off:false, warmup:[], cooldown:[], ex:[] },
+    session:{ date:today, off:false, warmup:[], cooldown:[], ex:[], id:newSessionId() },
     history:{}, customLib:{}, aliases:{}, bodyweight:[], startingWeights:{}, equipment:[], routines:[], routineDays:{}, finishedDates:[], templates:[], deloadStates:{}, deloadExclusions:[], painFlagged:[], weeklyTarget:4, otherTraining:[], predictions:{},
     exerciseNames:{}, shortTermGoal:'', photos:[], sessionDurations:[], liftGoals:[]
   };
@@ -6513,9 +6536,15 @@ function metricsContextFor(dateKey){
   let history = STATE.history || {};
   if(dateKey === today && curSession()){
     history = Object.assign({}, history);
+    /* Same collision this whole change is about: an earlier session
+       locked in today must not be erased by merging in the live,
+       still-open one just because both fall on the same date. Only the
+       CURRENT session's own not-yet-committed row is what gets replaced
+       here — anything from a session that already finished stays. */
+    const liveId = curSession().id;
     for(const e of curSession().ex || []){
       if(!(e.log || []).some(Boolean)) continue;
-      const rest = (history[e.id] || []).filter(x => x && x.date !== today);
+      const rest = (history[e.id] || []).filter(x => x && (x.date !== today || x.sessionId !== liveId));
       history[e.id] = rest.concat([todayEntry(e)]);
     }
   }
@@ -6782,6 +6811,17 @@ function setSessionMode(mode){
   saveState(); render();
 }
 
+/* A session id distinguishes two sessions on the SAME calendar day —
+   morning and evening — which the date string alone cannot. Minted at
+   two moments only: a brand-new day (nothing to collide with, so any id
+   is fine), and the explicit unlock-to-resume transition in
+   renderFinish, which is the one place a second session on today
+   genuinely begins. Everywhere else reads it, never mints it: an
+   in-progress session that predates this feature has no id yet, and
+   defaulting THAT to a fresh random value — rather than to today's date
+   — would orphan whatever it had already logged under the old code,
+   turning an ordinary continued session into a false two-a-day. */
+function newSessionId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 function curSession(){
   if(!STATE.session || STATE.session.date!==today){
     /* The day rolled over. If work was logged and finish was never pressed,
@@ -6794,8 +6834,14 @@ function curSession(){
     }
     STATE.submitted = false;
     Object.keys(restTimers).forEach(stopRest);
-    STATE.session = { date:today, off:false, warmup:[], cooldown:[], ex:[] };
+    STATE.session = { date:today, off:false, warmup:[], cooldown:[], ex:[], id:newSessionId() };
   }
+  /* Migration: a session already in progress when this shipped has no id
+     yet. Default it to today's date, matching how an unstamped HISTORY
+     row is read (sessionId ?? date) — so a session continued across a
+     reload keeps replacing its own rows in place exactly as it always
+     did, rather than being read as colliding with itself. */
+  if(!STATE.session.id) STATE.session.id = today;
   return STATE.session;
 }
 function sortedEx(session){ return session.ex.map((e,i)=>({e,i})).sort((a,b)=> (b.e.pinned-a.e.pinned)).map(o=>o.e); }
@@ -6814,7 +6860,7 @@ function logIsWorking(s){ return !!s && !s.fail && s.warmup!==true; }
 function logWorking(e){ return e.log.filter(logIsWorking); }
 /* Today's session as a history entry, so engine readers see one shape. */
 function todayEntry(e){
-  return { date:today, kg:e.kg, sets:e.log.filter(Boolean).map(s=>({
+  return { date:today, kg:e.kg, sessionId:curSession().id, sets:e.log.filter(Boolean).map(s=>({
     w:s.kg, r:s.reps, s:s.s, m:s.m, kind:s.kind, perSide:s.perSide, assisted:s.assisted,
     fail:s.fail, warmup:s.warmup,
   })) };
@@ -7152,6 +7198,12 @@ function renderFinish(session){
       recordShadowFindings();
       snapshotNow('session finished');
       publishMetrics(today, 'session finished');
+    } else {
+      /* UNLOCKING a finished session, not merely editing an open one.
+         This is the moment a second session on today genuinely starts:
+         whatever gets logged from here is distinct work, and it must not
+         silently replace what the morning already locked in. */
+      session.id = newSessionId();
     }
     const wasSubmitted=STATE.submitted;
     renderFinish(session); renderStreak(); renderOverviewCards(); saveState();
@@ -8508,7 +8560,16 @@ function repeatLastSession(e){
  */
 function rollupFor(e, date){
   const done = e.log.filter(s=>s&&!s.fail);
-  let h = histFor(e).filter(x=>x.date!==date);
+  /* A backdated edit (date !== today) is a whole-day rewrite by design —
+     the popup replaces everything logged for that day, and it has no
+     "current session" to distinguish. Only for TODAY does a second row
+     on the same date mean a second, distinct session rather than an
+     edit of the one already open: the sessionId check applies there and
+     nowhere else, so history edited from the calendar keeps behaving
+     exactly as it always did. */
+  const isToday = date===today;
+  const sid = isToday ? curSession().id : null;
+  let h = histFor(e).filter(x=>x.date!==date || (isToday && x.sessionId!==sid));
   if(done.length){
     /* Per-set weight and the warm-up flag are written from here on, so
        volume and e1RM can tell a ramp-up from the work. Older rows have
@@ -8548,7 +8609,7 @@ function rollupFor(e, date){
     /* The superset this lift was in, recorded with the session. Rest is
        only comparable between sessions of the same shape, and without
        this a switch away from supersets reads as rushing the rest. */
-    const row={date, kg: top ? top.kg : prescription(e).kg, sets};
+    const row={date, kg: top ? top.kg : prescription(e).kg, sets, sessionId: isToday ? sid : date};
     if(e.group) row.group=e.group;
     h.push(row);
     h.sort((a,b)=>a.date.localeCompare(b.date));
@@ -9192,6 +9253,7 @@ function runImport(text, unit, status){
     STATE.history[entry.exerciseId]=rows;
     if((STATE.finishedDates||[]).indexOf(entry.date)<0){ STATE.finishedDates=STATE.finishedDates||[]; STATE.finishedDates.push(entry.date); }
   });
+  migrateHistorySessionIds();
   rederiveFromHistory();
   /* Every day the import touched, oldest first — a backdated edit changes
      what was true on those days, and a consumer holding the old payload
@@ -9431,6 +9493,7 @@ function openSettings(){
           if(!out.ok){ restoreStatus.style.color='var(--fail)'; restoreStatus.textContent='Could not restore: '+out.reason+'.'; return; }
           snapshotNow('before restore');
           Object.assign(STATE, out.state);
+          migrateHistorySessionIds();
           rederiveFromHistory(); saveState();
           restoreStatus.style.color='var(--signal)';
           restoreStatus.textContent='Restored '+out.reason+'.';
@@ -11168,6 +11231,7 @@ function spawnParticles(root){
   STATE.finishedDates = STATE.finishedDates || [];
   STATE.templates = STATE.templates || [];
   STATE.history = STATE.history || {};
+  migrateHistorySessionIds();
   STATE.deloadStates = STATE.deloadStates || {};
   STATE.deloadExclusions = STATE.deloadExclusions || [];
   STATE.aliases = STATE.aliases || {};

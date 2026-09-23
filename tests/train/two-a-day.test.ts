@@ -10,6 +10,8 @@ import { currentWeekStreak, sessionsPerWeek } from '../../lib/train/streaks'
 import { sessionsPerWeekSeries, e1rmSeries } from '../../lib/train/series'
 import { restTrend } from '../../lib/train/timing'
 import { recentOtherLoad } from '../../lib/train/other'
+import { accuracyOver, type PredictionStore } from '../../lib/train/predictions'
+import { importCsv } from '../../lib/train/import'
 
 /**
  * TWO-A-DAYS — the assumption, made to fail out loud.
@@ -152,6 +154,44 @@ describe('the evening session is a session of its own', () => {
        so a two-a-day week looks thinner than it was. */
     const rows = [{ date: DAY }, { date: DAY }, { date: NEXT }]
     expect(new Set(rows.map((r) => r.date)).size).toBe(3)
+  })
+
+  it.fails('scores a prediction against the session it was actually made for', () => {
+    /* accuracyOver's `entries.find(e => e.date === p.date)` grabs
+       whichever row for that date comes first in array order — Prediction
+       carries no sessionId at all, so there is no way to tell which of
+       two same-day sessions a prediction was actually about. Two rows,
+       only one of which is a real attempt at the predicted 230x5; the
+       "wrong" one placed first is what gets scored today. */
+    const prediction = {
+      id: 'back_squat', date: DAY, weight: 230, reps: 5, seconds: null, metres: null,
+      basis: 'clean', deloadState: null, readiness: 'normal', madeAt: NOW,
+    } as const
+    const store: PredictionStore = { p1: prediction }
+    const wrongFirst = {
+      back_squat: [
+        sess(DAY, 5, 185),  // an unrelated lighter set, placed first — should not be scored
+        sess(DAY, 5, 245),  // the real attempt at 230x5 — a clear hit
+      ],
+    }
+    const result = accuracyOver(store, wrongFirst as never)
+    expect(result.hit).toBe(1)
+  })
+
+  it.fails('imports a genuinely second session rather than calling it a duplicate', () => {
+    /* import.ts's dedupe is `existing[id].some(e => e.date === row.date)`
+       — ANY existing row on that date marks the WHOLE imported row a
+       duplicate and drops it, even when the import is a real second
+       session that never touched the app. Worse than the overwrite this
+       whole feature fixes: the imported data is not even written. */
+    const existing = { back_squat: [{ date: DAY, kg: 225 }] }
+    const csv = [
+      'title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe',
+      `Day,${DAY} 18:00:00,${DAY} 19:00:00,Back Squat,1,normal,84,5,,,`,
+    ].join('\n')
+    const result = importCsv(csv, { existing: existing as never })
+    expect(result.report.duplicates).toBe(0)
+    expect(result.entries).toHaveLength(1)
   })
 })
 
@@ -311,14 +351,15 @@ describe('squat in the morning, squat in the evening', () => {
     run(`(function(){ document.querySelector('#finishBtn').click(); return STATE.submitted; })()`)
   }
 
-  it.fails('keeps BOTH sessions — today it keeps only the second', async () => {
-    /* THE DATA LOSS. rollupFor drops every row for (lift, date) before
-       writing the new one, so the morning's three sets are replaced by
-       the evening's two. Not merged — replaced. Five sets were done and
-       two are on record, with no warning and no undo.
-       
-       After the fix: two rows for squat on this date, five sets between
-       them, each carrying its own session id. */
+  it('keeps BOTH sessions, each on its own row', async () => {
+    /* THE DATA LOSS, FIXED. rollupFor used to drop every row for (lift,
+       date) before writing the new one, so the morning's three sets
+       were replaced by the evening's two — not merged, replaced. Five
+       sets were done and two were on record, with no warning and no
+       undo. This was `.fails` until the session-id guard landed; it
+       flipped to passing the moment rollupFor started comparing
+       sessionId as well as date, which is the proof the fix works
+       rather than an assertion that it should. */
     const { run, today } = await boot()
     session(run, 3, 225)                                   // morning
     run(`(function(){ document.querySelector('#finishBtn').click(); return STATE.submitted; })()`) // unlock
@@ -341,18 +382,58 @@ describe('squat in the morning, squat in the evening', () => {
     expect(rows[0].sets).toHaveLength(3)
   }, 60_000)
 
-  it('records today the loss it is going to fix', async () => {
-    /* Not an aspiration — the CURRENT behaviour, pinned. If somebody
-       "fixes" this by accident, or makes it worse, this is the line that
-       says what it used to do. */
+  it('publishing today does not erase the morning either — metricsContextFor', async () => {
+    /* The SECOND site this bug lived in, train.html:6518. rollupFor and
+       metricsContextFor carried the identical `x.date !== today` filter,
+       and both were fixed the same way in the same command — but only
+       rollupFor had a test watching it. This is that test for the other
+       one: lock the morning, start a genuinely new (unlocked) evening
+       session, and confirm publishing today's metrics still carries the
+       morning's committed row, not just the evening's live, uncommitted
+       one. */
     const { run, today } = await boot()
-    session(run, 3, 225)
-    run(`(function(){ document.querySelector('#finishBtn').click(); return STATE.submitted; })()`)
-    session(run, 2, 185)
-    const rows = JSON.parse(String(run(`JSON.stringify(STATE.history.squat || [])`)))
+    session(run, 3, 225)                                   // morning, locked
+    run(`(function(){ document.querySelector('#finishBtn').click(); return STATE.submitted; })()`) // unlock
+    run(`(function(){ curSession().ex=[]; render(); return true; })()`)
+    run(`(function(){ var s=curSession();
+      s.ex.push({id:'squat',name:'Squat',tier:1,sets:2,reps:5,kg:185,perHand:false,rest:90,
+        lastKg:185,pinned:false,collapsed:false,deload:false,note:'',log:[null,null]});
+      var e=s.ex[0]; doLog(e,0,{kg:185,reps:5},false); render(); return true; })()`) // evening, NOT finished
+    const rows = JSON.parse(String(run(`JSON.stringify(metricsContextFor(today).history.squat || [])`)))
       .filter((r: any) => r.date === today)
-    expect(rows).toHaveLength(1)
-    expect(rows[0].sets).toHaveLength(2)
-    expect(rows[0].kg).toBe(185)
+    expect(rows).toHaveLength(2)
+    const sets = rows.reduce((n: number, r: any) => n + (r.sets || []).length, 0)
+    expect(sets).toBe(4) // 3 morning + 1 logged-so-far evening
+  }, 60_000)
+
+  it.fails('keeps both backdated sessions on the same past date — currently inherited, not fixed', async () => {
+    /* THE HOLE THE isToday SCOPING LEAVES. rollupFor's sessionId check
+       only runs when `date === today`; for any other date it collapses
+       back to `x.date !== date`, the exact overwrite this feature exists
+       to fix — just reached through the history editor instead of a live
+       session. Confirmed by running it: two backdated writes to the same
+       past date, same lift, through the real rollupFor(draft, date) path
+       the history-edit popup uses. See docs/two-a-day-decisions.md,
+       "Known limitation: the guard is scoped to today".
+       This is deliberately out of scope for THIS command — isToday is a
+       narrow, considered cut, not an oversight — but it must stay
+       visible rather than silently read as "the guard is done". */
+    const { run } = await boot()
+    const PAST = '2026-08-01'
+    run(`(function(){
+      var draft = { id:'squat', name:'Squat', kind:'reps_weight',
+        log:[{kg:225,reps:5},{kg:225,reps:5},{kg:225,reps:5}] };
+      rollupFor(draft, '${PAST}');
+      return true; })()`)
+    run(`(function(){
+      var draft = { id:'squat', name:'Squat', kind:'reps_weight',
+        log:[{kg:185,reps:5},{kg:185,reps:5}] };
+      rollupFor(draft, '${PAST}');
+      return true; })()`)
+    const rows = JSON.parse(String(run(`JSON.stringify(STATE.history.squat || [])`)))
+      .filter((r: any) => r.date === PAST)
+    const sets = rows.reduce((n: number, r: any) => n + (r.sets || []).length, 0)
+    expect(rows).toHaveLength(2)
+    expect(sets).toBe(5)
   }, 60_000)
 })

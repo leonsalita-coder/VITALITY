@@ -17,36 +17,41 @@ import { readableEntries, type HistoryEntry } from '../../lib/train/sets'
  */
 describe('rows that can be read at all', () => {
   const ok = { date: '2026-09-19', kg: 100, sets: [{ w: 100, r: 5 }] }
+  /* What a well-formed row comes back AS: readableEntries stamps a
+     sessionId on anything that lacks one (see 'the migration' below),
+     so every expected shape here carries it. */
+  const okStamped = { ...ok, sessionId: ok.date }
 
   it('yields a well-formed row', () => {
-    expect([...readableEntries([ok])]).toEqual([ok])
+    expect([...readableEntries([ok])]).toEqual([okStamped])
   })
 
   it('skips an empty slot', () => {
-    expect([...readableEntries([null, ok] as never)]).toEqual([ok])
+    expect([...readableEntries([null, ok] as never)]).toEqual([okStamped])
   })
 
   it('skips a row with no date', () => {
-    expect([...readableEntries([{ ...ok, date: undefined }, ok] as never)]).toEqual([ok])
+    expect([...readableEntries([{ ...ok, date: undefined }, ok] as never)]).toEqual([okStamped])
   })
 
   it('skips a row whose date is not a string', () => {
-    expect([...readableEntries([{ ...ok, date: 20260919 }, ok] as never)]).toEqual([ok])
+    expect([...readableEntries([{ ...ok, date: 20260919 }, ok] as never)]).toEqual([okStamped])
   })
 
   it('skips something that is not a row at all', () => {
-    expect([...readableEntries(['2026-09-19', 7, true, ok] as never)]).toEqual([ok])
+    expect([...readableEntries(['2026-09-19', 7, true, ok] as never)]).toEqual([okStamped])
   })
 
   it('skips a rest day by default', () => {
-    expect([...readableEntries([{ ...ok, off: true }, ok])]).toEqual([ok])
+    expect([...readableEntries([{ ...ok, off: true }, ok])]).toEqual([okStamped])
   })
 
   it('yields rest days when asked for them', () => {
     /* Some reads count the days somebody deliberately took off, which is
        training information of its own. */
     const rest = { ...ok, off: true }
-    expect([...readableEntries([rest, ok], { includeOff: true })]).toEqual([rest, ok])
+    expect([...readableEntries([rest, ok], { includeOff: true })])
+      .toEqual([{ ...rest, sessionId: rest.date }, okStamped])
   })
 
   it('handles a missing list without complaint', () => {
@@ -68,6 +73,49 @@ describe('rows that can be read at all', () => {
        logged nothing — and callers that care count its sets themselves.
        Dropping it here would silently change what "a session" means. */
     expect([...readableEntries([{ date: '2026-09-19', kg: 0 }])]).toHaveLength(1)
+  })
+})
+
+/**
+ * The migration: a row with no session on it gets its own date as one.
+ *
+ * True by construction for every row ever written before this field
+ * existed — a date was the only identity a row had, and defaulting to
+ * it groups every pre-existing row with every OTHER row on that same
+ * date, exactly as history has always behaved. This is the ONE place
+ * that default lives; every caller across the engine sees it applied,
+ * without needing its own `?? date` fallback.
+ */
+describe('the migration', () => {
+  it('stamps sessionId = date on a row that has none', () => {
+    const [entry] = [...readableEntries([{ date: '2026-09-19', kg: 100 }])]
+    expect(entry.sessionId).toBe('2026-09-19')
+  })
+
+  it('leaves a real sessionId untouched', () => {
+    /* A row a live session actually wrote must not be silently
+       reassigned to its date — that would collapse two real sessions
+       on one day back into the very collision this exists to prevent. */
+    const withId = { date: '2026-09-19', kg: 100, sessionId: 'evening-abc123' }
+    const [entry] = [...readableEntries([withId])]
+    expect(entry.sessionId).toBe('evening-abc123')
+  })
+
+  it('gives two rows on the same date DIFFERENT session identity when they have it', () => {
+    const morning = { date: '2026-09-19', kg: 225, sessionId: 'morning-1' }
+    const evening = { date: '2026-09-19', kg: 185, sessionId: 'evening-2' }
+    const [a, b] = [...readableEntries([morning, evening])]
+    expect(a.sessionId).not.toBe(b.sessionId)
+  })
+
+  it('gives two OLD rows on the same date the SAME identity — their shared date', () => {
+    /* The control: two pre-migration rows sharing a date are exactly
+       the ordinary, non-collision case this whole system has always
+       had — one date, one session, full stop. */
+    const a = { date: '2026-09-19', kg: 225 }
+    const b = { date: '2026-09-19', kg: 185 }
+    const [ra, rb] = [...readableEntries([a, b])]
+    expect(ra.sessionId).toBe(rb.sessionId)
   })
 })
 

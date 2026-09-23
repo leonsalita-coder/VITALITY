@@ -158,3 +158,105 @@ describe('the storage report says which layers work', () => {
     expect(storageReport('ok', 'ok', 1).detail).toMatch(/1 snapshot,|1 snapshot$/)
   })
 })
+
+/**
+ * The eight sites a fixed-harness sweep found unwatched.
+ *
+ * Durability code runs on data nobody chose — a corrupt localStorage
+ * write, a snapshot from a boot that crashed halfway, a hand-edited
+ * export file. Every case below is one of those shapes, each picked to
+ * distinguish the mutation the sweep found from the code as written.
+ */
+describe('countSets does not crash on a state that fails its own guard', () => {
+  it('reads zero sets from a null state, not a thrown error', () => {
+    /* Every `||` on this guard has to hold: `!s` alone is not enough,
+       because typeof null === 'object' passes the SECOND clause, and a
+       version that dropped either clause reaches `s.history` on null. */
+    expect(makeSnapshot(null, NOW).sets).toBe(0)
+    expect(() => makeSnapshot(null, NOW)).not.toThrow()
+  })
+
+  it('reads zero sets from an object with no history field, not a thrown error', () => {
+    /* The complementary case: `s` IS an object (so `!s` and the typeof
+       check both pass), and only `!s.history` catches it. Dropping that
+       clause reaches `Object.values(undefined)`, which throws. */
+    expect(makeSnapshot({}, NOW).sets).toBe(0)
+    expect(() => makeSnapshot({}, NOW)).not.toThrow()
+  })
+
+  it('still counts a real state normally', () => {
+    /* The control: a guard that fired unconditionally would return 0
+       here too. */
+    expect(makeSnapshot(state(2, 3), NOW).sets).toBe(6)
+  })
+})
+
+describe('validateSnapshot rejects a timestamp that is not usable arithmetic', () => {
+  it('rejects NaN', () => {
+    /* `typeof at !== 'number'` alone does not catch this — NaN IS
+       typeof 'number'. Only `!Number.isFinite(at)` does, and it has to
+       be an OR: requiring BOTH clauses to fail lets NaN's real number
+       type mask the finiteness check. */
+    expect(validateSnapshot({ v: 1, at: Number.NaN, state: {} })).toBe(false)
+  })
+
+  it('rejects Infinity, for the same reason', () => {
+    expect(validateSnapshot({ v: 1, at: Number.POSITIVE_INFINITY, state: {} })).toBe(false)
+  })
+
+  it('still accepts an ordinary timestamp', () => {
+    expect(validateSnapshot({ v: 1, at: NOW, state: {} })).toBe(true)
+  })
+})
+
+describe('a tie in the restore pool breaks toward the FIRST one seen', () => {
+  it('keeps the earlier candidate when two share the same timestamp', () => {
+    /* `s.at > best.at` — reduce processes left to right, so `>` keeps
+       whichever arrived first on a tie and `>=` would let the later one
+       win instead. Two writes landing in the same millisecond is not
+       exotic: an import followed immediately by an auto-save can. */
+    const a = makeSnapshot(state(1, 1), NOW)
+    const b = { ...makeSnapshot(state(9, 9), NOW), at: a.at }
+    expect(chooseRestore([a, b])!.sets).toBe(a.sets)
+  })
+})
+
+describe('stateLooksEmpty needs BOTH signals absent, not either', () => {
+  it('is not empty with lifts logged but no finished day yet', () => {
+    /* A session started and abandoned before finishing: history has a
+       lift, finishedDates does not. `||` would call this empty and let
+       eviction-recovery treat live, unfinished work as loss. */
+    const midSession = { history: { squat: [{ date: '2026-09-19', kg: 100, sets: [] }] }, finishedDates: [] }
+    expect(stateLooksEmpty(midSession)).toBe(false)
+  })
+
+  it('is not empty with a finished day but no history rows', () => {
+    const dayOnly = { history: {}, finishedDates: ['2026-09-19'] }
+    expect(stateLooksEmpty(dayOnly)).toBe(false)
+  })
+
+  it('is empty only when both are absent', () => {
+    expect(stateLooksEmpty({ history: {}, finishedDates: [] })).toBe(true)
+  })
+})
+
+describe('importJson refuses a file whose top level is not a real object', () => {
+  it('refuses the literal JSON value null', () => {
+    /* `JSON.parse('null')` succeeds — it IS valid JSON — so this has to
+       be caught by the object check, not the parse's try/catch. `!parsed`
+       is true for null but typeof null === 'object' passes the second
+       clause; dropping either reaches `file.app` on a null file. */
+    const r = importJson('null')
+    expect(r.ok).toBe(false)
+    expect(r.reason).toMatch(/not an export file/)
+    expect(() => importJson('null')).not.toThrow()
+  })
+
+  it('refuses a file whose state is the literal null', () => {
+    /* Same shape one level down: a state of null must not be accepted
+       as "here is your recovered state, which is null." */
+    const r = importJson('{"app":"vitality-train","state":null}')
+    expect(r.ok).toBe(false)
+    expect(r.reason).toMatch(/no state/)
+  })
+})
