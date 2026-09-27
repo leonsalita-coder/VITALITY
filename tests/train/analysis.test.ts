@@ -286,7 +286,42 @@ describe('each gate fires on its boundary and not before', () => {
     it('speaks one set above it', () => expect(at(21)).toBe(true))
   })
 
-  describe('the floor is a floor', () => {
+  describe('a muscle can round to zero sets and still be present', () => {
+  /* A tiny secondary or off-split share (a bench mostly training chest,
+     with a sliver of triceps) can round to 0.0 hard sets while still
+     producing a row — this is not the same as the muscle never
+     appearing at all, and it must not be reported as "0 hard sets,
+     well under your average", which would be true of every muscle in
+     the body on any given week. */
+  const CUSTOM_LIB = {
+    chestMostly: { primary: [{ muscle: 'Chest', share: 0.999 }, { muscle: 'Triceps', share: 0.001 }] },
+    tricepsDirect: { primary: [{ muscle: 'Triceps', share: 1 }] },
+  }
+  const CUSTOM_INDEX = indexFrom(CUSTOM_LIB)
+
+  it('says nothing for a muscle whose real share rounds to zero this week', () => {
+    const history: History = {
+      // this week: 1 set on chestMostly gives triceps ~0.001 sets, which
+      // rounds to 0.0 — but the row exists, so the muscle IS in totals
+      chestMostly: [sess(1, 1)],
+      // trailing weeks: a real, substantial triceps average (floor=6)
+      tricepsDirect: [sess(7, 10), sess(14, 10)],
+    }
+    const found = weeklySets(history, CUSTOM_INDEX, NOW, { trainingAge: 'intermediate' })
+    expect(found.some((f) => f.muscle === 'triceps')).toBe(false)
+  })
+
+  it('does report it once the same muscle has a real amount this week — the control', () => {
+    const history: History = {
+      chestMostly: [sess(1, 1)],
+      tricepsDirect: [sess(1, 1), sess(7, 10), sess(14, 10)],
+    }
+    const found = weeklySets(history, CUSTOM_INDEX, NOW, { trainingAge: 'intermediate' })
+    expect(found.some((f) => f.muscle === 'triceps' && /under/.test(f.text))).toBe(true)
+  })
+})
+
+describe('the floor is a floor', () => {
     /* All inside the last week, so no trailing average exists and the
        age profile is the floor under test. Three muscles, because the
        age-profile floor is gated on the athlete training enough for
@@ -443,6 +478,22 @@ describe('the four-week trailing average', () => {
     const quads = found.find((f) => f.muscle === 'quads')
     expect(quads?.text).toMatch(/recent average/)
     expect(quads?.text).not.toMatch(/10-set band/)
+  })
+
+  it('includes a session on the LAST day of a trailing week, not only the first', () => {
+    /* Week 1 runs age 7-13. A session on day 7 and one on day 13 both
+       belong to it; day 14 starts week 2. Two covered weeks are the
+       minimum for a real average: 2 sets on day 7, 8 on day 13 (week 1)
+       and 2 on day 14 (week 2) average to (2+8+2)/2 = 6, clearing
+       MIN_TRAILING and landing a real trailing floor. Drop day 13 at the
+       boundary and the average falls to (2+2)/2 = 2 — under MIN_TRAILING,
+       which silently switches the floor source away from 'trailing'
+       rather than merely changing the number. sess(1,2) this week is
+       comfortably under either floor, so the finding fires either way;
+       what changes is which average it names. */
+    const boundary: History = { squat: [sess(1, 2), sess(7, 2), sess(13, 8), sess(14, 2)] }
+    const found = weeklySets(boundary, INDEX, NOW, { trainingAge: 'intermediate' })
+    expect(found.some((f) => f.muscle === 'quads' && /recent average of 6\b/.test(f.text))).toBe(true)
   })
 })
 

@@ -151,6 +151,11 @@ export function frequencyGaps(history: History, index: ExerciseIndex, now: numbe
   for (const row of rows) {
     const seen = byMuscle.get(row.muscle) || { dates: new Set<string>(), last: row.date, estimated: false }
     seen.dates.add(row.date)
+    /* EQUIVALENT MUTANT (confirmed empirically, not by reasoning — run
+       against the full real test suite): `>` can become `>=` with
+       nothing able to catch it. At the one input where they'd disagree
+       (row.date === seen.last exactly), the assignment reassigns the
+       identical string value — a no-op either way. */
     if (row.date > seen.last) seen.last = row.date
     seen.estimated = seen.estimated || row.estimated
     byMuscle.set(row.muscle, seen)
@@ -305,8 +310,21 @@ export function ratios(history: History, index: ExerciseIndex, now: number, days
     const left = sumOf(rows, a)
     const right = sumOf(rows, b)
     if (left + right < MIN_TOTAL) return
+    /* EQUIVALENT MUTANT (confirmed empirically): `<` can become `<=`
+       with nothing able to catch it. max(left, right) >= (left + right)
+       / 2 always, so having already passed the MIN_TOTAL(20) check above
+       guarantees max >= 10 — strictly greater than MIN_STRONG(6) at
+       every constant these two currently hold. This check can never be
+       the one that returns, given today's numbers. */
     if (Math.max(left, right) < MIN_STRONG) return
     if (right < 1 || left < 1) {
+      /* EQUIVALENT MUTANT (confirmed empirically): `>` can become `>=`
+         with nothing able to catch it. A genuine tie (left === right)
+         is only reachable here if BOTH are equal AND at least one is
+         < 1 (this branch's own gate) — which forces both < 1, putting
+         their sum under 2 and well below the MIN_TOTAL(20) check two
+         lines up. There is no reachable input where left === right
+         inside this branch. */
       const [busy, idle, busyName, idleName] =
         left > right ? [left, right, aName, bName] : [right, left, bName, aName]
       findings.push({
@@ -368,6 +386,17 @@ export function analyse(
   return [
     ...frequencyGaps(history, index, now),
     ...weeklySets(history, index, now, opts),
+    /* EQUIVALENT MUTANT (confirmed empirically, including against the
+       real per-muscle fixtures in load.test.ts that DO show otherTraining
+       changing a reading): `||` can become `&&` here with nothing able
+       to catch it, because volumeRamp only ever surfaces loadFindings(),
+       and loadFindings() reads exclusively from acuteChronic().byMuscle
+       — the per-muscle ratios, which never fold in otherTraining at all
+       (see other.ts and load.ts's own comment on why: self-reported
+       effort never becomes a muscle's hard sets). otherTraining only
+       ever reaches systemicLoadNote(), a separate reading volumeRamp
+       does not call. Whatever this line passes through, findings from
+       volumeRamp cannot tell the difference. */
     ...volumeRamp(history, index, now, opts.otherTraining || []),
     ...ratios(history, index, now),
   ]

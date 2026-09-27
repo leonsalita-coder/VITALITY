@@ -97,6 +97,11 @@ describe('normal — the moves it refuses', () => {
     expect(next.state).toBe('flagged')
   })
 
+  it('acts again exactly on the cooldown date, not only strictly after it', () => {
+    const next = nextDeloadState(record({ cooldownUntil: '2026-09-17' }), ctx()) // ctx()'s today
+    expect(next.state).toBe('flagged')
+  })
+
   it('stays put when the stall is a programming problem', () => {
     /* Comfortable RPE at a flat load is capacity going unused. Deloading
        removes stimulus they are already short of. */

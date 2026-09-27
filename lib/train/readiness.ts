@@ -114,7 +114,17 @@ export function assessReadiness(ctx: ReadinessContext): ReadinessResult {
   const other = ctx.otherLoad || null
   const hasOther = !!other && other.load >= MODERATE_OTHER_LOAD
 
-  // nothing to reason from; saying anything here would be invention
+  /* EQUIVALENT MUTANT (confirmed empirically, not by reasoning — applied
+     and run against the full real test suite, including every other
+     consumer of assessReadiness). This combined guard can be removed
+     with nothing able to catch it: every check below it re-derives the
+     identical safety independently, each gated on its own `hasX &&`
+     prefix (`hasRecovery && recovery < ...`, `hasLoad && ratio >= ...`).
+     With all three false, every one of those short-circuits to false
+     without ever reading the underlying null value, and the function
+     falls through to the same SILENT-shaped result this guard would
+     have returned directly. This line is an early exit, not a
+     correctness requirement. */
   if (!hasRecovery && !hasLoad && !hasOther) return SILENT
 
   const recovery = ctx.recovery as number

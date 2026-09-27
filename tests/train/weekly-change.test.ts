@@ -793,3 +793,121 @@ describe('tonnage is the metric that catches a deload', () => {
     expect(f?.outcome.current).toBe(6750)
   })
 })
+
+describe('a non-finite vitals reading is excluded, not averaged in', () => {
+  it('drops a NaN entry from the driver mean rather than letting it poison it', () => {
+    /* typeof NaN === 'number' is true, so a filter that only checks
+       typeof lets it straight through — and averaging a NaN into a mean
+       makes the whole mean NaN, which is a much louder failure than a
+       silently wrong number. */
+    const base = () => ({
+      history: { bench: weeks(8, 16) },
+      finishedDates: [day(1), day(4)],
+      vitals: [
+        ...Array.from({ length: 30 }, (_, i) => ({ date: day(i + 8), sleepHours: 6.4 })),
+        ...Array.from({ length: 7 }, (_, i) => ({ date: day(i + 1), sleepHours: 7.8 })),
+      ],
+    })
+    const clean = weeklyChange(ctx(base()))!
+    const withJunk = weeklyChange(ctx({
+      ...base(),
+      vitals: [...base().vitals, { date: day(2), sleepHours: NaN }, { date: day(9), sleepHours: Infinity }],
+    }))!
+    expect(clean.hypothesis).toBe('sleep_output') // control: the clean fixture really does fire
+    expect(withJunk.driver!.current).toBe(clean.driver!.current)
+    expect(Number.isFinite(withJunk.driver!.current)).toBe(true)
+  })
+})
+
+describe('e1RM has zero real samples when nothing logged falls in its rep range', () => {
+  it('does not let a value of 0 masquerade as a measured zero', () => {
+    /* Every set logged this week at 15 reps is real training, and would
+       correctly count toward hard_sets or tonnage — but none of it is
+       eligible for an e1RM estimate. Reporting e1RM as "crashed to 0"
+       would be a fabricated finding built on a sample count of zero
+       dressed up as a real one. */
+    const build = (thisWeekReps: number) => weeklyChange(ctx({
+      history: {
+        bench: [
+          ...[1, 2, 3, 4].flatMap((w) => [setsAt(w * 7, 185, [5, 5]), setsAt(w * 7 + 2, 185, [5, 5])]),
+          setsAt(1, 185, [thisWeekReps, thisWeekReps]),
+          setsAt(4, 185, [thisWeekReps, thisWeekReps]),
+        ],
+      },
+      vitals: vitalsOf('recovery', 80, 60), // moves normally — only the outcome sample count is in question
+    }))
+    expect(build(15)).toBeNull()
+  })
+})
+
+describe('strength-per-pound needs a real e1RM and a real, positive bodyweight', () => {
+  /* .value <= 0 rather than < 0: a bodyweight of exactly zero is exactly
+     as meaningless to divide by as a negative one, and the boundary is
+     the case a mutation of <= to < would let straight through. */
+  const eligibleSets = () =>
+    [1, 2, 3, 4].flatMap((w) => [setsAt(w * 7, 185, [5, 5]), setsAt(w * 7 + 2, 185, [5, 5])])
+      .concat([setsAt(1, 185, [5, 5]), setsAt(4, 185, [5, 5])])
+
+  it('withholds the finding when e1RM has no samples this week, even with a moving bodyweight', () => {
+    const f = weeklyChange(ctx({
+      history: {
+        bench: [
+          ...[1, 2, 3, 4].flatMap((w) => [setsAt(w * 7, 185, [5, 5]), setsAt(w * 7 + 2, 185, [5, 5])]),
+          setsAt(1, 185, [15, 15]), // out of e1RM range — e1.samples is 0 this week
+          setsAt(4, 185, [15, 15]),
+        ],
+      },
+      bodyweight: bwOf(190, 180),
+    }))
+    expect(f?.hypothesis).not.toBe('bodyweight_relative_strength')
+  })
+
+  it('withholds the finding when bodyweight has no readings in the window, even with a moving e1RM', () => {
+    const f = weeklyChange(ctx({
+      history: { bench: eligibleSets() },
+      bodyweight: [], // bw.samples is 0
+    }))
+    expect(f?.hypothesis).not.toBe('bodyweight_relative_strength')
+  })
+
+  it('withholds the finding when bodyweight averages to exactly zero, not only when negative', () => {
+    const f = weeklyChange(ctx({
+      history: { bench: eligibleSets() },
+      bodyweight: bwOf(0, 0), // every reading in range is exactly zero
+    }))
+    expect(f?.hypothesis).not.toBe('bodyweight_relative_strength')
+  })
+
+  it('reports it once both sides genuinely have samples and bodyweight is positive', () => {
+    // control: the same shape, with a real positive bodyweight, does fire
+    const f = weeklyChange(ctx({ history: { bench: eligibleSets() }, bodyweight: bwOf(190, 180) }))
+    expect(f?.hypothesis).toBe('bodyweight_relative_strength')
+  })
+})
+
+describe('progression needs a real e1RM and at least one session', () => {
+  /* frequency_progression's outcome divides e1RM by THIS WEEK's own
+     session count — a zero there must not divide-by-zero into an
+     Infinity that then reads as a real, enormous swing. Its driver is a
+     separate reading, sessions lagged 7 days. */
+  const weeksOfSets = () => Array.from({ length: 6 }, (_, w) =>
+    [setsAt(w * 7, 200, [5, 5]), setsAt(w * 7 + 3, 200, [5, 5])]).flat()
+  const driverDates = [day(7), day(8), day(9), day(10), day(11), day(12), day(20), day(35)]
+
+  it('withholds the finding when no session this week is marked finished, even with a real e1RM elsewhere', () => {
+    const f = weeklyChange(ctx({
+      history: { bench: weeksOfSets() },
+      finishedDates: driverDates, // plenty finished, none of them THIS week
+    }))
+    expect(f?.hypothesis).not.toBe('frequency_progression')
+  })
+
+  it('reports it once this week also has a finished session', () => {
+    // control: the same shape, with this week finished too, is free to fire
+    const f = weeklyChange(ctx({
+      history: { bench: weeksOfSets() },
+      finishedDates: [day(1), ...driverDates],
+    }))
+    expect(f?.hypothesis).toBe('frequency_progression')
+  })
+})

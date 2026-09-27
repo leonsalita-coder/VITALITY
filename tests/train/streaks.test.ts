@@ -41,6 +41,16 @@ describe('sessionsPerWeek', () => {
   it('counts a date only once even if it is duplicated', () => {
     expect(sessionsPerWeek([TODAY, TODAY, TODAY], now, 1)[0]).toBe(1)
   })
+
+  it('drops a date exactly one bucket past the requested range, not only the ones further out', () => {
+    /* Asking for 2 weeks means buckets 0 and 1 (ages 0-6 and 7-13). Age
+       14 is bucket 2 — the very next one — and has to be excluded the
+       same as age 21 would be, not silently extend the result. */
+    const dates = daysBefore(TODAY, 14)
+    const weeks = sessionsPerWeek(dates, now, 2)
+    expect(weeks).toEqual([0, 0])
+    expect(weeks.length).toBe(2)
+  })
 })
 
 describe('currentWeekStreak', () => {

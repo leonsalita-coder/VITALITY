@@ -65,9 +65,57 @@ describe('scoring one prediction', () => {
     expect(scorePrediction(plank, { date: '2026-09-19', kg: 0, sets: [{ kind: 'time', s: 60 }] })).toBe('hit')
     expect(scorePrediction(plank, { date: '2026-09-19', kg: 0, sets: [{ kind: 'time', s: 40 }] })).toBe('missed_high')
   })
+
+  it('scores a time lift missed LOW exactly at the margin boundary, not one second short', () => {
+    /* 60 + EASY_MARGIN(3) * 5 = 75. At 75 it is missed_low; at 74 (still
+       comfortably past the target) it is still a hit — the boundary is
+       exactly at 75, not somewhere near it. */
+    const plank = pred({ weight: null, reps: null, seconds: 60 })
+    expect(scorePrediction(plank, { date: '2026-09-19', kg: 0, sets: [{ kind: 'time', s: 75 }] })).toBe('missed_low')
+    expect(scorePrediction(plank, { date: '2026-09-19', kg: 0, sets: [{ kind: 'time', s: 74 }] })).toBe('hit')
+  })
+
+  it('scores a distance lift at both its boundaries', () => {
+    const run = pred({ weight: null, reps: null, metres: 1000 })
+    /* Exactly at target is a hit (>=), one metre short is missed high. */
+    expect(scorePrediction(run, { date: '2026-09-19', kg: 0, sets: [{ kind: 'distance', m: 1000 }] })).toBe('hit')
+    expect(scorePrediction(run, { date: '2026-09-19', kg: 0, sets: [{ kind: 'distance', m: 999 }] })).toBe('missed_high')
+    /* Exactly at 1.2x target is missed low, not merely near it. */
+    expect(scorePrediction(run, { date: '2026-09-19', kg: 0, sets: [{ kind: 'distance', m: 1200 }] })).toBe('missed_low')
+  })
 })
 
 describe('a prediction is written once', () => {
+  it('refuses each required field missing, independently — store, prediction, id, date', () => {
+    const good = pred()
+    /* Each case below is falsy on exactly ONE of the four required
+       things and valid on the other three, so the OR guard can only be
+       proven to be an OR (not an AND masquerading as one) by isolating
+       each disjunct rather than only ever testing them all-valid or
+       all-invalid together. */
+    expect(recordPrediction(null as never, good)).toBe(false)
+    expect(recordPrediction(undefined as never, good)).toBe(false)
+
+    const storeA: Record<string, Prediction> = {}
+    expect(recordPrediction(storeA, null as never)).toBe(false)
+    expect(Object.keys(storeA)).toEqual([])
+
+    const storeB: Record<string, Prediction> = {}
+    expect(recordPrediction(storeB, { ...good, id: '' })).toBe(false)
+    expect(Object.keys(storeB)).toEqual([])
+
+    const storeC: Record<string, Prediction> = {}
+    expect(recordPrediction(storeC, { ...good, date: '' })).toBe(false)
+    expect(Object.keys(storeC)).toEqual([])
+
+    /* Control: the same store, given a genuinely complete prediction,
+       does write — the four refusals above are about the guard, not a
+       store that never accepts anything. */
+    const storeD: Record<string, Prediction> = {}
+    expect(recordPrediction(storeD, good)).toBe(true)
+    expect(Object.keys(storeD)).toEqual([`${good.date}:${good.id}`])
+  })
+
   it('records one per lift per session', () => {
     const store = {}
     const a = recordPrediction(store, pred())
@@ -135,6 +183,38 @@ describe('accuracy over a window', () => {
     const acc = accuracyOver({}, {})
     expect(acc.total).toBe(0)
     expect(acc.rate).toBeNull()
+  })
+
+  it('ignores a corrupted null entry in the store rather than crashing on it', () => {
+    const withJunk = { 'garbage:key': null as never, ...store }
+    const acc = accuracyOver(withJunk, history)
+    // control: the real predictions are still all scored normally
+    expect(acc.total + acc.notAttempted).toBe(4)
+  })
+
+  it('includes a prediction dated exactly on the since boundary, not only after it', () => {
+    const p1 = pred({ date: '2026-09-05' })
+    const onlyStore = { [`${p1.date}:${p1.id}`]: p1 }
+    const onlyHistory = { bench: [{ ...entry([{ w: 200, r: 5 }]), date: p1.date }] }
+    const acc = accuracyOver(onlyStore, onlyHistory, { since: '2026-09-05' })
+    expect(acc.total).toBe(1)
+    // control: a since one day later excludes it
+    expect(accuracyOver(onlyStore, onlyHistory, { since: '2026-09-06' }).total).toBe(0)
+  })
+
+  it('says "usually too high" on an exact tie between the two kinds of miss', () => {
+    const store2: Record<string, Prediction> = {}
+    const history2: Record<string, ReturnType<typeof entry>[]> = { bench: [] }
+    const reps = [3, 3, 5 + EASY_MARGIN, 5 + EASY_MARGIN] // 2 missed high, 2 missed low
+    reps.forEach((r, i) => {
+      const date = `2026-09-1${i}`
+      store2[`${date}:bench`] = pred({ date })
+      history2.bench.push({ ...entry([{ w: 200, r }]), date })
+    })
+    const acc = accuracyOver(store2, history2)
+    expect(acc.missedHigh).toBe(2)
+    expect(acc.missedLow).toBe(2) // control: the tie is real, not one-sided
+    expect(acc.whenWrong).toMatch(/usually too high/)
   })
 })
 
@@ -221,6 +301,7 @@ describe('the feedback is gated hard', () => {
     const acc = accuracyOver(store, history as never)
     expect(acc.total).toBeGreaterThan(MIN_SCORED_FOR_FEEDBACK)
     expect(acc.rate).toBe(1)
+    expect(acc.whenWrong).toBeNull()
     expect(progressionDamping(acc)).toBeNull()
   })
 
@@ -240,5 +321,61 @@ describe('the feedback is gated hard', () => {
     expect(acc.total).toBeGreaterThan(MIN_SCORED_FOR_FEEDBACK)
     expect(acc.missedLow).toBeGreaterThan(acc.missedHigh)
     expect(progressionDamping(acc)).toBeNull()
+  })
+
+  it('lets the gate through at exactly the sample threshold, not only above it', () => {
+    const { store, history } = missing(MIN_SCORED_FOR_FEEDBACK)
+    const acc = accuracyOver(store, history as never)
+    expect(acc.total).toBe(MIN_SCORED_FOR_FEEDBACK) // control: exactly on the boundary
+    expect(progressionDamping(acc)).not.toBeNull()
+  })
+
+  it('blocks on a null rate even with plenty of samples', () => {
+    /* accuracyOver itself never produces total>0 with rate:null, but
+       progressionDamping's own signature promises to handle it, and the
+       OR that guards it collapses to a no-op AND when either half is
+       tested only by the case the other half already covers. */
+    const acc = {
+      total: 15, hit: 0, missedHigh: 15, missedLow: 0, notAttempted: 0,
+      rate: null, byBasis: {}, byLift: {}, whenWrong: 'usually too high (15 of 15)',
+    }
+    expect(progressionDamping(acc)).toBeNull()
+  })
+
+  it('blocks exactly at the poor-rate boundary, not only strictly below it', () => {
+    const store: Record<string, Prediction> = {}
+    const history: Record<string, unknown[]> = { bench: [] }
+    for (let i = 0; i < 6; i++) {
+      const date = `2026-09-${String(i + 1).padStart(2, '0')}`
+      store[`${date}:bench`] = pred({ date })
+      ;(history.bench as unknown[]).push({ ...entry([{ w: 200, r: 5 }]), date }) // hit
+    }
+    for (let i = 6; i < 10; i++) {
+      const date = `2026-09-${String(i + 1).padStart(2, '0')}`
+      store[`${date}:bench`] = pred({ date })
+      ;(history.bench as unknown[]).push({ ...entry([{ w: 200, r: 2 }]), date }) // missed high
+    }
+    const acc = accuracyOver(store, history as never)
+    expect(acc.rate).toBe(0.6) // control: the fixture lands exactly on the boundary
+    expect(progressionDamping(acc)).toBeNull()
+  })
+
+  it('eases off exactly at the mostly-high boundary, not only strictly above it', () => {
+    const store: Record<string, Prediction> = {}
+    const history: Record<string, unknown[]> = { bench: [] }
+    for (let i = 0; i < 6; i++) {
+      const date = `2026-09-${String(i + 1).padStart(2, '0')}`
+      store[`${date}:bench`] = pred({ date })
+      ;(history.bench as unknown[]).push({ ...entry([{ w: 200, r: 2 }]), date }) // missed high
+    }
+    for (let i = 6; i < 10; i++) {
+      const date = `2026-09-${String(i + 1).padStart(2, '0')}`
+      store[`${date}:bench`] = pred({ date })
+      ;(history.bench as unknown[]).push({ ...entry([{ w: 200, r: 5 + EASY_MARGIN }]), date }) // missed low
+    }
+    const acc = accuracyOver(store, history as never)
+    expect(acc.missedHigh).toBe(6)
+    expect(acc.missedLow).toBe(4) // control: 6 of 10 wrong is exactly the 0.6 ratio
+    expect(progressionDamping(acc)).not.toBeNull()
   })
 })

@@ -50,6 +50,16 @@ describe('rest taken between working sets', () => {
     expect(reading.hasObservedTiming).toBe(true)
   })
 
+  it('reads nothing rather than crashing on a missing or off entry', () => {
+    // control: a genuine entry does read something
+    expect(restTaken(timed('2026-09-19', 200, 90)).hasObservedTiming).toBe(true)
+    expect(restTaken(null)).toEqual({ gaps: [], median: null, hasObservedTiming: false })
+    expect(restTaken(undefined)).toEqual({ gaps: [], median: null, hasObservedTiming: false })
+    expect(restTaken({ ...timed('2026-09-19', 200, 90), off: true })).toEqual({
+      gaps: [], median: null, hasObservedTiming: false,
+    })
+  })
+
   it('needs two sets to have a gap at all', () => {
     const reading = restTaken(timed('2026-09-19', 200, 90, 1))
     expect(reading.gaps).toEqual([])
@@ -76,6 +86,38 @@ describe('rest taken between working sets', () => {
     ] }
     expect(restTaken(entry).gaps).toEqual([])
     expect(restTaken(entry).hasObservedTiming).toBe(false)
+  })
+
+  it('includes a gap of exactly MAX_REST_SECONDS, not only shorter ones', () => {
+    const start = new Date('2026-09-19T18:00:00').getTime()
+    const entry = { date: '2026-09-19', kg: 200, sets: [
+      { w: 200, r: 5, at: start },
+      { w: 200, r: 5, at: start + MAX_REST_SECONDS * 1000 },
+    ] }
+    expect(restTaken(entry).gaps).toEqual([MAX_REST_SECONDS])
+  })
+
+  it('excludes a zero-second gap, not only a negative one', () => {
+    // two sets logged at the identical timestamp — no time actually passed
+    const start = new Date('2026-09-19T18:00:00').getTime()
+    const entry = { date: '2026-09-19', kg: 200, sets: [
+      { w: 200, r: 5, at: start },
+      { w: 200, r: 5, at: start },
+      { w: 200, r: 5, at: start + 90_000 },
+    ] }
+    expect(restTaken(entry).gaps).toEqual([90])
+  })
+
+  it('never reads a non-finite timestamp as observed, even though it is typeof number', () => {
+    const start = new Date('2026-09-19T18:00:00').getTime()
+    const entry = { date: '2026-09-19', kg: 200, sets: [
+      { w: 200, r: 5, at: start },
+      { w: 200, r: 5, at: NaN },
+      { w: 200, r: 5, at: start + 90_000 },
+    ] }
+    /* NaN breaks the chain like any other unobserved set — the gap either
+       side of it is not measured, not a plausible-looking 90s either. */
+    expect(restTaken(entry).gaps).toEqual([])
   })
 
   it('excludes warm-ups, like everything else here', () => {

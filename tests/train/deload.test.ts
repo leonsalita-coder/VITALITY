@@ -8,8 +8,9 @@ import {
   nextDeloadState,
   deloadPlan,
   limitDeloads,
+  plateauAdvice,
 } from '../../lib/train/deload'
-import type { DeloadRecord } from '../../lib/train/deload'
+import type { DeloadRecord, Plateau } from '../../lib/train/deload'
 import type { HistoryEntry } from '../../lib/train/sets'
 
 const session = (date: string, w: number, reps = 5, sets = 3): HistoryEntry => ({
@@ -167,6 +168,34 @@ describe('nextDeloadState — diagnosis', () => {
   it('marks it measured when real signal drove it', () => {
     expect(nextDeloadState(null, ctx({ recovery: 40 })).confidence).toBe('measured')
   })
+
+  it('treats exactly RECOVERY_FLOOR as fine, not as the problem', () => {
+    // control: comfortably below the floor is still the volume path
+    expect(nextDeloadState(null, ctx({ recovery: RECOVERY_FLOOR - 1 })).kind).toBe('volume')
+    const r = nextDeloadState(null, ctx({ recovery: RECOVERY_FLOOR }))
+    expect(r.kind).not.toBe('volume')
+  })
+
+  it('cuts intensity at exactly HIGH_RPE, not only above it', () => {
+    const r = nextDeloadState(null, ctx({ recovery: 80, rpe: HIGH_RPE }))
+    expect(r.kind).toBe('intensity')
+    expect(r.confidence).toBe('measured')
+  })
+
+  it('does not diagnose from RPE when it is a real, ordinary number below HIGH_RPE', () => {
+    /* recovery stays null (out of the picture), and the stall's own RPE
+       trend is unknown (the default fixture logs no RPE), so if THIS
+       check fired on the strength of merely being a number it would be
+       the only thing producing a 'measured' confidence here. */
+    const r = nextDeloadState(null, ctx({ rpe: 5 }))
+    expect(r.confidence).not.toBe('measured')
+  })
+
+  it('never reads a non-numeric RPE as a real one, however it compares', () => {
+    // a malformed value from outside the type system — checked directly
+    const r = nextDeloadState(null, ctx({ rpe: '20' as never }))
+    expect(r.confidence).not.toBe('measured')
+  })
 })
 
 describe('deloadPlan', () => {
@@ -286,6 +315,26 @@ describe('plateau cause from RPE', () => {
     expect(tired.sessions).toBe(bored.sessions)
     expect(tired.cause).not.toBe(bored.cause)
   })
+
+  it('calls it fatigue at exactly a one-point rise, not only above it', () => {
+    // 6 -> 7 is a rise of exactly RPE_RISE(1); one point under a hair less would not clear it
+    const p = detectPlateau(flat([6, 6, 6, 7]))
+    expect(p!.cause).toBe('fatigue')
+  })
+
+  it('calls it fatigue at exactly HIGH_RPE average, not only above it', () => {
+    // steady at 9 flat — no rise, but the mean sits exactly on HIGH_RPE
+    const p = detectPlateau(flat([9, 9, 9, 9]))
+    expect(p!.cause).toBe('fatigue')
+  })
+
+  it('reads a real trend from exactly two points, not only three or more', () => {
+    /* Two RPE points and two nulls: a trend needs two, and two is what
+       this gets — the control is the existing single-point case, which
+       must still say unknown. */
+    const p = detectPlateau(flat([null, null, 7, 9]))
+    expect(p!.cause).not.toBe('unknown')
+  })
 })
 
 describe('RPE drives the deload diagnosis', () => {
@@ -390,5 +439,45 @@ describe('assisted work plateaus in the right direction', () => {
 
   it('is a plateau when the assistance is going UP', () => {
     expect(detectPlateau(assistedAt([20, 25, 35, 40]))).not.toBeNull()
+  })
+})
+
+describe('plateauAdvice names each cause, not just some of them', () => {
+  /* rest_compression is covered in tests/train/timing.test.ts and
+     rest-grouping.test.ts, where the fixture that produces it lives.
+     This covers the other four returns directly, since a hand-built
+     Plateau says exactly what each branch needs without reconstructing
+     a whole history for each one. */
+  const plateau = (over: Partial<Plateau>): Plateau => ({
+    sessions: 3, weight: 185, kind: 'reps_weight', cause: 'unknown',
+    rpe: null, amrapFalling: false, restCompressing: false, ...over,
+  })
+
+  it('says nothing for no plateau at all', () => {
+    expect(plateauAdvice(null)).toBe('')
+  })
+
+  it('names fatigue driven by a falling all-out set', () => {
+    const text = plateauAdvice(plateau({ cause: 'fatigue', amrapFalling: true }))
+    expect(text).toMatch(/all-out set/i)
+    expect(text).toMatch(/fatigue/i)
+  })
+
+  it('names fatigue driven by climbing effort, worded differently from the AMRAP case', () => {
+    const text = plateauAdvice(plateau({ cause: 'fatigue', amrapFalling: false }))
+    expect(text).toMatch(/effort has been climbing/i)
+    expect(text).not.toMatch(/all-out set/i)
+  })
+
+  it('names a programming stall as capacity going unused, not fatigue', () => {
+    const text = plateauAdvice(plateau({ cause: 'programming' }))
+    expect(text).toMatch(/capacity/i)
+    expect(text).not.toMatch(/fatigue/i)
+  })
+
+  it('falls back to the generic line for an unknown cause, not the programming one', () => {
+    const text = plateauAdvice(plateau({ cause: 'unknown' }))
+    expect(text).toMatch(/nothing logged that says why/i)
+    expect(text).not.toMatch(/capacity/i)
   })
 })

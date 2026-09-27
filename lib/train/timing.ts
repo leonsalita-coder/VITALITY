@@ -52,9 +52,27 @@ export const REST_COMPRESSION = 0.8
 
 /** A timestamp that was actually observed, rather than inferred. */
 function observedAt(set: HistorySet | null | undefined): number | null {
+  /* EQUIVALENT MUTANT (confirmed empirically, not by reasoning — applied
+     and run against the full real test suite, including every other
+     consumer of restTrend: deload.ts's readCause, weekly.ts's
+     median_rest metric). This function is private, and its one caller
+     (restTaken's loop, below) only ever passes members of `working`,
+     already filtered through isWorkingSet(), which returns false on
+     null/undefined before this function is ever reached. The guard
+     cannot fire on a reachable input. */
   if (!set) return null
   if (set.atEstimated === true) return null
   const at = set.at
+  /* EQUIVALENT MUTANT (confirmed empirically, including the fixture that
+     looked like it should catch it: a NaN and an Infinity `at` on a
+     middle set, tried directly). `&&` can become `||` here with nothing
+     able to catch it — a non-finite `at` that slips past this check does
+     not stay unnoticed, it poisons the subtraction in restTaken's gap
+     calculation into NaN or Infinity, and restTaken's own
+     `seconds > 0 && seconds <= MAX_REST_SECONDS` bounds check rejects
+     every non-finite result independently, on the way in from any
+     source. There is no reachable `at` for which this check's outcome
+     changes what ends up in `gaps`. */
   return typeof at === 'number' && Number.isFinite(at) ? at : null
 }
 
@@ -166,6 +184,13 @@ export function restTrend(history: HistoryEntry[] | null | undefined): RestTrend
    * Only grouped-versus-ungrouped matters, not WHICH group: a superset
    * relabelled from A to B is the same structure and the same rest cost.
    */
+  /* EQUIVALENT MUTANT (confirmed empirically): `!==` here can become
+     `===` with nothing able to catch it. groupingChanged only asks
+     whether every element of `grouped` agrees with the first one —
+     negating EVERY element (which is what this mutation does, since the
+     comparison inside the map is applied uniformly to every shape) never
+     changes whether the array is uniform, only which uniform value it
+     holds. `grouped` is used nowhere else. */
   const grouped = shapes.map((s) => s !== 'none')
   const groupingChanged = grouped.some((g) => g !== grouped[0])
 
@@ -178,6 +203,13 @@ export function restTrend(history: HistoryEntry[] | null | undefined): RestTrend
     /* A structural change makes the two ends incomparable. Reporting a
        softened version — "rest fell, but you changed things" — would be
        worse than silence, because the reader takes the headline. */
+    /* EQUIVALENT MUTANT (confirmed empirically): `from > 0` can become
+       `from >= 0` with nothing able to catch it. `from` is `medians[0]`,
+       and every value in `medians` comes from medianRest() on a gap
+       list where every gap already passed `seconds > 0` above — the
+       median of one or more strictly-positive numbers is itself always
+       positive, so `from === 0` is not a reachable input through
+       restTrend, the only caller. */
     compressing: !groupingChanged && from > 0 && to / from <= REST_COMPRESSION,
     groupingChanged,
   }

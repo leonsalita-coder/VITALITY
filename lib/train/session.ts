@@ -144,6 +144,13 @@ export function sameAsLastTime(
   if (!usable.length) return null
   const last = usable[usable.length - 1]
   const sets = (last.sets || []).filter((s) => isWorkingSet(s))
+  /* EQUIVALENT MUTANT (confirmed empirically): this guard can be removed
+     with nothing able to catch it. `last` is drawn from `usable`, and
+     `usable`'s own filter above already requires
+     `(e.sets || []).some((s) => isWorkingSet(s))` — every entry that
+     reaches `last` is guaranteed at least one working set, so filtering
+     `last.sets` by the same predicate can never produce an empty array
+     here. There is no reachable input where this guard fires. */
   if (!sets.length) return null
   return sets.map((s) => ({
     weight: s.w,

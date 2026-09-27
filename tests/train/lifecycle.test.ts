@@ -87,12 +87,21 @@ describe('what an abandoned session contributes — the stated decision', () => 
     expect(complete.progression).toBe(true)
     expect(complete.volume).toBe(abandoned.volume)
     expect(complete.plateau).toBe(abandoned.plateau)
+    expect(complete.records).toBe(abandoned.records)
   })
 
   it('has a not-started session contribute nothing at all', () => {
     expect(contributionOf('not_started')).toEqual({
       volume: false, plateau: false, records: false, streak: false, progression: false,
     })
+  })
+
+  it('an in-progress session contributes exactly like an abandoned one', () => {
+    /* Both are unfinished work — the sets count toward volume, plateau
+       detection and records, but not toward a streak or a progression
+       bump. The only thing distinguishing them is whether the day has
+       rolled over, which sessionState decides, not contributionOf. */
+    expect(contributionOf('in_progress')).toEqual(abandoned)
   })
 })
 

@@ -4,6 +4,8 @@ import {
   assessReadiness,
 } from '../../lib/train/readiness'
 import type { ReadinessContext } from '../../lib/train/readiness'
+import { HARD_OTHER_LOAD } from '../../lib/train/other'
+import type { OtherLoadSummary } from '../../lib/train/other'
 
 const ctx = (over: Partial<ReadinessContext> = {}): ReadinessContext => ({
   recovery: null,
@@ -56,6 +58,30 @@ describe('each verdict from its own signal', () => {
     const r = assessReadiness(ctx({ recovery: 40 }))
     expect(r.reason).not.toMatch(/\?|should you|do you want/i)
     expect(r.reason).toMatch(/^Recovery is \d+\/100\./)
+  })
+})
+
+describe('each recovery tier ends exactly on its floor, not before', () => {
+  it('is not rest-advised at exactly REST_FLOOR — that tier is strictly below it', () => {
+    const r = assessReadiness(ctx({ recovery: REST_FLOOR }))
+    expect(r.verdict).not.toBe('rest_advised')
+    expect(r.verdict).toBe('reduced_volume') // falls to the next tier down
+    expect(r.setsFactor).toBe(0.6)
+  })
+
+  it('is not the low-recovery cut at exactly LOW_RECOVERY — that tier is strictly below it', () => {
+    const r = assessReadiness(ctx({ recovery: LOW_RECOVERY }))
+    expect(r.setsFactor).toBe(1) // the 0.6 sets cut did not fire
+    expect(r.verdict).toBe('reduced_intensity') // falls to the next tier down
+    expect(r.weightFactor).toBeLessThan(1)
+  })
+
+  it('is not weight-eased at exactly MODERATE_RECOVERY — that tier is strictly below it', () => {
+    const r = assessReadiness(ctx({ recovery: MODERATE_RECOVERY }))
+    expect(r.weightFactor).toBe(1) // the 0.9 weight ease did not fire
+    expect(r.verdict).toBe('normal')
+    expect(r.reason).toBeNull()
+    expect(r.confidence).toBe('measured') // control: recovery WAS read, it just had nothing to say
   })
 })
 
@@ -159,5 +185,22 @@ describe('precedence', () => {
       .toBe('reduced_volume')
     expect(assessReadiness(ctx({ recentHardSets: base * (LOAD_SPIKE - 0.1), baselineHardSets: base })).verdict)
       .toBe('normal')
+  })
+})
+
+describe('self-reported training names how many sessions, correctly pluralised', () => {
+  const summary = (sessions: number): OtherLoadSummary => ({
+    load: HARD_OTHER_LOAD, sessions, days: sessions, estimated: true,
+    hardest: { date: '2026-09-18', activity: 'martial_arts', minutes: 90, intensity: 8 },
+  })
+
+  it('names no extra sessions at exactly one — "plus 0 more" is not a sentence', () => {
+    const r = assessReadiness(ctx({ otherLoad: summary(1) }))
+    expect(r.reason).not.toMatch(/plus/i)
+  })
+
+  it('names the extra sessions once there genuinely is more than one', () => {
+    const r = assessReadiness(ctx({ otherLoad: summary(2) }))
+    expect(r.reason).toMatch(/plus 1 more/i)
   })
 })

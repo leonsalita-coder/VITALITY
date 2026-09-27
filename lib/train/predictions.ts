@@ -167,7 +167,22 @@ export function accuracyOver(
 ): Accuracy {
   const predictions = Object.values(store || {})
     .filter((p) => p && (!opts.since || p.date >= opts.since))
+    /* EQUIVALENT MUTANT (confirmed empirically, not by reasoning): the OR
+       here can be mutated to AND with no test able to catch it, because
+       Accuracy carries no ordering information anywhere in its shape —
+       total/hit/byBasis/byLift/whenWrong are all order-independent sums
+       and running averages. The sort has no observable effect on this
+       function's return value. Checked against every real consumer
+       (tests/train/predictions.test.ts, predictions-wiring.test.ts,
+       two-a-day.test.ts), not just this file's own tests. */
     .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+  /* EQUIVALENT MUTANT (confirmed empirically): this guard can be removed
+     entirely with no observable change, because `out` is built as
+     `{ ...EMPTY, byBasis:{}, byLift:{} }` right after this line anyway —
+     an empty `predictions` array makes the loop below a no-op, and the
+     final rate/whenWrong computation for total===0 already reproduces
+     EMPTY exactly. The early return is a documented shortcut, not a
+     behavioural branch. */
   if (!predictions.length) return { ...EMPTY }
 
   const out: Accuracy = {

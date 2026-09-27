@@ -3425,6 +3425,17 @@ var TrainEngine = (() => {
     return [
       ...frequencyGaps(history, index, now),
       ...weeklySets(history, index, now, opts),
+      /* EQUIVALENT MUTANT (confirmed empirically, including against the
+         real per-muscle fixtures in load.test.ts that DO show otherTraining
+         changing a reading): `||` can become `&&` here with nothing able
+         to catch it, because volumeRamp only ever surfaces loadFindings(),
+         and loadFindings() reads exclusively from acuteChronic().byMuscle
+         — the per-muscle ratios, which never fold in otherTraining at all
+         (see other.ts and load.ts's own comment on why: self-reported
+         effort never becomes a muscle's hard sets). otherTraining only
+         ever reaches systemicLoadNote(), a separate reading volumeRamp
+         does not call. Whatever this line passes through, findings from
+         volumeRamp cannot tell the difference. */
       ...volumeRamp(history, index, now, opts.otherTraining || []),
       ...ratios(history, index, now)
     ];
@@ -3795,6 +3806,13 @@ var TrainEngine = (() => {
       /* A structural change makes the two ends incomparable. Reporting a
          softened version — "rest fell, but you changed things" — would be
          worse than silence, because the reader takes the headline. */
+      /* EQUIVALENT MUTANT (confirmed empirically): `from > 0` can become
+         `from >= 0` with nothing able to catch it. `from` is `medians[0]`,
+         and every value in `medians` comes from medianRest() on a gap
+         list where every gap already passed `seconds > 0` above — the
+         median of one or more strictly-positive numbers is itself always
+         positive, so `from === 0` is not a reachable input through
+         restTrend, the only caller. */
       compressing: !groupingChanged && from > 0 && to / from <= REST_COMPRESSION,
       groupingChanged
     };

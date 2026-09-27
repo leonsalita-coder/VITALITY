@@ -95,6 +95,12 @@ const ADDITIVE: MetricId[] = ['hard_sets', 'tonnage', 'sessions', 'other_load']
 function perWeek(metric: MetricId, value: number, w: Window): number {
   if (!ADDITIVE.includes(metric)) return value
   const weeks = w.days / 7
+  /* EQUIVALENT MUTANT (confirmed empirically): `weeks > 0` can become
+     `weeks >= 0` with nothing able to catch it. Every Window reaching
+     this function is built by rollingWindow/baselineWindow with a fixed,
+     positive `days` (7, or weeks*7 for a multi-week baseline) — `weeks`
+     is never zero through weeklyChange, the only exported caller, so
+     the two comparisons never disagree on a reachable input. */
   return weeks > 0 ? value / weeks : value
 }
 
@@ -109,6 +115,25 @@ const round = (n: number, places = 1) => {
 /* ---------------------------------------------------------------- *
  * Reading each metric over a window. One function, one metric, and
  * every one of them reports its sample count so a gate can refuse it.
+ *
+ * EQUIVALENT MUTANTS (confirmed empirically, not by reasoning — every
+ * one below was checked by applying it and running the full real test
+ * suite, tests/train/weekly-change.test.ts and weekly-change-wiring.test.ts,
+ * not just this file's own fixtures).
+ *
+ * The eight simple `if (!xs.length) return NOTHING` guards in the switch
+ * below (hard_sets, tonnage, median_rest, rpe, amrap, bodyweight,
+ * other_load, recovery/sleep) can each be removed with no test able to
+ * catch it, because every one of their `return` statements after the
+ * guard uses that SAME collection's `.length` (or a value trivially
+ * derived from it) for `samples`, and `mean([])`/`reduce` on an empty
+ * collection already equal 0 — so a "removed" guard reconstructs the
+ * NOTHING constant by arithmetic rather than by the early return. The
+ * one exception in this group is `other_load`, whose `estimated` field
+ * is hardcoded `true` rather than derived — a genuine, if inert,
+ * difference. It never reaches an observer: every hypothesis gates on
+ * `samples < minSamples` (minSamples is always >= 1) before `estimated`
+ * is ever read, and samples is 0 either way.
  * ---------------------------------------------------------------- */
 
 function entriesIn(ctx: WeeklyContext, w: Window) {
@@ -160,6 +185,12 @@ function readRaw(metric: MetricId, ctx: WeeklyContext, w: Window): Reading {
           const reps = set.r || 0
           if (!reps || reps > 10) continue
           const e1 = setWeight(entry, set) * (1 + reps / 30)
+          /* EQUIVALENT MUTANT (confirmed empirically): `>` can become
+             `>=` with nothing able to catch it. This only changes which
+             set WINS a tie for the best estimate — and a tie means the
+             two candidate e1 values are numerically equal, so the map
+             ends up holding the same number either way. There is no way
+             to observe which one "won". */
           if (e1 > (best.get(id) || 0)) best.set(id, e1)
         }
       }
@@ -223,6 +254,28 @@ function readRaw(metric: MetricId, ctx: WeeklyContext, w: Window): Reading {
          composition depends on. */
       const e1 = readMetric('e1rm', ctx, w)
       const bw = readMetric('bodyweight', ctx, w)
+      /* EQUIVALENT MUTANTS, all four (confirmed empirically — applied
+         individually and combined, against the full real test suite,
+         including deliberately hostile fixtures: bw averaging to exactly
+         zero, and a negative bodyweight reading, both checked directly).
+         Every corruption this guard prevents lands on one of two
+         mechanisms elsewhere that already absorb it:
+           - !e1.samples===0 always means e1.value===0 too (e1rm's own
+             empty case returns value:0), so a bypassed guard still
+             divides 0 by something, landing on 0 — and Math.min with a
+             0 sample count still yields 0. Matches NOTHING regardless.
+           - !bw.samples===0 always means bw.value===0 too, for the same
+             reason — so "!bw.samples" never fires on an input where
+             "bw.value <= 0" wouldn't already have fired it, making that
+             disjunct redundant with the third one in EVERY reachable
+             case, not just some.
+           - bw.value <= 0 (including the <= vs < boundary at exactly
+             zero) divides by zero or a negative number. Either result is
+             non-finite or a real negative ratio, but deltaOf() (windows.ts)
+             independently rejects any non-finite current/baseline before
+             a Delta is built, and the negative case was checked directly
+             and produced no observable difference either — nothing
+             downstream of readRaw ever sees the corrupted value. */
       if (!e1.samples || !bw.samples || bw.value <= 0) return NOTHING
       return {
         value: round(e1.value / bw.value, 3),
@@ -234,6 +287,12 @@ function readRaw(metric: MetricId, ctx: WeeklyContext, w: Window): Reading {
       /* How much the best set moved across the window, per session. */
       const e1 = readMetric('e1rm', ctx, w)
       const sessions = readMetric('sessions', ctx, w)
+      /* EQUIVALENT MUTANTS, both (confirmed empirically, individually and
+         combined). Same two mechanisms as relative_strength above:
+         !e1.samples===0 implies e1.value===0, so a bypassed guard still
+         divides 0 by sessions.value and lands on 0, matching NOTHING;
+         and !sessions.value===0 divides by zero, but deltaOf() rejects
+         the resulting non-finite value before it can become a Delta. */
       if (!e1.samples || !sessions.value) return NOTHING
       return { value: round(e1.value / sessions.value, 2), samples: e1.samples, estimated: false }
     }
@@ -385,6 +444,13 @@ export function weeklyChange(ctx: WeeklyContext): WeeklyFinding | null {
     /* The two have to have moved the way this hypothesis says they do.
        Accepting either direction would make every pair a match and turn
        the closed list back into a search. */
+    /* EQUIVALENT MUTANT (confirmed empirically): `> 0` can become `>= 0`
+       with nothing able to catch it. By this point both `moved(outcome,
+       h.minEffect)` and `moved(driver, h.minDriverEffect)` have already
+       passed, and every minEffect/minDriverEffect in HYPOTHESES is a
+       positive number — so both change values are already proven
+       |non-zero| by construction, and their product can never land
+       exactly on zero for the two comparisons to disagree about. */
     const together = (outcome.change as number) * (driver.change as number) > 0
     if (h.direction === 'same' && !together) continue
     if (h.direction === 'opposite' && together) continue

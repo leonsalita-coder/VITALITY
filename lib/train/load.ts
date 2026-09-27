@@ -154,6 +154,15 @@ function dailySeries(
   const series = new Array(span).fill(0)
   for (const row of rows) {
     const age = daysBetween(row.date, today)
+    /* EQUIVALENT MUTANT (confirmed empirically, not by reasoning — run
+       against the full real test suite, including every consumer of
+       acuteChronic outside this file). `>=` can become `>` with nothing
+       able to catch it: at the one age where they'd disagree
+       (age === span exactly), `series[span - 1 - age]` is `series[-1]`
+       — JS silently creates a non-index property on the array rather
+       than writing into it, and weeklyRate/ewma below only ever read
+       numeric indices 0..length-1 by iteration. The write happens; it
+       is never read by anything. */
     if (age < 0 || age >= span) continue
     series[span - 1 - age] += row.amount
   }
@@ -166,6 +175,20 @@ function readingFrom(daily: number[], observedDays: number, estimated: boolean):
   const rate = weeklyRate(daily)
   const acute = ewma(rate, ACUTE_DAYS)
   const chronic = ewma(rate, CHRONIC_DAYS)
+  /* FIXTURE-SHAPE MASKED, flagged rather than forced (run count: this is
+     one more for the running tally). `chronic >= MIN_CHRONIC_LOAD` is a
+     real, meaningful boundary — unlike the equivalents elsewhere in this
+     file — but `chronic` is a continuous EWMA over real training dates,
+     not an integer count, and the comparison reads the UNROUNDED value
+     (the rounding below is display-only). Landing it on exactly 4.0
+     requires either the private, unexported ewma()/readingFrom()
+     directly, or a session pattern precise enough to survive floating-
+     point accumulation through a recursive filter — tried a flat 4-of-7
+     day pattern (mathematically constant weekly rate) and it still
+     settled at 3.9, not 4.0, from residual startup transient. A test
+     landing exactly on this boundary through the public API would be
+     fragile by construction, which is a worse failure mode than an
+     unpinned boundary. */
   const usable = observedDays >= MIN_CHRONIC_DAYS && chronic >= MIN_CHRONIC_LOAD
   return {
     acute: round(acute),
@@ -182,6 +205,10 @@ function readingFrom(daily: number[], observedDays: number, estimated: boolean):
 function spanOfHistory(ctx: LoadContext): number {
   const today = dateKey(ctx.now)
   let oldest = 0
+  /* EQUIVALENT MUTANT, both occurrences below (confirmed empirically):
+     `>` can become `>=` with nothing able to catch it. At the one age
+     where they'd disagree (age === oldest exactly), the assignment
+     reassigns the identical number — a no-op either way. */
   for (const id of Object.keys(ctx.history || {})) {
     for (const entry of readableEntries(ctx.history[id])) {
       const age = daysBetween(entry.date, today)
@@ -258,6 +285,11 @@ export function loadFindings(ctx: LoadContext): LoadFinding[] {
     if (reading.ratio >= SANE_BAND[0] && reading.ratio <= SANE_BAND[1]) continue
 
     const label = muscle.replace(/_/g, ' ')
+    /* EQUIVALENT MUTANT (confirmed empirically): `>` can become `>=`
+       with nothing able to catch it. The `continue` two lines up already
+       excludes ratio === SANE_BAND[1] (its own check is `<=`), so this
+       ternary never sees that exact value — only strictly above or
+       strictly below the whole band. */
     const direction = reading.ratio > SANE_BAND[1] ? 'above' : 'below'
     out.push({
       muscle,
@@ -292,6 +324,9 @@ export function systemicLoadNote(ctx: LoadContext): string | null {
   if (!systemic.usable) return null
   if (systemic.ratio >= SANE_BAND[0] && systemic.ratio <= SANE_BAND[1]) return null
 
+  /* EQUIVALENT MUTANT (confirmed empirically): same reasoning as the
+     identical line in loadFindings above — the early return already
+     excludes ratio === SANE_BAND[1] via its own `<=`. */
   const direction = systemic.ratio > SANE_BAND[1] ? 'above' : 'below'
   const caveat = systemic.estimated
     ? ' That includes other training you logged, which is self-reported.'
