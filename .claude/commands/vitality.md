@@ -23,11 +23,11 @@ mkdir -p public/tiles
 cp tiles-library/*.html public/tiles/
 ```
 
-If `tiles-library/` isn't there (an older or hand-trimmed copy), pull it straight from the public repo
-instead — same result:
+If `tiles-library/` isn't there (an older or hand-trimmed copy), pull it straight from this repo's own
+GitHub instead — same result:
 
 ```bash
-npx --yes degit RowanThistlebrooke/vitality-base/tiles-library public/tiles --force
+npx --yes degit leonsalita-coder/VITALITY/tiles-library public/tiles --force
 ```
 
 Then confirm what landed: `ls public/tiles` should list the seven `.html` tiles.

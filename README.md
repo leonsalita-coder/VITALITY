@@ -26,7 +26,7 @@ the **vision in motion**: each episode adds one input tile to the equation.
 2. **Deploy to Vercel**: import the repo and click Deploy. There are **no environment
    variables** to set.
 
-   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/RowanThistlebrooke/vitality-base)
+   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/leonsalita-coder/VITALITY)
 
 That is it. Your dashboard is live.
 
@@ -61,7 +61,7 @@ not-secret, or add auth later.
 
 ```bash
 git clone <your-fork-url>
-cd vitality-base
+cd VITALITY
 npm install
 npm run dev
 ```
