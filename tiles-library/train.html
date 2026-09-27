@@ -8806,7 +8806,7 @@ function doLog(e, idx, values, fail){
      celebration to keep meaning anything. */
   if(isBigPR(e, idx) && !wasComplete && exComplete(e) && card){
     card.classList.add('celebrate'); setTimeout(()=>card.classList.remove('celebrate'),1650);
-    celebrate(e, kg, reps);
+    celebrate(e, entry.kg, entry.reps);
   }
   if(logIsWorking(e.log[idx]) && (!e.group || isLastInGroup(e, curSession()))) startRest(e);
 }
@@ -8941,7 +8941,7 @@ function rollupFor(e, date){
     h.sort((a,b)=>a.date.localeCompare(b.date));
     /* Only a session for TODAY may move the carried-over weight. Editing
        last month must not rewrite what the next session starts from. */
-    if(top.kg!=null && date===today) e.lastKg=top.kg;
+    if(top && top.kg!=null && date===today) e.lastKg=top.kg;
   }
   STATE.history[e.id]=h;
   STATE.exerciseNames=STATE.exerciseNames||{}; STATE.exerciseNames[e.id]=e.name;
