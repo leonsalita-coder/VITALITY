@@ -1,5 +1,5 @@
 {
-  "name": "vitality-base",
+  "name": "vitality",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -18,7 +18,9 @@
     "mutate:callsites": "node scripts/mutate.mjs --mode=callsites",
     "mutate:fuzz": "node scripts/mutate.mjs --mode=fuzz",
     "verify": "npm run build:tiles && tsc --noEmit && vitest run tests/ && node scripts/mutate.mjs --mode=lint && node scripts/style-lint.mjs",
-    "verify:full": "npm run verify && node scripts/mutate.mjs --mode=callsites && node scripts/mutate.mjs --mode=fuzz && node scripts/mutate.mjs --mode=mutate",
+    "verify:fast": "npm run build:tiles && tsc --noEmit && node scripts/mutate.mjs --mode=lint && node scripts/style-lint.mjs",
+    "verify:push": "vitest run tests/",
+    "verify:full": "npm run verify && node scripts/mutate.mjs --mode=callsites --require-pinned && node scripts/mutate.mjs --mode=fuzz --require-pinned && node scripts/mutate.mjs --mode=mutate --require-pinned",
     "prepare": "git config core.hooksPath .githooks || true",
     "build:contact": "node scripts/build-contact-sheet.mjs",
     "style:lint": "node scripts/style-lint.mjs",

@@ -698,7 +698,7 @@ export function partialRun(opts) {
   return Boolean(opts.limit || (opts.files && opts.files.length))
 }
 
-function checkRatchet(mode, count) {
+function checkRatchet(mode, count, opts = {}) {
   const baseline = readBaseline()
   const allowed = baseline[mode]
   /**
@@ -707,15 +707,22 @@ function checkRatchet(mode, count) {
    * An absent key means nobody has measured this mode yet, which must
    * not pass silently — that is the "no baseline" case below. `null`
    * means somebody measured it, decided the number was not worth
-   * gating against, and said so. The run reports its count and stays
-   * green.
+   * gating against, and said so. By default the run reports its count
+   * and stays green — that default is what pre-commit's `--mode=lint`
+   * and any ad-hoc exploratory run rely on.
    *
-   * mutate is null because every figure available is a pre-harness-fix
-   * one: 492 and 379 were both produced before a failed SUITE counted
-   * as a kill, and 1 was corruption from a partial --bless. The next
-   * number worth pinning comes from the post-migration sweep.
+   * `--require-pinned` removes that leniency. It exists because printing
+   * "not gating" and still exiting 0 reads as a pass to anything that
+   * only checks the exit code — which is every automated caller. A
+   * comprehensive run (verify:full) that tolerates an unpinned mode
+   * isn't comprehensive, so it opts into the stricter read instead of
+   * getting it by default everywhere.
    */
   if (allowed === null) {
+    if (opts.requirePinned) {
+      console.error(`  REGRESSION: ${mode} is unpinned (null) — a comprehensive run requires every mode it checks to be pinned`)
+      return 1
+    }
     console.log(`  ${mode}: ${count} survivor(s) — unpinned, not gating`)
     return 0
   }
@@ -741,6 +748,7 @@ function main() {
     files: (args.find((a) => a.startsWith('--files=')) || '--files=').split('=')[1].split(',').filter(Boolean),
     limit: Number((args.find((a) => a.startsWith('--limit=')) || '--limit=0').split('=')[1]) || 0,
     json: args.includes('--json'),
+    requirePinned: args.includes('--require-pinned'),
   }
 
   const bless = args.includes('--bless')
@@ -762,7 +770,7 @@ function main() {
     counts[mode] = report(mode.toUpperCase(), runner(opts), opts.json)
     if (bless) continue
     if (partial) console.log(`  partial run — not scored against the baseline`)
-    else failed += checkRatchet(mode, counts[mode])
+    else failed += checkRatchet(mode, counts[mode], opts)
   }
   if (bless) {
     writeFileSync(BASELINE_FILE, JSON.stringify({ ...readBaseline(), ...counts }, null, 2) + '\n')

@@ -598,6 +598,79 @@ describe('a rising count actually fails the command', () => {
 })
 
 /**
+ * An unpinned mode printing "not gating" and still exiting 0 reads as a
+ * pass to anything that only checks the exit code — which is every
+ * automated caller. `--require-pinned` is how the comprehensive gate
+ * (verify:full) refuses to call that success; a mode left null under it
+ * is a regression, not a shrug.
+ *
+ * `lint` is the vehicle, same as above: it is complete and fast, and the
+ * mechanism is shared by every mode.
+ */
+describe('an unpinned mode fails a --require-pinned run', () => {
+  const FILE = '.mutation-baseline.json'
+
+  it('exits non-zero when the checked mode is unpinned', async () => {
+    const { writeFileSync } = await import('node:fs')
+    const before = readFileSync(FILE, 'utf8')
+    try {
+      writeFileSync(FILE, JSON.stringify({ ...JSON.parse(before), lint: null }, null, 2) + '\n')
+      let code = 0, out = ''
+      try {
+        out = execFileSync('node', ['scripts/mutate.mjs', '--mode=lint', '--require-pinned'],
+          { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })
+      } catch (e: any) { code = e.status; out = String(e.stdout || '') + String(e.stderr || '') }
+      expect(code).toBe(1)
+      expect(out.toLowerCase()).toContain('unpinned')
+    } finally {
+      writeFileSync(FILE, before)
+    }
+  }, 120_000)
+
+  it('stays green on an unpinned mode WITHOUT the flag — existing callers are unaffected', async () => {
+    /* The positive control: pre-commit's `--mode=lint` (no flag) and any
+       ad-hoc exploratory run must keep behaving exactly as before. Only
+       a caller that opts in with --require-pinned gets the stricter read. */
+    const { writeFileSync } = await import('node:fs')
+    const before = readFileSync(FILE, 'utf8')
+    try {
+      writeFileSync(FILE, JSON.stringify({ ...JSON.parse(before), lint: null }, null, 2) + '\n')
+      let code = 0
+      try {
+        execFileSync('node', ['scripts/mutate.mjs', '--mode=lint'], { cwd: process.cwd(), stdio: 'pipe' })
+      } catch (e: any) { code = e.status }
+      expect(code).toBe(0)
+    } finally {
+      writeFileSync(FILE, before)
+    }
+  }, 120_000)
+
+  it('stays green with --require-pinned once the mode IS pinned', () => {
+    /* Second control: the flag must not fail unconditionally, or it
+       would block every commit the moment anything used it. */
+    let code = 0
+    try {
+      execFileSync('node', ['scripts/mutate.mjs', '--mode=lint', '--require-pinned'], { cwd: process.cwd(), stdio: 'pipe' })
+    } catch (e: any) { code = e.status }
+    expect(code).toBe(0)
+  }, 120_000)
+})
+
+describe('verify:full requires every mode it checks to be pinned', () => {
+  const scripts = () => JSON.parse(readFileSync('package.json', 'utf8')).scripts
+
+  it('passes --require-pinned to callsites, fuzz, and mutate', () => {
+    const full = scripts()['verify:full']
+    for (const mode of ['--mode=callsites', '--mode=fuzz', '--mode=mutate']) {
+      const from = full.slice(full.indexOf(mode))
+      const nextAnd = from.indexOf('&&')
+      const segment = nextAnd === -1 ? from : from.slice(0, nextAnd)
+      expect(segment).toContain('--require-pinned')
+    }
+  })
+})
+
+/**
  * The wiring is the part that failed, so the wiring is asserted.
  *
  * Every piece of the ratchet worked in isolation. What was broken was

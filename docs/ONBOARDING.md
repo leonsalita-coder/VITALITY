@@ -55,29 +55,48 @@ iframe and mutation-testable (§5). If a function needs `document` or
 `window`, it doesn't belong in `lib/train/` — it belongs in the tile shell
 markup/script, hand-written directly in `public/tiles/train.html`.
 
-## 4. The pre-commit hook — and why `--no-verify` is dangerous here
+## 4. The pre-commit / pre-push split — and why `--no-verify` is dangerous here
 
 `core.hooksPath` is set to `.githooks` (via the `prepare` npm script, which
-runs automatically on `npm install`/`npm ci`). `.githooks/pre-commit` runs
-on every commit:
+runs automatically on `npm install`/`npm ci` — a fresh clone gets both
+hooks with no extra setup). Two hooks live there, split by cost:
+
+**`.githooks/pre-commit`** — fast, structural, ~2 seconds:
 
 1. If `.mutate-snapshot.json` exists, the commit is **blocked outright** —
    it means a mutation sweep (§5) is mid-flight and the working tree
    currently holds deliberately broken code. Wait for the sweep, or run
    `npm run mutate:lint` to restore the files it left behind.
-2. Otherwise it runs `npm run verify` (rebuilds the tiles, typechecks,
-   runs the full test suite, mutation-lints, style-lints) and blocks the
+2. Otherwise it runs `npm run verify:fast` (rebuilds the tiles, typechecks,
+   mutation-lints, style-lints — **not** the test suite) and blocks the
    commit if any of that is red.
 3. It then checks that `public/tiles/train.html` and
    `tiles-library/train.html` have no unstaged diff — i.e. that if
    `build:tiles` changed them, you staged both. This is what forces the
    two copies to move together.
 
-**`git commit --no-verify` is how a stylesheet got silently deleted from
-this repo for six weeks.** The escape hatch exists for genuine
-work-in-progress commits on a branch — never use it on `main`, and never
-use it to get past a red tile-sync check. If `verify` is red, the fix is
-to find out why, not to skip the question.
+**`.githooks/pre-push`** — the full test suite, ~4 minutes:
+
+Runs `npm run verify:push` (`vitest run tests/`, all 99 files) and blocks
+the push if anything is red.
+
+This split exists because the full suite used to run on every commit,
+paid in full by every developer on every commit. With two people
+committing against this repo that adds up fast for a check that only
+needs to be true once per push, not once per commit — so it moved to
+pre-push, and pre-commit kept only the checks that are essentially free.
+
+**`npm run verify` still runs everything by hand** — tiles, typecheck, the
+full suite, mutation lint, style lint, all in one command — exactly what
+the old single pre-commit gate ran. Use it whenever you want the complete
+picture without pushing. (`verify:full` is a separate, much longer
+command — see §6.)
+
+**`git commit --no-verify` / `git push --no-verify` is how a stylesheet got
+silently deleted from this repo for six weeks.** The escape hatch exists
+for genuine work-in-progress commits on a branch — never use it on `main`,
+and never use it to get past a red tile-sync check. If a gate is red, the
+fix is to find out why, not to skip the question.
 
 ## 5. Stop hooks — hard warning
 
@@ -126,6 +145,17 @@ Notes:
 - `.mutate-snapshot.json` existing on disk means a sweep is **currently
   mid-flight** and the working tree holds intentionally-broken code. Don't
   commit, don't assume the tree is sane — see §4.
+- `.mutation-baseline.json` holds a separate survivor count **per mode**
+  (`lint`, `callsites`, `fuzz`, `mutate`) — they are independent numbers
+  that happen to sometimes coincide, not one shared figure. A mode's
+  baseline can be `null`, which means DELIBERATELY UNPINNED (measured,
+  but not gating) rather than absent (never measured). By default an
+  unpinned mode reports its count and stays green, which is what lets
+  pre-commit's `npm run mutate:lint` stay lenient if `lint` were ever
+  unpinned. `npm run verify:full` opts out of that leniency by passing
+  `--require-pinned` to every mode it runs: under that flag, a `null`
+  baseline is a hard failure, not a shrug — a comprehensive gate that
+  tolerates an unpinned mode isn't comprehensive.
 
 ## 7. Design system / style-lint
 

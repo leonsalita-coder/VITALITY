@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# The full test suite, moved here from pre-commit.
+#
+# It cost ~4 minutes and ran on every commit, paid in full by every
+# developer on every commit — with two people committing against this
+# repo, that adds up fast for a check that only needs to be true once
+# per push, not once per commit. pre-commit keeps the fast, structural
+# checks (build, tiles-in-sync, typecheck, mutation lint, style lint,
+# ~2s); this is everything else.
+#
+# Escape hatch: `git push --no-verify`. Same rule as pre-commit: using it
+# on main is the thing to avoid, not the flag itself.
+
+set -e
+
+if [ -n "$SKIP_VERIFY" ]; then
+  echo "pre-push: SKIP_VERIFY set, gate skipped"
+  exit 0
+fi
+
+echo "pre-push: full test suite…"
+
+if ! npm run --silent verify:push; then
+  echo ""
+  echo "──────────────────────────────────────────────────────────────"
+  echo " PUSH BLOCKED — the test suite failed."
+  echo ""
+  echo " Run 'npm run verify:push' to see which test, or 'npm run verify'"
+  echo " for the full pre-commit-equivalent check too."
+  echo " Deliberate and justified? 'git push --no-verify'."
+  echo "──────────────────────────────────────────────────────────────"
+  exit 1
+fi
+
+echo "pre-push: clean"

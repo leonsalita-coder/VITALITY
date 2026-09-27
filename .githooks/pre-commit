@@ -44,18 +44,24 @@ if [ -n "$SKIP_VERIFY" ]; then
   exit 0
 fi
 
-echo "pre-commit: build, typecheck, tests, mutation lint…"
+echo "pre-commit: build, typecheck, mutation lint, style lint…"
 
-if ! npm run --silent verify; then
+# The full test suite (~4 min) runs at pre-push instead, not here. This
+# gate stays structural and fast (~2s): tiles rebuilt and in sync,
+# typecheck clean, no new absence assertions without a positive control,
+# no raw hex/px outside the token block. `npm run verify` still runs
+# everything, including the suite, by hand.
+if ! npm run --silent verify:fast; then
   echo ""
   echo "──────────────────────────────────────────────────────────────"
-  echo " COMMIT BLOCKED — verify failed."
+  echo " COMMIT BLOCKED — verify:fast failed."
   echo ""
-  echo " One of: the tiles are out of sync, typecheck is red, a test"
-  echo " failed, or the mutation lint found more absence assertions"
-  echo " without a positive control than the baseline allows."
+  echo " One of: the tiles are out of sync, typecheck is red, or the"
+  echo " mutation lint found more absence assertions without a positive"
+  echo " control than the baseline allows."
   echo ""
-  echo " Run 'npm run verify' to see which."
+  echo " Run 'npm run verify:fast' to see which (or 'npm run verify' for"
+  echo " the full suite too)."
   echo " Deliberate and justified? 'git commit --no-verify'."
   echo "──────────────────────────────────────────────────────────────"
   exit 1
