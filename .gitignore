@@ -53,6 +53,12 @@ next-env.d.ts
 !.claude/commands/sweep.md
 !.claude/settings.json
 
+# ui-ux-pro-max is a project tool, not personal state — ships with the base.
+# Compiled Python bytecode is a machine/version-specific build artifact, not
+# source, and never belongs in the repo.
+!.claude/skills/
+.claude/skills/**/__pycache__/
+
 # personal MCP connection (contains a per-user vitm_ token — never commit)
 .mcp.json
 
