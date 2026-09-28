@@ -198,4 +198,35 @@ describe('the coach is told, and only with enough scored', () => {
     expect(said).toMatch(/100%/)
     expect(said).toMatch(/8 suggestions/)
   })
+
+  /* Unguarded callsite: nothing previously exercised buildInsightContext
+     with accuracy bad enough to trigger TrainEngine.progressionDamping's
+     truthy branch (rate < 60%, mostly missed high, >=10 scored) — every
+     existing fixture here is a clean 100% hit rate, so stubbing that
+     callsite out changed nothing any test could see. */
+  it('eases off when accuracy is poor and the misses are mostly high', async () => {
+    const lines: string[] = (await run(`
+      (function(){
+        ${reset};
+        var d = function(back){
+          var x = new Date(Date.now() - back * 86400000);
+          return x.getFullYear() + '-' + String(x.getMonth()+1).padStart(2,'0')
+               + '-' + String(x.getDate()).padStart(2,'0');
+        };
+        STATE.history.bench = []; STATE.predictions = {};
+        for (var i = 1; i <= 10; i++) {
+          /* Predicted 250, only ever loaded 200 — loaded < targetWeight
+             is scored missed_high regardless of reps, so all ten miss
+             the same direction. */
+          STATE.predictions[d(i) + ':bench'] = { id:'bench', date:d(i), weight:250, reps:5,
+            seconds:null, metres:null, basis:'clean', deloadState:null,
+            readiness:'normal', madeAt: 1 };
+          STATE.history.bench.push({ date:d(i), kg:200, sets:[{w:200,r:5},{w:200,r:5}] });
+        }
+        return buildInsightContext(curSession()).then(function(c){ return c.lines; });
+      })()`))
+    const said = lines.filter((l) => /^SELF-CORRECTION:/.test(l)).join(' ')
+    expect(said).toMatch(/Easing off/)
+    expect(said).toMatch(/missed 10 of the last 10/)
+  })
 })

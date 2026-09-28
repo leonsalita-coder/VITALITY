@@ -188,4 +188,23 @@ describe('it is reachable', () => {
     expect(run('typeof openTrim')).toBe('function')
     expect(run(`readFileCheck = true; document.body.innerHTML.length > 0`)).toBe(true)
   })
+
+  /* Unguarded callsite: every test above calls TrainEngine.trimSession
+     directly, bypassing openTrim() entirely — so its own internal call
+     (draw()'s `const plan = TrainEngine.trimSession(...)`) was never
+     actually exercised. Stubbing it out there breaks nothing the tests
+     above can see, because none of them ever go through openTrim. */
+  it('opens the dialog and renders a real plan, not an empty one', () => {
+    const body = run(`
+      (function(){
+        ${reset};
+        openTrim();
+        return document.querySelector('#trimBody').innerHTML;
+      })()`)
+    /* Stubbing TrainEngine.trimSession makes `plan` undefined, and
+       reading `plan.before` inside draw() throws — openTrim() would
+       never finish rendering, and #trimBody would stay empty. */
+    expect(body).toMatch(/min now/)
+    expect(body).toMatch(/min\.?<\/div>/)
+  })
 })
