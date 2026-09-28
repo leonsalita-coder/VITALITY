@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
+import { localToday } from '../helpers/clock'
 
 /**
  * The shadow log, driven through the real tile.
@@ -27,11 +28,6 @@ import { JSDOM } from 'jsdom'
 
 /* LOCAL date, never toISOString — east of UTC that returns yesterday and
    the session never matches the tile's `today`. */
-const localToday = () => {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 const dayBack = (back: number) => {
   const d = new Date()
   d.setDate(d.getDate() - back)

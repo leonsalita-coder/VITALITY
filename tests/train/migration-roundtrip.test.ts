@@ -8,6 +8,7 @@ import { e1rmSeries } from '../../lib/train/series'
 import { workingVolume } from '../../lib/train/sets'
 import { currentWeekStreak } from '../../lib/train/streaks'
 import type { History } from '../../lib/train/analysis'
+import { localToday } from '../helpers/clock'
 
 /**
  * The session-id migration, proved against a year of real-shaped data.
@@ -27,8 +28,6 @@ import type { History } from '../../lib/train/analysis'
  * row, or reorders one, this is the test that notices.
  */
 
-const localToday = () => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
 const today = localToday()
 const dayBack = (n: number) => {
   const d = new Date(); d.setDate(d.getDate() - n)

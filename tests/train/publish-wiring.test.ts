@@ -2,13 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
 import { validatePublish } from '../../lib/tiles/metricsContract'
-
-/* LOCAL date, never toISOString — see docs/train-verification.md. */
-const localToday = () => {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
+import { localToday } from '../helpers/clock'
 
 /**
  * Train publishing, through the real tile.

@@ -12,6 +12,7 @@ import { restTrend } from '../../lib/train/timing'
 import { recentOtherLoad } from '../../lib/train/other'
 import { accuracyOver, type PredictionStore } from '../../lib/train/predictions'
 import { importCsv } from '../../lib/train/import'
+import { localToday } from '../helpers/clock'
 
 /**
  * TWO-A-DAYS — the assumption, made to fail out loud.
@@ -305,9 +306,6 @@ describe('lifting in the morning, taekwondo in the evening', () => {
  * THE REGRESSION TEST. This is the one that matters.
  * ------------------------------------------------------------------ */
 describe('squat in the morning, squat in the evening', () => {
-  const localToday = () => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
-
   const boot = async () => {
     const { JSDOM } = await import('jsdom')
     const { readFileSync } = await import('node:fs')

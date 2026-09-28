@@ -1,13 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
-
-/* LOCAL date, never toISOString — see docs/train-verification.md. */
-const localToday = () => {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
+import { localToday } from '../helpers/clock'
 
 /**
  * Per-limb logging through the real tile.
