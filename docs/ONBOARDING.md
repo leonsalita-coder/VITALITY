@@ -141,10 +141,23 @@ Notes:
   and without it, vitest's default per-CPU worker forking saturates the
   machine and produces false "survived" results from resource starvation,
   not real gaps in the tests.
-- A full sweep across every module is roughly **4 hours**.
+- A full `--mode=mutate` sweep across every module is roughly **4 hours**
+  by itself. `callsites` (95 candidates, each re-running every JSDOM-tagged
+  wiring test file) turned out to be the second most expensive check, not
+  a cheap one — measured, not guessed, after it silently ate most of a
+  first attempt at this. **`npm run verify:full` end to end is roughly
+  6 hours.** It is an occasional, deliberate exercise — something you
+  decide to run and wait out, not a command either of us runs casually or
+  as a matter of routine. `verify:full`'s internal order is cost-ascending:
+  build, typecheck, the fast lints, the test suite, `fuzz`, `callsites`,
+  `mutate` last.
 - `.mutate-snapshot.json` existing on disk means a sweep is **currently
   mid-flight** and the working tree holds intentionally-broken code. Don't
-  commit, don't assume the tree is sane — see §4.
+  commit, don't assume the tree is sane — see §4. The file records **which
+  mode** owns it (`callsites` or `mutate` — both write it, and it used to
+  be impossible to tell which without inferring from elapsed time) and
+  long-running modes print coarse progress to stderr as they go, so "how
+  far in is it" doesn't require guessing either.
 - `.mutation-baseline.json` holds a separate survivor count **per mode**
   (`lint`, `callsites`, `fuzz`, `mutate`) — they are independent numbers
   that happen to sometimes coincide, not one shared figure. A mode's
