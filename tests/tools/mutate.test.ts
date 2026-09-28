@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, statSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import {
   OPERATORS, mutationsFor, splitTests, inCommentAt, evenlySampled,
   ABSENCE, CONTROL, verdictFrom, partialRun,
@@ -413,6 +413,7 @@ describe('recovery keeps its hands off a run that is still going', () => {
       for (let i = 0; i < 240 && !existsSync(SNAPSHOT); i++) await new Promise((r) => setTimeout(r, 500))
       const snap = JSON.parse(readFileSync(SNAPSHOT, 'utf8'))
       expect(snap.pid).toBe(child.pid)
+      expect(snap.mode).toBe('mutate')
     } finally {
       child.kill('SIGKILL')
       await new Promise((r) => setTimeout(r, 300))
@@ -487,6 +488,62 @@ describe('recovery keeps its hands off a run that is still going', () => {
       rmSync(SNAPSHOT, { force: true })
     }
   }, 120_000)
+})
+
+/**
+ * The snapshot names its owning mode, and a long mode says how far in it
+ * is — both missing until a callsites pass that took roughly ninety
+ * minutes was read as being deep into the four-hour mutate sweep, because
+ * `.mutate-snapshot.json` is written by both modes and neither said which
+ * one it was, nor how far through its own list it had gotten.
+ */
+describe('a long mode names itself and reports progress', () => {
+  const SNAPSHOT = '.mutate-snapshot.json'
+  const TILES = ['public/tiles/train.html', 'tiles-library/train.html']
+
+  it('records callsites, not just mutate, as the owning mode', async () => {
+    /* Unlike the deload-only mutate test above, callsites mutates the
+       TILE — and by the time the snapshot file is observed to exist, the
+       loop may already be mid-flight on its (--limit=1) candidate. A
+       SIGKILL landing there leaves the tile stubbed, same as any killed
+       sweep. This must restore the tiles unconditionally, not just clean
+       up the snapshot, or this test corrupts the file for whatever runs
+       after it — which is exactly what happened the first time this was
+       written without the restore. */
+    const { spawn } = await import('node:child_process')
+    const { readFileSync, writeFileSync, existsSync, rmSync } = await import('node:fs')
+    const before = TILES.map((t) => readFileSync(t, 'utf8'))
+    const child = spawn('node', ['scripts/mutate.mjs', '--mode=callsites', '--limit=1'], {
+      cwd: process.cwd(), stdio: 'ignore',
+    })
+    try {
+      for (let i = 0; i < 240 && !existsSync(SNAPSHOT); i++) await new Promise((r) => setTimeout(r, 500))
+      const snap = JSON.parse(readFileSync(SNAPSHOT, 'utf8'))
+      expect(snap.mode).toBe('callsites')
+    } finally {
+      child.kill('SIGKILL')
+      await new Promise((r) => setTimeout(r, 300))
+      TILES.forEach((t, i) => writeFileSync(t, before[i]))
+      rmSync(SNAPSHOT, { force: true })
+    }
+  }, 180_000)
+
+  it('prints progress for mutate, keyed to the module it is in', () => {
+    const r = spawnSync('node', ['scripts/mutate.mjs', '--mode=mutate', '--files=deload', '--limit=1'],
+      { cwd: process.cwd(), encoding: 'utf8' })
+    expect(r.stderr).toContain('mutate: module 1/1 — deload')
+    expect(r.stderr).toContain('mutate:deload: 1/1')
+  }, 60_000)
+
+  it('prints progress for callsites', () => {
+    /* --limit=1 lets this run to completion rather than killing it mid-way
+       — callsites re-runs every JSDOM-tagged test file per candidate, so
+       even one candidate takes real time; this is the slow test in this
+       file for exactly that reason. */
+    const r = spawnSync('node', ['scripts/mutate.mjs', '--mode=callsites', '--limit=1'],
+      { cwd: process.cwd(), encoding: 'utf8' })
+    expect(r.stderr).toContain('callsites: 1/1')
+  }, 180_000)
 })
 
 /**

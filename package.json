@@ -20,7 +20,7 @@
     "verify": "npm run build:tiles && tsc --noEmit && vitest run tests/ && node scripts/mutate.mjs --mode=lint && node scripts/style-lint.mjs",
     "verify:fast": "npm run build:tiles && tsc --noEmit && node scripts/mutate.mjs --mode=lint && node scripts/style-lint.mjs",
     "verify:push": "vitest run tests/",
-    "verify:full": "npm run verify && node scripts/mutate.mjs --mode=callsites --require-pinned && node scripts/mutate.mjs --mode=fuzz --require-pinned && node scripts/mutate.mjs --mode=mutate --require-pinned",
+    "verify:full": "npm run build:tiles && tsc --noEmit && node scripts/mutate.mjs --mode=lint && node scripts/style-lint.mjs && node scripts/mutate.mjs --mode=callsites --require-pinned && node scripts/mutate.mjs --mode=fuzz --require-pinned && vitest run tests/ && node scripts/mutate.mjs --mode=mutate --require-pinned",
     "prepare": "git config core.hooksPath .githooks || true",
     "build:contact": "node scripts/build-contact-sheet.mjs",
     "style:lint": "node scripts/style-lint.mjs",

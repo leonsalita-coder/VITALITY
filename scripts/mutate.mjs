@@ -255,13 +255,22 @@ function recoverInterruptedRun() {
   )
 }
 
-function snapshot(paths) {
+/**
+ * `.mutate-snapshot.json` is written by every mode that mutates-and-
+ * restores (callsites, fuzz's cousin modes, mutate) — its mere presence
+ * says "a sweep is running" but not which one. That ambiguity is exactly
+ * how a ~90-minute callsites pass got read as being deep into the
+ * multi-hour mutate sweep: both write the same file, so "which mode owns
+ * this" had to be inferred from elapsed time instead of just read. `mode`
+ * is recorded here so it never has to be inferred again.
+ */
+function snapshot(paths, mode) {
   const dir = mkdtempSync(join(tmpdir(), 'mutate-'))
   const saved = new Map()
   for (const p of paths) saved.set(p, readFileSync(p, 'utf8'))
   /* On disk BEFORE the first mutation is applied. A snapshot held only
      in memory dies with the process that needed it. */
-  writeFileSync(SNAPSHOT_FILE, JSON.stringify({ pid: process.pid, files: Object.fromEntries(saved) }))
+  writeFileSync(SNAPSHOT_FILE, JSON.stringify({ pid: process.pid, mode, files: Object.fromEntries(saved) }))
   return {
     dir,
     restore() {
@@ -277,6 +286,21 @@ function snapshot(paths) {
       rmSync(SNAPSHOT_FILE, { force: true })
     },
   }
+}
+
+/**
+ * Coarse, mode-labelled progress for anything that iterates for a while.
+ *
+ * "How far in is it" used to have no answer short of guessing from
+ * elapsed time. This prints at roughly every 5% (or every step, for a
+ * count too small to have a meaningful 5%), so a long mode says where it
+ * is without flooding the log with one line per mutation.
+ */
+function progress(mode, done, total) {
+  if (total <= 0) return
+  const step = Math.max(1, Math.floor(total / 20))
+  if (done !== total && done % step !== 0) return
+  process.stderr.write(`  ${mode}: ${done}/${total}\n`)
 }
 
 /* ---------------------------------------------------------------- *
@@ -380,7 +404,8 @@ function modeMutate(opts) {
   let killed = 0
   let considered = 0
 
-  for (const name of modules) {
+  for (const [moduleIndex, name] of modules.entries()) {
+    process.stderr.write(`  mutate: module ${moduleIndex + 1}/${modules.length} — ${name}\n`)
     const file = join(ENGINE_DIR, `${name}.ts`)
     const scope = testsFor(name)
     if (!scope.length) {
@@ -401,16 +426,19 @@ function modeMutate(opts) {
        lib/train, and the tile is the thing that ships — a rebuild landing
        mid-run bakes a mutated engine into it, the source gets restored,
        and the corrupted tile stays. That happened, and reached the index. */
-    const snap = snapshot([file, ...TILES])
+    const snap = snapshot([file, ...TILES], 'mutate')
     try {
+      let doneInModule = 0
       for (const m of all) {
         considered++
+        doneInModule++
         applyMutation(m)
         const r = runTests(scope, { minFiles: scope.length, minTests: base.total, baselineRan: true })
         snap.restore()
         if (!r.ok) return harnessFailure(`${name}:${m.line} — ${r.reason}`)
         if (r.lethal) killed++
         else survivors.push({ ...m, scope: scope.length })
+        progress(`mutate:${name}`, doneInModule, all.length)
       }
     } finally {
       snap.restore()
@@ -466,9 +494,9 @@ function modeCallsites(opts) {
 
   const survivors = []
   let killed = 0
-  const snap = snapshot(TILES)
+  const snap = snapshot(TILES, 'callsites')
   try {
-    for (const call of unique) {
+    for (const [i, call] of unique.entries()) {
       /* Replaced rather than deleted: the expression must still parse, so
          the failure is "nothing was wired here" and not a syntax error
          that would fail everything and look like a pass. */
@@ -482,6 +510,7 @@ function modeCallsites(opts) {
       if (!r.ok) return harnessFailure(`callsite ${call.name}: ${r.reason}`)
       if (r.lethal) killed++
       else survivors.push({ file: tile, line: call.line, id: 'unguarded-callsite', name: call.name })
+      progress('callsites', i + 1, unique.length)
     }
   } finally {
     snap.restore()
@@ -503,6 +532,7 @@ function modeFuzz(opts) {
 
   const survivors = []
   let considered = 0
+  const total = ZONES.length * HOURS.length
   for (const zone of ZONES) {
     /* The hour is supplied to the suite rather than faked here: a test
        that reads the clock will read this one. Tests that pass `now`
@@ -518,6 +548,7 @@ function modeFuzz(opts) {
       if (r.lethal) {
         survivors.push({ file: `${zone} @ ${hour}`, line: 0, id: 'time-dependent', failed: r.failed })
       }
+      progress('fuzz', considered, total)
     }
   }
   return { considered, killed: considered - survivors.length, survivors }
