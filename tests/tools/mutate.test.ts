@@ -985,12 +985,26 @@ describe('a deliberately unpinned mode', () => {
     }
   }, 120_000)
 
-  it('leaves mutate unpinned until a post-migration sweep', () => {
-    /* The state this commit puts the file in, asserted so a stray
-       --bless cannot quietly re-pin it to a pre-harness-fix number. */
+  it('mutate is pinned, now that the post-migration sweep landed clean', () => {
+    /* The post-migration sweep this whole describe block used to wait
+       for ran to completion (45/45 modules, zero harness failures) and
+       is pinned in .mutation-baseline.json. Asserted as a real number,
+       not a specific value — the value itself belongs to the baseline
+       file and its own commit message, not to a test that would need
+       editing every time the number legitimately falls. */
     const b = JSON.parse(readFileSync(FILE, 'utf8'))
-    expect(b.mutate).toBeNull()
+    expect(b.mutate).toBeTypeOf('number')
     expect(b.lint).toBeTypeOf('number')
+  })
+
+  it('leaves fuzz unpinned, deliberately — see docs/plans/fuzz-unpinned.md', () => {
+    /* fuzz's own baseline was noise, not signal: two clean runs on the
+       same commit produced two different survivor sets, traced to 27
+       test files reading the real clock instead of an injected one.
+       Asserted here so a stray --bless can't quietly re-pin it to
+       whatever a lucky run happens to show. */
+    const b = JSON.parse(readFileSync(FILE, 'utf8'))
+    expect(b.fuzz).toBeNull()
   })
 })
 

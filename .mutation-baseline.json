@@ -1,7 +1,7 @@
 {
-  "_note": "Survivor counts the gate refuses to let RISE. Lower one with --bless. `mutate` is null — deliberately UNPINNED, not missing: it is measured but not gating, pending the post-migration full sweep. Every number available today is pre-harness-fix (492 and 379 were both produced before a failed SUITE counted as a kill), and the 1 it held until now was corruption from a partial --bless that survived into fcb730e. Do not re-pin it to an old figure.",
+  "_note": "Survivor counts the gate refuses to let RISE. Lower one with --bless. `mutate` is pinned as of the first post-migration full sweep to complete clean (45/45 modules, zero harness failures) — 296 survivors of 1532 mutations considered, 1236 killed. Four prior attempts died on an earlier link in the && chain (verify:full's ordering) or a transient harness hiccup; this one ran standalone (node scripts/mutate.mjs --mode=mutate --json), which is why it's the first number worth trusting. `fuzz` is deliberately UNPINNED (see fuzz-unpinned.md in this directory) — its baseline was noise, not signal, until the 27 files reading the real clock take an injected one.",
   "lint": 51,
   "callsites": 20,
-  "fuzz": 0,
-  "mutate": null
+  "fuzz": null,
+  "mutate": 296
 }
