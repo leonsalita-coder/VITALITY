@@ -1,0 +1,236 @@
+<title>Heatmap Signal Probe</title>
+<style>
+  :root {
+    /* copied from public/tiles/train.html's real :root — this page tests
+       legibility against the actual dark tokens, not an approximation.
+       Train has no light mode, so this page deliberately doesn't either;
+       see the note in the lede for why. */
+    --e0:#030304; --e1:#0a0a0d; --e2:#101013; --e3:#17171b; --e4:#1f1f24;
+    --hair:rgba(255,255,255,.05); --hair-strong:rgba(255,255,255,.12);
+    --signal:#6EE7B7; --fail:#ef6f6a;
+    --text:#f2f2f0; --muted:#86868f; --muted-2:#5c5c63;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,"JetBrains Mono",monospace;
+    --fs-micro:11px; --lh-micro:14px; --fw-micro:600; --ls-micro:.04em;
+    --fs-body:15px; --fw-body:400;
+    --fs-title:20px; --fw-title:700;
+    --r-sm:10px;
+    color-scheme: dark;
+    background: var(--e0);
+  }
+  * { box-sizing:border-box; }
+  body {
+    background:var(--e0); color:var(--text); font-family:var(--sans);
+    margin:0; padding:32px 16px 48px; font-size:var(--fs-body);
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size:var(--fs-title); font-weight:var(--fw-title); margin:0 0 6px; }
+  .lede {
+    color:var(--muted); font-size:13px; line-height:1.5;
+    margin-bottom:36px; max-width: 60ch;
+  }
+  .lede b { color: var(--text); font-weight: 600; }
+  section { margin-bottom:44px; }
+  h2 {
+    font-size:var(--fs-micro); font-weight:var(--fw-micro); letter-spacing:var(--ls-micro);
+    text-transform:uppercase; color:var(--muted); font-family:var(--mono);
+    border-bottom:1px solid var(--hair-strong); padding-bottom:8px; margin-bottom:20px;
+  }
+  .row { display:flex; flex-wrap:wrap; gap:24px; margin-bottom:8px; }
+  .swatch { display:flex; flex-direction:column; align-items:center; gap:8px; width: 96px; }
+  .swatch .cap {
+    font-family:var(--mono); font-size:9px; color:var(--muted-2);
+    text-align:center; line-height:1.35;
+  }
+  .stage {
+    background:var(--e1); border:1px solid var(--hair); border-radius:var(--r-sm);
+    padding:14px; display:flex; align-items:center; justify-content:center;
+    width: 100%; height: 48px;
+  }
+  .cell-13 { width:13px; height:13px; flex: none; }
+  .cell-4 { width:4px; height:4px; flex: none; }
+  .cell {
+    position:relative; border-radius:50%; border:1px solid var(--hair);
+    background:var(--e2);
+  }
+  /* load levels — low-opacity tint ramp of --signal, full strength ONLY
+     on the top band, per the decided signal-scarcity rule */
+  .l0 { background:var(--e2); }
+  .l1 { background:color-mix(in srgb, var(--signal) 22%, var(--e2)); border-color:transparent; }
+  .l2 { background:color-mix(in srgb, var(--signal) 45%, var(--e2)); border-color:transparent; }
+  .l3 { background:color-mix(in srgb, var(--signal) 68%, var(--e2)); border-color:transparent; }
+  .l4 { background:var(--signal); border-color:var(--signal); }
+  /* target-met — shape channel: "under" swaps the fill for a coloured
+     ring, so it reads independently of the colour channel */
+  .under { background:var(--e2) !important; border:1.5px solid var(--muted); }
+  .under.l1 { border-color: color-mix(in srgb, var(--signal) 45%, var(--e2)); }
+  .under.l2 { border-color: color-mix(in srgb, var(--signal) 68%, var(--e2)); }
+  .under.l3 { border-color: color-mix(in srgb, var(--signal) 85%, var(--e2)); }
+  .under.l4 { border-color: var(--signal); }
+  /* overlay — quiet mark for a secondary layer condition. Neutral,
+     never --signal, never --gold. */
+  .overlay::after {
+    content:''; position:absolute; inset:2.5px; border-radius:50%;
+    border:1px solid var(--muted-2); pointer-events:none;
+  }
+  .cell-4 .overlay::after { inset:0.5px; border-width:0.5px; }
+  /* note — a day carries a note. Small corner mark, neutral. */
+  .note::before {
+    content:''; position:absolute; top:-1px; right:-1px; width:4px; height:4px;
+    border-radius:50%; background:var(--muted); border:1px solid var(--e0);
+  }
+  .cell-4 .note::before { width:2px; height:2px; top:-0.5px; right:-0.5px; border-width:0.5px; }
+  /* split — a two-a-day. Diagonal half-fill. */
+  .split {
+    background: none !important;
+    background-image: linear-gradient(135deg, var(--split-a) 50%, var(--split-b) 50%) !important;
+  }
+  .greyscale { filter: grayscale(1); }
+  .combo-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px,1fr)); gap:20px; }
+</style>
+
+<div class="wrap">
+<h1>Heatmap Signal Probe</h1>
+<div class="lede">
+  Five candidate signals&mdash;load, target-met, overlay, note, split&mdash;
+  at true cell size, on the real <code>--e0</code>/<code>--e1</code>
+  background, real tokens copied from <code>public/tiles/train.html</code>.
+  <b>13px</b> matches today's <code>.cal .cd</code> (month/quarter scale);
+  <b>4px</b> matches a year-scale cell. Single dark theme only, matching
+  Train itself&mdash;the tile has no light mode to test against.
+</div>
+
+<section>
+  <h2>1. Each signal alone, 13px</h2>
+  <div class="row">
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3"></div></div>
+      <div class="cap">load only (l3)</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 under"></div></div>
+      <div class="cap">target-met (hollow ring = under target)</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l0 overlay"></div></div>
+      <div class="cap">overlay only, empty cell</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l0 note"></div></div>
+      <div class="cap">note only, empty cell</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 split" style="--split-a: var(--e2); --split-b: color-mix(in srgb, var(--signal) 45%, var(--e2));"></div></div>
+      <div class="cap">split only (two-a-day)</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>2. Every pairing, 13px</h2>
+  <div class="combo-grid">
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 under"></div></div>
+      <div class="cap">load + target-met</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 overlay"></div></div>
+      <div class="cap">load + overlay</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 note"></div></div>
+      <div class="cap">load + note</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 split" style="--split-a: color-mix(in srgb, var(--signal) 22%, var(--e2)); --split-b: color-mix(in srgb, var(--signal) 68%, var(--e2));"></div></div>
+      <div class="cap">load + split (two levels)</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 under overlay"></div></div>
+      <div class="cap">target-met + overlay</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 under note"></div></div>
+      <div class="cap">target-met + note</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 split under" style="--split-a: var(--e2); --split-b: color-mix(in srgb, var(--signal) 68%, var(--e2));"></div></div>
+      <div class="cap">target-met + split</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 overlay note"></div></div>
+      <div class="cap">overlay + note</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 split overlay" style="--split-a: color-mix(in srgb, var(--signal) 22%, var(--e2)); --split-b: color-mix(in srgb, var(--signal) 68%, var(--e2));"></div></div>
+      <div class="cap">overlay + split</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 split note" style="--split-a: color-mix(in srgb, var(--signal) 22%, var(--e2)); --split-b: color-mix(in srgb, var(--signal) 68%, var(--e2));"></div></div>
+      <div class="cap">note + split</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3. All five at once, 13px</h2>
+  <div class="row">
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 split under overlay note" style="--split-a: color-mix(in srgb, var(--signal) 22%, var(--e2)); --split-b: color-mix(in srgb, var(--signal) 85%, var(--e2));"></div></div>
+      <div class="cap">load + target-met + overlay + note + split, together</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>4. The same sets, greyscale</h2>
+  <div class="combo-grid greyscale">
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3"></div></div>
+      <div class="cap">load alone</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 under"></div></div>
+      <div class="cap">load + target-met</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 l3 overlay note"></div></div>
+      <div class="cap">load + overlay + note</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-13 split under overlay note" style="--split-a: color-mix(in srgb, var(--signal) 22%, var(--e2)); --split-b: color-mix(in srgb, var(--signal) 85%, var(--e2));"></div></div>
+      <div class="cap">all five</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>5. Year scale &mdash; the same sets at 4px</h2>
+  <div class="combo-grid">
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-4 l3"></div></div>
+      <div class="cap">load alone</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-4 l3 under"></div></div>
+      <div class="cap">load + target-met</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-4 l3 overlay"></div></div>
+      <div class="cap">load + overlay</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-4 l3 note"></div></div>
+      <div class="cap">load + note</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-4 split" style="--split-a: color-mix(in srgb, var(--signal) 22%, var(--e2)); --split-b: color-mix(in srgb, var(--signal) 68%, var(--e2));"></div></div>
+      <div class="cap">load + split</div>
+    </div>
+    <div class="swatch">
+      <div class="stage"><div class="cell cell-4 split under overlay note" style="--split-a: color-mix(in srgb, var(--signal) 22%, var(--e2)); --split-b: color-mix(in srgb, var(--signal) 85%, var(--e2));"></div></div>
+      <div class="cap">all five</div>
+    </div>
+  </div>
+</section>
+</div>
