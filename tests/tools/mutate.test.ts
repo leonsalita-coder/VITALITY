@@ -537,13 +537,39 @@ describe('a long mode names itself and reports progress', () => {
 
   it('prints progress for callsites', () => {
     /* --limit=1 lets this run to completion rather than killing it mid-way
-       — callsites re-runs every JSDOM-tagged test file per candidate, so
-       even one candidate takes real time; this is the slow test in this
-       file for exactly that reason. */
+       — callsites re-runs every JSDOM-tagged test file per candidate (a
+       full baseline pass, then one more per mutation), so even one
+       candidate takes real time; this is the slow test in this file for
+       exactly that reason.
+
+       The 180_000 budget this carried before measured 176s against it —
+       2% headroom, which is a test passing by luck, not a passing test,
+       and it was eventually going to fail on an unrelated commit and get
+       blamed for it. Investigated before touching the number, per the
+       rule about not silently bumping a timeout: tileTests() (the
+       function that decides this scope) was matching the bare word
+       "JSDOM" anywhere in a file, which pulled THIS file into its own
+       scope — a comment two lines up here literally contains the string
+       "JSDOM-tagged" — meaning callsites' scope included this file's own
+       slow spawned-subprocess tests, a self-referential false positive
+       (callsites' scope included a test that spawns callsites). Fixed at
+       the source (tileTests() now matches a real `jsdom` import, static
+       or dynamic, not the bare word) rather than here.
+
+       That fix helped only a little (166.6s measured twice, back to
+       back, after it — the false positive wasn't the dominant cost).
+       The remaining ~167s is genuine: 35 real test files that each boot
+       a tile via JSDOM, run twice (baseline + one mutation), at ~84s a
+       pass. That scope grows as the tile's wiring-test surface grows, so
+       167s is a real, moving number, not a one-time constant to shave
+       once and forget. Raised to 360_000 (6 minutes, ~2.2x the measured
+       167s) rather than a razor-thin bump, specifically so normal
+       variance this environment's own back-to-back runs can't reveal
+       doesn't reproduce the exact failure this replaces. */
     const r = spawnSync('node', ['scripts/mutate.mjs', '--mode=callsites', '--limit=1'],
       { cwd: process.cwd(), encoding: 'utf8' })
     expect(r.stderr).toContain('callsites: 1/1')
-  }, 180_000)
+  }, 360_000)
 })
 
 /**

@@ -320,9 +320,19 @@ function testsFor(moduleName) {
   return found
 }
 
-/** Test files that boot a tile. Any engine change can move these. */
+/** Test files that boot a tile. Any engine change can move these.
+ * Matches a real import of the `jsdom` package — `from 'jsdom'` (the
+ * common case) or `import('jsdom')` (two-a-day.test.ts's dynamic one) —
+ * not the bare word "JSDOM" anywhere in the file. The looser word match
+ * this replaced pulled tests/tools/mutate.test.ts itself into scope
+ * purely because a comment here says "JSDOM-tagged" — meaning every
+ * callsites run (baseline AND each mutation) was also running this
+ * file's own tests, including its slowest spawned-subprocess ones (a
+ * costly, self-referential false positive: callsites' own scope
+ * included a test that itself spawns callsites). Confirmed by listing
+ * both matches and diffing them before changing this, not assumed. */
 function tileTests() {
-  return testFiles().filter((f) => /JSDOM/.test(readFileSync(f, 'utf8')))
+  return testFiles().filter((f) => /(?:from|import\()\s*['"]jsdom['"]/.test(readFileSync(f, 'utf8')))
 }
 
 /* ---------------------------------------------------------------- *

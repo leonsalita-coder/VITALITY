@@ -966,22 +966,35 @@
      never dimmed — "silence is a state," the same rule the 28-day gate
      and empty-layer cases use elsewhere in the spec. No cascade
      animation on load, no per-cell hover chrome yet — marks and
-     interaction are later slices.
+     interaction are later slices. A fixed 53-week trailing window, not
+     data-extent — see renderHeatmap()'s own comment for why.
      ==================================================================== */
   .hmHead { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; margin-bottom:8px; }
   .hmWd { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:var(--lh-micro); }
   .hmBody { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; max-height:60vh; overflow-y:auto; }
-  .hmCell { position:relative; width:42px; height:42px; padding:0; border:1px solid var(--hair); border-radius:var(--r-sm); background:none; cursor:default; aspect-ratio:1; }
-  /* Tap target padded to 44px without disturbing the 42px grid math or
-     the 4px gap it's built on — a technique already established, not
-     invented here: extend the hit area with an absolutely-positioned
-     pseudo-element rather than resizing the element the grid lays out. */
-  .hmCell::before { content:''; position:absolute; inset:-1px; }
+  /* .hmCell is the GRID ITEM — 42px, exactly decision 5's own geometry,
+     untouched by the tap-target requirement below. It carries the
+     VISUAL fill/border only; it is not itself the interactive element. */
+  .hmCell { position:relative; width:42px; height:42px; border:1px solid var(--hair); border-radius:var(--r-sm); background:none; aspect-ratio:1; }
   .hmCell.l1 { background:var(--hm1); border-color:transparent; }
   .hmCell.l2 { background:var(--hm2); border-color:transparent; }
   .hmCell.l3 { background:var(--hm3); border-color:transparent; }
   .hmCell.l4 { background:var(--hm4); border-color:transparent; }
   .hmCell.today { box-shadow:0 0 0 2px var(--signal); }
+  /* .hmHit is the real <button> — inset:-1px on a 42px parent gives it
+     an actual, measurable 44×44 border-box (getBoundingClientRect, not
+     an assumption about pseudo-element hit-testing, which is what the
+     previous ::before attempt here rested on and doesn't reliably
+     extend a real tap target across engines). Taken out of grid flow
+     (position:absolute) so it extends into the 4px gap without moving
+     any other cell or changing the grid's own 42px+4px rhythm. */
+  .hmHit { position:absolute; inset:-1px; padding:0; margin:0; border:none; background:none; cursor:default; }
+  .hmLegend { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); line-height:var(--lh-micro); }
+  /* Swatches reuse .hmCell's own l1–l4 rules verbatim (same classes, same
+     selectors) rather than restating --hm1–--hm4 here — this size-only
+     override cannot drift out of sync with the real cells' colour
+     because it never states a colour of its own. */
+  .hmLegendSwatch { width:11px; height:11px; flex:none; border-radius:3px; }
 
   /* ====================================================================
      RECOVERED — the remaining 59, lifted from 731e891 in six groups
@@ -11388,6 +11401,23 @@ function calSparkPath(curve, W, H){
    of that is later slices per the spec. Reuses aggregateVolumeByDate()
    (already used by the .cal family above) — no new engine surface. */
 const HM_MIN_TRAINED_DAYS=5;
+/* 53 weeks trailing, fixed — not data extent. The first version used the
+   athlete's own earliest trained date as the start, which meant a fresh
+   or lightly-used account rendered as a single, non-scrolling week: a
+   heatmap that only becomes a heatmap once enough history accumulates,
+   which defeats the point of a heatmap. 53 was never a new number here
+   — it's decision 1's own reasoning restated: the landscape rejection
+   compared a 53-column year against 42px portrait cells, so the
+   intended SCOPE was always about a year; only the orientation changed.
+   At 42px cells + 4px gaps (46px pitch), 53 rows is ~2438px — roughly
+   4.8 screens of scroll at the .hmBody 60vh cap on a typical phone
+   viewport — long enough to read as a real, pattern-revealing year
+   rather than a memorized week, without rendering multiple years of
+   empty cells for a fresh account. Every cell in the window is real —
+   a quiet year is drawn honestly (all rest/no-data cells), not hidden;
+   "silence is a state" applies to the WHOLE grid the same way it
+   applies to one cell. */
+const HM_WINDOW_WEEKS=53;
 /* Bucketing: quartiles of the athlete's OWN trained-day volumes, over
    ALL-TIME history — not the visible range, and not a fixed absolute
    threshold. All-time (not per-window) so a cell's colour doesn't shift
@@ -11423,11 +11453,15 @@ function renderHeatmap(){
   plot.style.aspectRatio='auto';
   cap.textContent='';
   const {map, thresholds}=heatmapVolumeLevels();
-  const dates=Object.keys(map).sort();
-  const earliestKey=dates.length?dates[0]:today;
-  const [ey,em,ed]=earliestKey.split('-').map(Number);
-  const start=new Date(ey,em-1,ed); start.setDate(start.getDate()-start.getDay());
-  const end=new Date(); end.setDate(end.getDate()+(6-end.getDay()));
+  const [ty,tm,td]=today.split('-').map(Number);
+  const end=new Date(ty,tm-1,td); // today, local midnight — the window's own hard edge
+  const weekStart=new Date(end); weekStart.setDate(weekStart.getDate()-weekStart.getDay());
+  const start=new Date(weekStart); start.setDate(start.getDate()-7*(HM_WINDOW_WEEKS-1));
+  /* Stops AT today, not at the end of today's week. A CSS grid with
+     fewer than 7 items in its last row simply leaves the remaining
+     tracks empty — no placeholder cells needed for a short last row —
+     so the loop can end at `end` directly rather than padding forward
+     and having to mark the padding as non-interactive after the fact. */
   const cells=[]; const cursor=new Date(start);
   while(cursor<=end){
     const key=ymd(cursor);
@@ -11436,8 +11470,15 @@ function renderHeatmap(){
     cursor.setDate(cursor.getDate()+1);
   }
   const head=CAL_WD.map(w=>'<div class="hmWd">'+w+'</div>').join('');
-  const body=cells.map(c=>'<button class="hmCell'+(c.level?' l'+c.level:'')+(c.isToday?' today':'')+'" data-date="'+c.key+'" data-vol="'+(map[c.key]||0)+'" aria-label="'+fmtDate(c.key)+'"></button>').join('');
-  plot.innerHTML='<div class="hmHead">'+head+'</div><div class="hmBody">'+body+'</div>';
+  const body=cells.map(c=>
+    '<div class="hmCell'+(c.level?' l'+c.level:'')+(c.isToday?' today':'')+'" data-vol="'+(map[c.key]||0)+'">'
+    + '<button class="hmHit" data-date="'+c.key+'" aria-label="'+fmtDate(c.key)+'"></button></div>'
+  ).join('');
+  const legend='<div class="hmLegend">Less'
+    + '<span class="hmCell hmLegendSwatch"></span><span class="hmCell l1 hmLegendSwatch"></span>'
+    + '<span class="hmCell l2 hmLegendSwatch"></span><span class="hmCell l3 hmLegendSwatch"></span>'
+    + '<span class="hmCell l4 hmLegendSwatch"></span>More</div>';
+  plot.innerHTML='<div class="hmHead">'+head+'</div><div class="hmBody">'+body+'</div>'+legend;
 }
 function drawSessionsCal(){
   const plot=$('#statsPlot'), cap=$('#statsCap');

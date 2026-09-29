@@ -202,6 +202,22 @@ if that rule is ever relaxed, the guard doesn't fail, it goes *blind* to
 that element, which is the worked example of a guard that has to check
 its own premise, not just the thing it was written to check.
 
+Two `getComputedStyle`-in-JSDOM gaps, found by this same guard on two
+separate passes, are worth naming together: it never resolves `var()` to
+an `rgb()` value (above), and — found later, adding the heatmap's cell
+fill to the same guard — it never populates `backgroundColor` from a
+`background: var(...)` shorthand declaration either, computing it as the
+transparent default no matter what's actually declared; only reading the
+`background` shorthand property itself returns the literal
+`"var(--token)"` string, the same way `color` does. Both were found by
+writing a real value into the property, reading it back, and noticing it
+came back wrong — not by reading JSDOM's docs and trusting them. The
+point both make together: a guard is only as good as the specific
+property it reads, and the "obvious" property (`backgroundColor` for a
+background, a resolved colour for a token) is exactly the one JSDOM gets
+wrong in each case — check which property the value actually lands on
+before trusting a guard that reads it.
+
 ## 7. Design system / style-lint
 
 Tokens live in `:root` in `public/tiles/train.html` — nowhere else.

@@ -98,11 +98,10 @@ async function boot(state: () => object) {
   return (expr: string): any => dom.window.eval(expr)
 }
 
-/** Evaluated INSIDE the tile's own window: every rendered HTML leaf
- * element (no element children, so its own textContent is exactly what
- * it shows) whose value is empty/zero, checked against the three
- * achievement-colour custom properties by their LITERAL computed string
- * — see the module comment for why that's valid here. Checks BOTH
+/** Evaluated INSIDE the tile's own window: every rendered HTML element
+ * whose value is empty/zero, checked against the three achievement-
+ * colour custom properties by their LITERAL computed string — see the
+ * module comment for why that's valid here. Checks BOTH
  * `color` and the `background` SHORTHAND (not `backgroundColor` —
  * verified directly: JSDOM never resolves `background-color` from a
  * `background: var(...)` shorthand declaration at all, computing it as
@@ -116,11 +115,15 @@ async function boot(state: () => object) {
  * "Zero" is detected two ways, because a value-bearing element doesn't
  * always carry its value as visible text:
  *   - the element's own text reduces to the number 0 (the original
- *     eleven sites' shape), or
- *   - the element carries `data-vol="0"` (the heatmap's shape — its
- *     cells are empty <button>s; data-vol is what the tile itself
- *     already emits as the "what value does this cell represent" fact,
- *     not a check-only artifact bolted on after the fact).
+ *     eleven sites' shape) — restricted to elements with no element
+ *     children, so a parent's combined text (every descendant's text
+ *     concatenated) is never misread as one value, or
+ *   - the element carries `data-vol="0"` (the heatmap's shape — data-vol
+ *     is what the tile itself already emits as the "what value does
+ *     this cell represent" fact, not a check-only addition), checked
+ *     regardless of children — .hmCell wraps a real <button> (.hmHit,
+ *     the tap-target fix) inside itself, so it is not a leaf, but it is
+ *     still exactly the element whose background carries the value.
  *
  * Scoped by three things learned empirically, not assumed, while first
  * running this against the real tile:
@@ -156,10 +159,18 @@ const SCAN_SRC = `(function(){
   var offenders = [];
   document.querySelectorAll('body *').forEach(function(el){
     if (el.namespaceURI === SVG_NS) return;
-    if (el.children.length > 0) return;
+    var volAttr = el.getAttribute('data-vol');
+    /* The leaf restriction (no element children) only makes sense for
+       the TEXT-based check — it exists so a parent's combined text
+       (all its descendants' text concatenated) doesn't get read as one
+       value. data-vol is an explicit attribute, not derived from text,
+       so an element carrying it is checked regardless of children — the
+       heatmap's .hmCell wraps a real <button> (.hmHit, the tap-target
+       fix) inside itself, so it is NOT a leaf, but it is still exactly
+       the element whose background carries the value. */
+    if (volAttr === null && el.children.length > 0) return;
     if (getComputedStyle(el).display === 'none') return;
     var text = (el.textContent || '').trim();
-    var volAttr = el.getAttribute('data-vol');
     var isZero = false;
     if (volAttr !== null) {
       isZero = volAttr === '0';
