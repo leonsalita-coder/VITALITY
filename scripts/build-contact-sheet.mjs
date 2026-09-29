@@ -537,6 +537,18 @@ ${sec('calendar', '18 · The calendar', 'Rounded per tests/tools/recovered-primi
   </div>
 `)}
 
+${sec('heatmap', '18b · The heatmap (first slice)', 'docs/plans/heatmap.md — grid shell only, volume-bucketed. --hm1–--hm4 is a NEW ramp (not elevation), neutral by design; --signal appears exactly once, on today, regardless of that day’s own value. Rest/no-data is drawn (hairline outline, no fill), never dimmed.', `
+  <div class="hmHead" style="width:max-content">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((w) => `<div class="hmWd">${w}</div>`).join('')}</div>
+  <div class="hmBody" style="width:max-content;max-height:none;grid-template-rows:repeat(2,42px)">
+    <button class="hmCell"></button><button class="hmCell l1"></button><button class="hmCell l2"></button>
+    <button class="hmCell l3"></button><button class="hmCell l4"></button><button class="hmCell today"></button>
+    <button class="hmCell l2 today"></button>
+    <button class="hmCell"></button><button class="hmCell"></button><button class="hmCell l1"></button>
+    <button class="hmCell l3"></button><button class="hmCell"></button><button class="hmCell l4"></button>
+    <button class="hmCell l2"></button>
+  </div>
+`)}
+
 ${sec('overview', '19 · Overview cards &amp; weekday bars', 'Signal shows up twice here — .ovNum.mint and .wdFill’s gradient — flagged, not changed, in the same pass that ported these.', `
   <div class="ovGrid" style="margin-top:0">
     ${cell('ovCard, gold', '<div class="ovCard"><div class="ovNum gold">6</div><div class="ovLbl">Longest run</div><div class="ovDesc">weeks at 3+ sessions</div></div>')}

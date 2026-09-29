@@ -100,9 +100,27 @@ async function boot(state: () => object) {
 
 /** Evaluated INSIDE the tile's own window: every rendered HTML leaf
  * element (no element children, so its own textContent is exactly what
- * it shows) whose text reduces to the number 0, checked against the
- * three achievement-colour custom properties by their LITERAL computed
- * string — see the module comment for why that's valid here.
+ * it shows) whose value is empty/zero, checked against the three
+ * achievement-colour custom properties by their LITERAL computed string
+ * — see the module comment for why that's valid here. Checks BOTH
+ * `color` and the `background` SHORTHAND (not `backgroundColor` —
+ * verified directly: JSDOM never resolves `background-color` from a
+ * `background: var(...)` shorthand declaration at all, computing it as
+ * the transparent default regardless of what's actually declared; only
+ * reading the shorthand property itself returns the literal
+ * `"var(--token)"` string, the same way `color` does), because a value
+ * can be painted either way — the eleven original sites all used text
+ * colour, but the heatmap (docs/plans/heatmap.md) encodes its value as a
+ * cell's FILL, with no text in the cell at all.
+ *
+ * "Zero" is detected two ways, because a value-bearing element doesn't
+ * always carry its value as visible text:
+ *   - the element's own text reduces to the number 0 (the original
+ *     eleven sites' shape), or
+ *   - the element carries `data-vol="0"` (the heatmap's shape — its
+ *     cells are empty <button>s; data-vol is what the tile itself
+ *     already emits as the "what value does this cell represent" fact,
+ *     not a check-only artifact bolted on after the fact).
  *
  * Scoped by three things learned empirically, not assumed, while first
  * running this against the real tile:
@@ -114,14 +132,21 @@ async function boot(state: () => object) {
  *     display:none and gold — correctly, since nothing is ever visually
  *     painted there when hidden. Checking computed colour on an invisible
  *     element measures nothing a viewer could see.
- *   - EMPTY text is no longer treated as "zero" (the instruction's
- *     "zero-or-empty" was narrowed here after running it for real):
- *     `.noteDot` is a purely decorative 4px bullet
+ *   - EMPTY text with no data-vol attribute is not treated as "zero"
+ *     (the instruction's "zero-or-empty" was narrowed here after running
+ *     it for real): `.noteDot` is a purely decorative 4px bullet
  *     (`background:currentColor`, no text ever) whose colour comes
  *     correctly from an already-guarded parent (`.note-gold` requires
  *     totals.total>0) — it isn't a value display and flagging it is
- *     noise unrelated to the eleven real bugs, every one of which was a
- *     literal "0", never an empty string.
+ *     noise unrelated to the real bugs, every one of which was either a
+ *     literal "0" or an explicit data-vol="0", never a bare empty string.
+ *
+ * Deliberately does NOT check box-shadow/border — the heatmap's "today"
+ * ring is --signal by design (docs/plans/heatmap.md decision 2: "signal
+ * spent exactly once, on today"), regardless of that day's own value.
+ * That's a time marker, not a value colour, and uses a different CSS
+ * property for exactly this reason — checking it here would make this
+ * guard fail on the tile's own intended design.
  *
  * Returns plain data (not DOM nodes) so it survives the eval() boundary.
  */
@@ -134,14 +159,19 @@ const SCAN_SRC = `(function(){
     if (el.children.length > 0) return;
     if (getComputedStyle(el).display === 'none') return;
     var text = (el.textContent || '').trim();
-    if (text === '') return;
-    var m = text.match(/^[+-]?[\\d,]+(?:\\.\\d+)?/);
-    if (!m) return;
-    if (parseFloat(m[0].replace(/,/g,'')) !== 0) return;
-    var color = getComputedStyle(el).color;
-    if (BAD.indexOf(color) !== -1) {
-      offenders.push(el.tagName.toLowerCase() + (el.id?'#'+el.id:'') + (el.getAttribute('class')?'.'+el.getAttribute('class').replace(/\\s+/g,'.'):'') + ' text="' + text + '" color=' + color);
+    var volAttr = el.getAttribute('data-vol');
+    var isZero = false;
+    if (volAttr !== null) {
+      isZero = volAttr === '0';
+    } else if (text !== '') {
+      var m = text.match(/^[+-]?[\\d,]+(?:\\.\\d+)?/);
+      isZero = !!m && parseFloat(m[0].replace(/,/g,'')) === 0;
     }
+    if (!isZero) return;
+    var cs = getComputedStyle(el);
+    var label = el.tagName.toLowerCase() + (el.id?'#'+el.id:'') + (el.getAttribute('class')?'.'+el.getAttribute('class').replace(/\\s+/g,'.'):'') + ' text="' + text + '" data-vol=' + volAttr;
+    if (BAD.indexOf(cs.color) !== -1) offenders.push(label + ' color=' + cs.color);
+    if (BAD.indexOf(cs.background) !== -1) offenders.push(label + ' background=' + cs.background);
   });
   return offenders;
 })()`
@@ -156,6 +186,7 @@ const SCENES = [
   `drawExerciseChart('squat');`,
   `statsView={id:'__volume'}; drawStatsSection();`,
   `statsView={id:'__sessions'}; drawStatsSection();`,
+  `statsView={id:'__heatmap'}; drawStatsSection();`,
 ]
 
 describe('PRECONDITION — this guard is only meaningful while colours are all var()', () => {

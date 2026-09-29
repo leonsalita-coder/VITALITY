@@ -20,6 +20,12 @@
     /* elevation — true-black base, five graphite steps up */
     --e0:#030304; --e1:#0a0a0d; --e2:#101013; --e3:#17171b; --e4:#1f1f24;
     --hair:rgba(255,255,255,.05); --hair-strong:rgba(255,255,255,.12);
+    /* heatmap ramp — NOT elevation steps, despite the naming resemblance.
+       e1–e4 encode depth/layering and are too close together (five
+       near-blacks) to also read as a continuous quantity scale; this is
+       a separate four-step ramp built to encode volume intensity in the
+       training-load grid, nothing else. See docs/plans/heatmap.md. */
+    --hm1:#2a2a31; --hm2:#3d3d47; --hm3:#55555f; --hm4:#71717d;
     /* signal — scarce by design. gold flags a PR, fail flags a miss */
     --signal:#6EE7B7; --signal-ink:#04140d;
     --gold:#f5a623; --fail:#ef6f6a;
@@ -949,6 +955,35 @@
   @media (prefers-reduced-motion:reduce){ .cal .cd { animation:none; } }
 
   /* ====================================================================
+     THE HEATMAP — docs/plans/heatmap.md, first slice: the grid shell,
+     volume only. Portrait, 7 columns (days of week), weeks running down,
+     vertical scroll — replaces the quarter-bound .cal above once it has
+     parity (marks, layers, interaction); until then the two sit side by
+     side, reachable as separate chips. Ramp is --hm1–--hm4 (NOT the
+     elevation ramp — see the token comment in :root), neutral by
+     design: --signal is spent exactly once, on today, never on the
+     intensity fill. Rest/no-data is drawn (hairline outline, no fill),
+     never dimmed — "silence is a state," the same rule the 28-day gate
+     and empty-layer cases use elsewhere in the spec. No cascade
+     animation on load, no per-cell hover chrome yet — marks and
+     interaction are later slices.
+     ==================================================================== */
+  .hmHead { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; margin-bottom:8px; }
+  .hmWd { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:var(--lh-micro); }
+  .hmBody { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; max-height:60vh; overflow-y:auto; }
+  .hmCell { position:relative; width:42px; height:42px; padding:0; border:1px solid var(--hair); border-radius:var(--r-sm); background:none; cursor:default; aspect-ratio:1; }
+  /* Tap target padded to 44px without disturbing the 42px grid math or
+     the 4px gap it's built on — a technique already established, not
+     invented here: extend the hit area with an absolutely-positioned
+     pseudo-element rather than resizing the element the grid lays out. */
+  .hmCell::before { content:''; position:absolute; inset:-1px; }
+  .hmCell.l1 { background:var(--hm1); border-color:transparent; }
+  .hmCell.l2 { background:var(--hm2); border-color:transparent; }
+  .hmCell.l3 { background:var(--hm3); border-color:transparent; }
+  .hmCell.l4 { background:var(--hm4); border-color:transparent; }
+  .hmCell.today { box-shadow:0 0 0 2px var(--signal); }
+
+  /* ====================================================================
      RECOVERED — the remaining 59, lifted from 731e891 in six groups
      (overview/weekday stats, the hero progress ring, the trend-chart
      SVG primitives, the step-by-step form flow, the add-lift button's
@@ -1441,6 +1476,18 @@
       <div class="cs-cell"><div class="cs-lbl">calTotal.hot</div><div class="calTotal hot"><div class="ctNum">2.4k</div><div class="ctLbl">lb</div></div></div>
       <div style="position:relative;width:132px;height:70px"><div class="cs-cell"><div class="cs-lbl">calPop</div><div class="calPop on" style="position:relative;right:auto;top:auto;transform:none;opacity:1"><div class="cpCap">growth this quarter</div></div></div></div>
     </div>
+  </div>
+</section>
+
+<section class="cs-sec" id="heatmap"><h2>18b · The heatmap (first slice)</h2><p class="cs-note">docs/plans/heatmap.md — grid shell only, volume-bucketed. --hm1–--hm4 is a NEW ramp (not elevation), neutral by design; --signal appears exactly once, on today, regardless of that day’s own value. Rest/no-data is drawn (hairline outline, no fill), never dimmed.</p>
+  <div class="hmHead" style="width:max-content"><div class="hmWd">Sun</div><div class="hmWd">Mon</div><div class="hmWd">Tue</div><div class="hmWd">Wed</div><div class="hmWd">Thu</div><div class="hmWd">Fri</div><div class="hmWd">Sat</div></div>
+  <div class="hmBody" style="width:max-content;max-height:none;grid-template-rows:repeat(2,42px)">
+    <button class="hmCell"></button><button class="hmCell l1"></button><button class="hmCell l2"></button>
+    <button class="hmCell l3"></button><button class="hmCell l4"></button><button class="hmCell today"></button>
+    <button class="hmCell l2 today"></button>
+    <button class="hmCell"></button><button class="hmCell"></button><button class="hmCell l1"></button>
+    <button class="hmCell l3"></button><button class="hmCell"></button><button class="hmCell l4"></button>
+    <button class="hmCell l2"></button>
   </div>
 </section>
 

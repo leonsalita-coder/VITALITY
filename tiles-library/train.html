@@ -20,6 +20,12 @@
     /* elevation — true-black base, five graphite steps up */
     --e0:#030304; --e1:#0a0a0d; --e2:#101013; --e3:#17171b; --e4:#1f1f24;
     --hair:rgba(255,255,255,.05); --hair-strong:rgba(255,255,255,.12);
+    /* heatmap ramp — NOT elevation steps, despite the naming resemblance.
+       e1–e4 encode depth/layering and are too close together (five
+       near-blacks) to also read as a continuous quantity scale; this is
+       a separate four-step ramp built to encode volume intensity in the
+       training-load grid, nothing else. See docs/plans/heatmap.md. */
+    --hm1:#2a2a31; --hm2:#3d3d47; --hm3:#55555f; --hm4:#71717d;
     /* signal — scarce by design. gold flags a PR, fail flags a miss */
     --signal:#6EE7B7; --signal-ink:#04140d;
     --gold:#f5a623; --fail:#ef6f6a;
@@ -947,6 +953,35 @@
   .calPop .cpCap { font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); margin-bottom:6px; }
   .calLegend { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); color:var(--muted); }
   @media (prefers-reduced-motion:reduce){ .cal .cd { animation:none; } }
+
+  /* ====================================================================
+     THE HEATMAP — docs/plans/heatmap.md, first slice: the grid shell,
+     volume only. Portrait, 7 columns (days of week), weeks running down,
+     vertical scroll — replaces the quarter-bound .cal above once it has
+     parity (marks, layers, interaction); until then the two sit side by
+     side, reachable as separate chips. Ramp is --hm1–--hm4 (NOT the
+     elevation ramp — see the token comment in :root), neutral by
+     design: --signal is spent exactly once, on today, never on the
+     intensity fill. Rest/no-data is drawn (hairline outline, no fill),
+     never dimmed — "silence is a state," the same rule the 28-day gate
+     and empty-layer cases use elsewhere in the spec. No cascade
+     animation on load, no per-cell hover chrome yet — marks and
+     interaction are later slices.
+     ==================================================================== */
+  .hmHead { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; margin-bottom:8px; }
+  .hmWd { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:var(--lh-micro); }
+  .hmBody { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; max-height:60vh; overflow-y:auto; }
+  .hmCell { position:relative; width:42px; height:42px; padding:0; border:1px solid var(--hair); border-radius:var(--r-sm); background:none; cursor:default; aspect-ratio:1; }
+  /* Tap target padded to 44px without disturbing the 42px grid math or
+     the 4px gap it's built on — a technique already established, not
+     invented here: extend the hit area with an absolutely-positioned
+     pseudo-element rather than resizing the element the grid lays out. */
+  .hmCell::before { content:''; position:absolute; inset:-1px; }
+  .hmCell.l1 { background:var(--hm1); border-color:transparent; }
+  .hmCell.l2 { background:var(--hm2); border-color:transparent; }
+  .hmCell.l3 { background:var(--hm3); border-color:transparent; }
+  .hmCell.l4 { background:var(--hm4); border-color:transparent; }
+  .hmCell.today { box-shadow:0 0 0 2px var(--signal); }
 
   /* ====================================================================
      RECOVERED — the remaining 59, lifted from 731e891 in six groups
@@ -10956,7 +10991,7 @@ function renderStatsPicker(){
   const items=[
     {id:'__e1rm',label:'Strength'},{id:'__muscles',label:'Muscles'},
     {id:'__consistency',label:'Consistency'},{id:'__compare',label:'8 vs 8'},
-    {id:'__sessions',label:'Calendar'},{id:'__volume',label:'Volume'},
+    {id:'__sessions',label:'Calendar'},{id:'__heatmap',label:'Grid'},{id:'__volume',label:'Volume'},
     {id:'__records',label:'Records'},{id:'__goals',label:'Goals'}
   ].concat(Object.keys(names).map(id=>({id,label:names[id]})));
   el.innerHTML = items.map(it=>'<button class="chip'+(statsView.id===it.id?' on':'')+'" data-id="'+it.id+'">'+escapeHtml(it.label)+'</button>').join('');
@@ -10976,6 +11011,7 @@ function drawStatsSection(){
   else if(statsView.id==='__consistency') drawConsistency();
   else if(statsView.id==='__compare') drawPeriodCompare();
   else if(statsView.id==='__sessions') drawSessionsCal();
+  else if(statsView.id==='__heatmap') renderHeatmap();
   else if(statsView.id==='__volume') drawVolumeChart();
   else if(statsView.id==='__records') drawRecords();
   else if(statsView.id==='__muscles') drawMuscles();
@@ -11345,6 +11381,63 @@ function calSparkPath(curve, W, H){
   const px=i=> 3+(i/Math.max(1,curve.length-1))*(W-6);
   const py=v=> 4+(1-(v-lo)/span)*(H-8);
   return curve.map((v,i)=>(i===0?'M':'L')+px(i).toFixed(1)+','+py(v).toFixed(1)).join(' ');
+}
+/* ---- THE HEATMAP — docs/plans/heatmap.md, first slice ---------------
+   Grid shell only: 7-column portrait grid, weeks running down, coloured
+   by session volume. No marks, no layers, no interaction, no zoom — all
+   of that is later slices per the spec. Reuses aggregateVolumeByDate()
+   (already used by the .cal family above) — no new engine surface. */
+const HM_MIN_TRAINED_DAYS=5;
+/* Bucketing: quartiles of the athlete's OWN trained-day volumes, over
+   ALL-TIME history — not the visible range, and not a fixed absolute
+   threshold. All-time (not per-window) so a cell's colour doesn't shift
+   as more weeks scroll into view, matching §1's own complaint about the
+   old calendar's per-quarter reset. Per-athlete (not a fixed kg cutoff)
+   because absolute volume means nothing across athletes of different
+   strength levels — the same "wrong model" problem §1 names for raw
+   tonnage, just resurfacing at the threshold level instead of the fill
+   level if left fixed. Below HM_MIN_TRAINED_DAYS distinct trained days,
+   quartiles are not yet meaningful — everything logged gets ONE flat
+   tone (l2) rather than differentiating: a beginner's first three
+   sessions should not spread across "faint" and "darkest" purely because
+   there were only three numbers to rank, which is what naive quantiling
+   over a tiny sample would do. */
+function heatmapVolumeLevels(){
+  const volByDate=aggregateVolumeByDate();
+  const map={}; volByDate.forEach(d=>{ map[d.date]=d.kg; });
+  const trained=volByDate.map(d=>d.kg).filter(v=>v>0).sort((a,b)=>a-b);
+  if(trained.length<HM_MIN_TRAINED_DAYS) return { map, thresholds:null };
+  const q=p=> trained[Math.min(trained.length-1, Math.floor(p*trained.length))];
+  return { map, thresholds:{ p25:q(0.25), p50:q(0.5), p75:q(0.75) } };
+}
+function heatmapLevelFor(vol, thresholds){
+  if(!(vol>0)) return 0; // rest / no data — drawn, not dimmed
+  if(!thresholds) return 2; // not enough trained days yet to bucket meaningfully
+  if(vol<=thresholds.p25) return 1;
+  if(vol<=thresholds.p50) return 2;
+  if(vol<=thresholds.p75) return 3;
+  return 4;
+}
+function renderHeatmap(){
+  const plot=$('#statsPlot'), cap=$('#statsCap');
+  plot.style.aspectRatio='auto';
+  cap.textContent='';
+  const {map, thresholds}=heatmapVolumeLevels();
+  const dates=Object.keys(map).sort();
+  const earliestKey=dates.length?dates[0]:today;
+  const [ey,em,ed]=earliestKey.split('-').map(Number);
+  const start=new Date(ey,em-1,ed); start.setDate(start.getDate()-start.getDay());
+  const end=new Date(); end.setDate(end.getDate()+(6-end.getDay()));
+  const cells=[]; const cursor=new Date(start);
+  while(cursor<=end){
+    const key=ymd(cursor);
+    const level=heatmapLevelFor(map[key]||0, thresholds);
+    cells.push({ key, level, isToday: key===today });
+    cursor.setDate(cursor.getDate()+1);
+  }
+  const head=CAL_WD.map(w=>'<div class="hmWd">'+w+'</div>').join('');
+  const body=cells.map(c=>'<button class="hmCell'+(c.level?' l'+c.level:'')+(c.isToday?' today':'')+'" data-date="'+c.key+'" data-vol="'+(map[c.key]||0)+'" aria-label="'+fmtDate(c.key)+'"></button>').join('');
+  plot.innerHTML='<div class="hmHead">'+head+'</div><div class="hmBody">'+body+'</div>';
 }
 function drawSessionsCal(){
   const plot=$('#statsPlot'), cap=$('#statsCap');
