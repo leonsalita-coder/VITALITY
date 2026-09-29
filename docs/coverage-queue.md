@@ -212,3 +212,32 @@ comparisons of `acuteChronic` and `loadFindings`):
 - `L157` `age >= span` → `>`: at `age === span` the mutant writes
   `series[-1]`, a non-index property. `weeklyRate` and `ewma` iterate by
   index up to `length`, so it is never read.
+
+---
+
+## streaks — 6 → 4
+
+**Real gaps closed (2):** the tail-trim in `longestWeekStreak` inverted
+(L90 `===` → `!==`) throws away a run sitting in the oldest weeks of the
+five-year window, so "best streak on record" reads 0; and `sessionsPerWeek`
+returning one extra `NaN` bucket when a session sits exactly one week past
+the window (L46 `<` → `<=`). The second has no consumer today — nothing but
+`streaks.ts` calls `sessionsPerWeek`, and the streak functions are unaffected
+by the extra bucket — but it is exported and "returns the weeks you asked
+for" is its contract, so it is pinned as a contract, not as an internal.
+
+**Left (4) — equivalent**, structurally and over 12,000 comparisons (current
+and longest streak, `sessionsPerWeek` at 12 and 260 weeks; runs placed up to
+and past the window's far edge, future dates, duplicates, targets 1–5):
+
+- `L97` `run > best` → `>=`: assigns an equal value.
+- `L71` `i < length` → `<=`: reads `weeks[length]`, which is `undefined`,
+  fails `>= target`, and breaks — the loop ends there either way.
+- `L90` `last >= 0` → `> 0`: stops trimming at week 0 instead of -1. That only
+  matters when every week is empty; the extra pass over one zero week cannot
+  start a run for any target > 0, and for a target of 0 `currentWeekStreak`
+  already returns every week and wins the `Math.max`.
+- `L44` future-date guard removed: a future date gets a negative bucket, and
+  `buckets[-1] += 1` writes a non-index property (`NaN`) that no loop reads.
+  *Not* pinned: a test for it would have to inspect the array's non-index
+  keys, which is asserting the mutation, not behaviour.

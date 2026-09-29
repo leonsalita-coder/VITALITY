@@ -126,3 +126,23 @@ describe('streakLabel', () => {
     expect(streakLabel(0, 4)).toBe('')
   })
 })
+
+describe('the far edge of the window', () => {
+  it('returns exactly the weeks asked for, even with a session just past them', () => {
+    /* Day 84 is the first day of week 12 — one past a 12-week window. */
+    const weeks = sessionsPerWeek(daysBefore(TODAY, 77, 84), now, 12)
+    expect(weeks).toHaveLength(12)
+    expect(weeks[11]).toBe(1)   // control: day 77 is inside, in the last week
+    expect(weeks.every((n) => Number.isFinite(n))).toBe(true)
+  })
+
+  it('finds the best run even when it sits in the oldest weeks on record', () => {
+    /* Ten weeks at the target, at the very end of the five-year window
+       (weeks 250-259), and nothing since. The tail-trim that skips a
+       quiet history must stop at the first week with sessions in it, not
+       run through them. */
+    const offsets: number[] = []
+    for (let w = 250; w <= 259; w++) for (let s = 0; s < DEFAULT_WEEKLY_TARGET; s++) offsets.push(w * 7 + s)
+    expect(longestWeekStreak(daysBefore(TODAY, ...offsets), DEFAULT_WEEKLY_TARGET, now)).toBe(10)
+  })
+})
