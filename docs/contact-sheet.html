@@ -981,14 +981,19 @@
   .hmCell.l3 { background:var(--hm3); border-color:transparent; }
   .hmCell.l4 { background:var(--hm4); border-color:transparent; }
   .hmCell.today { box-shadow:0 0 0 2px var(--signal); }
-  /* .hmHit is the real <button> — inset:-1px on a 42px parent gives it
-     an actual, measurable 44×44 border-box (getBoundingClientRect, not
-     an assumption about pseudo-element hit-testing, which is what the
-     previous ::before attempt here rested on and doesn't reliably
-     extend a real tap target across engines). Taken out of grid flow
-     (position:absolute) so it extends into the 4px gap without moving
-     any other cell or changing the grid's own 42px+4px rhythm. */
-  .hmHit { position:absolute; inset:-1px; padding:0; margin:0; border:none; background:none; cursor:default; }
+  /* .hmHit is the real <button>, a fixed 44×44 centred on its parent —
+     NOT inset:-1px, which was measured live (varying the border 0/1/3px
+     and watching the hit box come back 44/42/38) to resolve against
+     .hmCell's PADDING box, not its border box: the 1px hairline border
+     ate exactly the padding meant to overhang the cell, and the result
+     varied by cell state (a filled day loses its border, so it measured
+     44; a rest day keeps its hairline, so it measured 42). left/top 50%
+     + a fixed size + a centring transform doesn't derive from the
+     parent's box model at all, so it can't drift with border state.
+     Taken out of grid flow (position:absolute) so it extends into the
+     4px gap without moving any other cell or changing the grid's own
+     42px+4px rhythm. */
+  .hmHit { position:absolute; left:50%; top:50%; width:44px; height:44px; transform:translate(-50%,-50%); padding:0; margin:0; border:none; background:none; cursor:default; }
   .hmLegend { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); line-height:var(--lh-micro); }
   /* Swatches reuse .hmCell's own l1–l4 rules verbatim (same classes, same
      selectors) rather than restating --hm1–--hm4 here — this size-only
