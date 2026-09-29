@@ -241,3 +241,20 @@ and past the window's far edge, future dates, duplicates, targets 1–5):
   `buckets[-1] += 1` writes a non-index property (`NaN`) that no loop reads.
   *Not* pinned: a test for it would have to inspect the array's non-index
   keys, which is asserting the mutation, not behaviour.
+
+---
+
+## session — 5 → 1
+
+**Real gaps closed (4):** the `CONTRIBUTIONS` decision table had two rows
+never pinned. `complete.records` (L93) and `in_progress` volume, plateau and
+records (L96, three mutants). The in-progress row is live product behaviour:
+the tile shows today's volume off `contributionOf(currentSessionState()).volume`
+(`train.html:7325`), which returns 0 if that flag is false. Both rows are now
+pinned whole, beside the existing stated-decision tests for `abandoned`.
+
+**Left (1) — equivalent, unreachable:** `L147` `if (!sets.length) return null`
+in `sameAsLastTime`. `usable` already keeps only entries with at least one
+working set, and `last` is one of them, so `sets` is never empty. Confirmed
+over 4,000 generated histories (warm-ups, zero-rep and missed sets, timed
+sets, null sets, off days, missing `sets`, `excludeDate`): 0 differences.

@@ -89,6 +89,22 @@ describe('what an abandoned session contributes — the stated decision', () => 
     expect(complete.plateau).toBe(abandoned.plateau)
   })
 
+  it('has a complete session count toward everything', () => {
+    expect(contributionOf('complete')).toEqual({
+      volume: true, plateau: true, records: true, streak: true, progression: true,
+    })
+  })
+
+  it('has an open session count its sets now, and the finish only once it finishes', () => {
+    /* The sets of a session still in progress have happened: the tile
+       shows today's volume live off this (train.html currentSessionState →
+       contributionOf(...).volume). What waits for the finish is the same
+       two things an abandoned session never gets. */
+    expect(contributionOf('in_progress')).toEqual({
+      volume: true, plateau: true, records: true, streak: false, progression: false,
+    })
+  })
+
   it('has a not-started session contribute nothing at all', () => {
     expect(contributionOf('not_started')).toEqual({
       volume: false, plateau: false, records: false, streak: false, progression: false,
