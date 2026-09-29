@@ -1,3 +1,18 @@
+**Addendum (horizontal-scroll fix):** `.coachFab` and `#coachFabCanvas` now
+carry minimal CSS — `position:fixed`, an explicit 56×56 size, and enough
+surface (`--e3`, a hairline border, a shadow) not to render as a bare
+unstyled rectangle — added to close a real page-overflow bug (the FAB's
+canvas had no CSS at all, so its DPR-scaled backing store became its
+rendered CSS size, widening the page 223px past the viewport on an iPhone).
+This is NOT the visual treatment this brief specs below — the elevation
+step and every other call in the `.coachFab` section further down are
+still open. `makeConstellation`'s `resize()` (`train.html`) was also
+changed to always pin `canvas.style.width/height` from the measured CSS
+box, independent of whatever backing-store size it computes — so `#cvCanvas`
+(the coach overlay's own canvas, still fully unstyled) can no longer cause
+the same class of bug once the overlay is opened, even though its panel's
+CSS is still deferred exactly as below.
+
 # The coach overlay — a redesign brief, not a recovery
 
 `docs/train-missing-stylesheet.md` already made the call: the coach

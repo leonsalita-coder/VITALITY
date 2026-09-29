@@ -380,6 +380,7 @@ ${sec('chrome', '10b · Header, menu, coach and overlays', 'Surfaces that live o
       + '<button>Add a note</button>'
       + '<div class="sep"></div>'
       + '<button class="danger">Remove from day</button></div>')}
+    ${cell('coachFab — floating trigger', '<div class="cs-stage"><button class="coachFab" title="Talk to your coach" aria-label="Talk to your coach"><canvas id="coachFabCanvas"></canvas></button></div>')}
     ${cell('cvInputRow — coach', '<div class="cvInputRow"><input placeholder="e.g. 30 min, dumbbells only" /><button class="cvSend" aria-label="Send">↑</button></div>')}
     ${cell('cvInputRow — disabled while replying', '<div class="cvInputRow"><input placeholder="Thinking…" disabled /><button class="cvSend" aria-label="Send" disabled>↑</button></div>')}
     ${cell('goalRow', '<div class="goalRow"><span class="nm">Bench Press to 225</span><button class="photoX">Edit</button></div>')}

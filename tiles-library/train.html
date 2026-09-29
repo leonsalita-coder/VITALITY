@@ -727,6 +727,19 @@
   .celebrate .ch2 .goal { color:var(--gold); font-weight:700; }
   .celebrate .tap { color:var(--muted); font-size:var(--fs-label); margin-top:20px; line-height:var(--lh-label); font-weight:var(--fw-label); }
 
+  /* .coachFab was one of the 13 selectors the stylesheet restoration
+     deliberately deferred (see docs/plans/coach-overlay.md) — but its
+     markup stayed live, unstyled, in normal flow. With no CSS at all,
+     it rendered position:static at its canvas's backing-store size
+     (makeConstellation's resize() sets canvas.width/height from a
+     devicePixelRatio-scaled backing store with no CSS width/height to
+     constrain it back down), widening the page's own content box past
+     the viewport. This is a minimal, position/size-only fix to stop
+     that — NOT the full visual treatment coach-overlay.md specs out,
+     which is still open and still deferred. */
+  .coachFab { position:fixed; right:calc(16px + env(safe-area-inset-right)); bottom:calc(16px + env(safe-area-inset-bottom)); width:56px; height:56px; padding:0; border:1px solid var(--hair-strong); border-radius:var(--r-pill); background:var(--e3); box-shadow:0 14px 30px -14px rgba(0,0,0,.6); z-index:50; cursor:pointer; }
+  #coachFabCanvas { display:block; width:56px; height:56px; }
+
   /* keyframes the card menu animates */
   @keyframes menuDrop { to { opacity:1; filter:blur(0px); transform:translateY(0) scale(1); } }
   @keyframes menuItemIn { from { opacity:0; filter:blur(8px); transform:translateX(8px) scale(.96); } }
@@ -11429,10 +11442,21 @@ function makeConstellation(canvas, opts){
   opts = opts || {};
   const ctx = canvas.getContext('2d');
   const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let w=0, h=0, dpr=Math.min(2, window.devicePixelRatio||1);
+  let w=0, h=0, dpr=window.devicePixelRatio||1;
   function resize(){
+    /* The backing store (canvas.width/height) and the CSS box are two
+       separate sizes. Reading getBoundingClientRect() BEFORE this ever
+       ran gives the element's true CSS size; setting canvas.width/height
+       right after changes the canvas's OWN intrinsic size too, and on
+       any element with no CSS width/height rule, that intrinsic size IS
+       the CSS size — so a canvas can silently balloon to its own
+       DPR-scaled backing store the moment this runs. Pinning
+       canvas.style.width/height here makes the CSS box independent of
+       the backing store, always, whether or not a stylesheet happens to
+       constrain this canvas. */
     const r=canvas.getBoundingClientRect(); w=Math.max(1,r.width); h=Math.max(1,r.height);
     canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
+    canvas.style.width=w+'px'; canvas.style.height=h+'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
   }
   resize();

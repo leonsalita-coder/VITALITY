@@ -727,6 +727,19 @@
   .celebrate .ch2 .goal { color:var(--gold); font-weight:700; }
   .celebrate .tap { color:var(--muted); font-size:var(--fs-label); margin-top:20px; line-height:var(--lh-label); font-weight:var(--fw-label); }
 
+  /* .coachFab was one of the 13 selectors the stylesheet restoration
+     deliberately deferred (see docs/plans/coach-overlay.md) — but its
+     markup stayed live, unstyled, in normal flow. With no CSS at all,
+     it rendered position:static at its canvas's backing-store size
+     (makeConstellation's resize() sets canvas.width/height from a
+     devicePixelRatio-scaled backing store with no CSS width/height to
+     constrain it back down), widening the page's own content box past
+     the viewport. This is a minimal, position/size-only fix to stop
+     that — NOT the full visual treatment coach-overlay.md specs out,
+     which is still open and still deferred. */
+  .coachFab { position:fixed; right:calc(16px + env(safe-area-inset-right)); bottom:calc(16px + env(safe-area-inset-bottom)); width:56px; height:56px; padding:0; border:1px solid var(--hair-strong); border-radius:var(--r-pill); background:var(--e3); box-shadow:0 14px 30px -14px rgba(0,0,0,.6); z-index:50; cursor:pointer; }
+  #coachFabCanvas { display:block; width:56px; height:56px; }
+
   /* keyframes the card menu animates */
   @keyframes menuDrop { to { opacity:1; filter:blur(0px); transform:translateY(0) scale(1); } }
   @keyframes menuItemIn { from { opacity:0; filter:blur(8px); transform:translateX(8px) scale(.96); } }
@@ -1269,6 +1282,7 @@
   <div class="cs-stack">
     <div class="cs-cell"><div class="cs-lbl">topSticker + noteBar</div><header class="topSticker"><div class="stickerGreet">Welcome Piglet</div><div class="noteBar"><div class="noteSlot"><div class="noteCard note-mint"><span class="noteDot"></span><span class="noteEmo">✓</span><span class="noteTxt">Three weeks running at 4+ sessions.</span></div></div></div></header></div>
     <div class="cs-cell"><div class="cs-lbl">menuPop — the card overflow menu</div><div class="menuPop"><button class="deloadRow on" role="switch" aria-checked="true"><span class="menuRowLabel">Deload active</span><span class="bouncyTrack mini"><span class="bouncyThumb"><span class="bouncyDot">⬇️</span></span></span></button><button>This hurts — stop suggesting it</button><button>Add a note</button><div class="sep"></div><button class="danger">Remove from day</button></div></div>
+    <div class="cs-cell"><div class="cs-lbl">coachFab — floating trigger</div><div class="cs-stage"><button class="coachFab" title="Talk to your coach" aria-label="Talk to your coach"><canvas id="coachFabCanvas"></canvas></button></div></div>
     <div class="cs-cell"><div class="cs-lbl">cvInputRow — coach</div><div class="cvInputRow"><input placeholder="e.g. 30 min, dumbbells only" /><button class="cvSend" aria-label="Send">↑</button></div></div>
     <div class="cs-cell"><div class="cs-lbl">cvInputRow — disabled while replying</div><div class="cvInputRow"><input placeholder="Thinking…" disabled /><button class="cvSend" aria-label="Send" disabled>↑</button></div></div>
     <div class="cs-cell"><div class="cs-lbl">goalRow</div><div class="goalRow"><span class="nm">Bench Press to 225</span><button class="photoX">Edit</button></div></div>
