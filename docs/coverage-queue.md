@@ -97,3 +97,21 @@ MEAN. A targeted driver with every reading negative produced
 "Strength per pound up 8% in a week you averaged -162 lb". Both now killed.
 
 Fixture shape: nothing here was masked by shape rather than value.
+
+---
+
+## deload — 11 → 0
+
+All 11 were real gaps, every one a documented edge the tests never sat on:
+two RPE points being enough for a trend (L159); a rise of exactly one point
+(L165); a mean of exactly `HIGH_RPE` (L166, "at or above"); recovery of
+exactly `RECOVERY_FLOOR` not being a recovery problem (L235, "below this");
+a last-session RPE of exactly `HIGH_RPE` counting as measured evidence and a
+comfortable one (7) not counting — the latter matters because a measured
+diagnosis buys the harsher cut in `deloadPlan` (L238, three mutants); the
+cooldown ending ON its date, not a day later (L275, "no re-flagging BEFORE");
+and `plateauAdvice`, which was only ever tested for the rest-compression
+sentence — `null` → `''`, and fatigue / programming / unknown each getting
+their own advice (L423, L427, L432).
+
+Fixture shape: nothing masked by shape.

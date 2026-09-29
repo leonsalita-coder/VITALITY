@@ -8,8 +8,9 @@ import {
   nextDeloadState,
   deloadPlan,
   limitDeloads,
+  plateauAdvice,
 } from '../../lib/train/deload'
-import type { DeloadRecord } from '../../lib/train/deload'
+import type { DeloadRecord, Plateau } from '../../lib/train/deload'
 import type { HistoryEntry } from '../../lib/train/sets'
 
 const session = (date: string, w: number, reps = 5, sets = 3): HistoryEntry => ({
@@ -390,5 +391,102 @@ describe('assisted work plateaus in the right direction', () => {
 
   it('is a plateau when the assistance is going UP', () => {
     expect(detectPlateau(assistedAt([20, 25, 35, 40]))).not.toBeNull()
+  })
+})
+
+/* ────────────────────────────────────────────────────────────────────
+   The documented edges, each exactly on its line.
+   ──────────────────────────────────────────────────────────────────── */
+describe('the cause thresholds include their own boundary', () => {
+  /* detectPlateau reads the last THREE of these four sessions. */
+  const flat = (rpes: Array<number | null>) =>
+    ['2026-08-20', '2026-08-27', '2026-09-03', '2026-09-10'].map((d, i) => rpeSession(d, 185, rpes[i]))
+
+  it('reads a trend from two RPE points — two is enough', () => {
+    /* "A trend needs at least two points": the window has three sessions,
+       one of them unlogged, and the other two rise sharply. */
+    expect(detectPlateau(flat([null, null, 7, 9]))!.cause).toBe('fatigue')
+  })
+
+  it('counts a rise of exactly one RPE point as accumulating fatigue', () => {
+    /* RPE_RISE is "a rise of this much"; mean 7.3 keeps the high-RPE
+       rule out of it, so only the rise can call it fatigue. */
+    expect(detectPlateau(flat([7, 7, 7, 8]))!.cause).toBe('fatigue')
+    // control: the same shape with no rise is a programming stall
+    expect(detectPlateau(flat([7, 7, 7, 7]))!.cause).toBe('programming')
+  })
+
+  it('counts a steady mean of exactly HIGH_RPE as grinding', () => {
+    /* HIGH_RPE: "at or above this, the lifter is grinding". No rise at all. */
+    expect(detectPlateau(flat([HIGH_RPE, HIGH_RPE, HIGH_RPE, HIGH_RPE]))!.cause).toBe('fatigue')
+  })
+})
+
+describe('the diagnosis thresholds include their own boundary', () => {
+  /* `stalled` logs no RPE, so the plateau's own cause is 'unknown' and
+     only ctx.recovery / ctx.rpe can make the diagnosis measured. */
+
+  it('does not call recovery of exactly RECOVERY_FLOOR a recovery problem', () => {
+    /* The floor is the value BELOW which a stall is fatigue. */
+    expect(nextDeloadState(null, ctx({ recovery: RECOVERY_FLOOR })).kind).toBe('intensity')
+    // control: one point under it is
+    expect(nextDeloadState(null, ctx({ recovery: RECOVERY_FLOOR - 1 })).kind).toBe('volume')
+  })
+
+  it('treats a last-session RPE of exactly HIGH_RPE as measured evidence', () => {
+    const r = nextDeloadState(null, ctx({ rpe: HIGH_RPE }))
+    expect(r.kind).toBe('intensity')
+    expect(r.confidence).toBe('measured')
+  })
+
+  it('does not treat a comfortable RPE as measured evidence for cutting load', () => {
+    /* A measured diagnosis buys the harder cut in deloadPlan. An RPE of 7
+       says nothing about the load being the problem, so the diagnosis
+       stays the gentler, inferred one — exactly as with no RPE at all. */
+    expect(nextDeloadState(null, ctx({ rpe: 7 })).confidence).toBe('inferred')
+    expect(nextDeloadState(null, ctx()).confidence).toBe('inferred')
+  })
+})
+
+describe('the cooldown ends on its date', () => {
+  /* "No re-flagging BEFORE this date": on the date itself a stall may be
+     flagged again, or the cooldown silently runs a day longer than set. */
+  const cooling = (until: string): DeloadRecord => ({
+    state: 'normal', kind: null, priorWeight: 185, since: '2026-09-01', sessions: 0,
+    confidence: 'measured', cooldownUntil: until,
+  })
+
+  it('may flag on the day the cooldown ends', () => {
+    expect(nextDeloadState(cooling('2026-09-17'), ctx({ today: '2026-09-17' })).state).toBe('flagged')
+  })
+
+  it('still holds the day before', () => {
+    expect(nextDeloadState(cooling('2026-09-18'), ctx({ today: '2026-09-17' })).state).toBe('normal')
+  })
+})
+
+describe('plateau advice names the cause it was given', () => {
+  const plateau = (cause: Plateau['cause'], amrapFalling = false): Plateau => ({
+    sessions: 3, weight: 185, kind: 'reps_weight', cause, rpe: null, amrapFalling, restCompressing: false,
+  })
+
+  it('says nothing about a lift that is not stalled', () => {
+    expect(plateauAdvice(null)).toBe('')
+  })
+
+  it('calls fatigue fatigue, and does not call it spare capacity', () => {
+    expect(plateauAdvice(plateau('fatigue'))).toMatch(/fatigue/i)
+    expect(plateauAdvice(plateau('fatigue', true))).toMatch(/all-out set has been falling/i)
+    expect(plateauAdvice(plateau('fatigue'))).not.toMatch(/capacity/i)
+  })
+
+  it('calls a programming stall spare capacity, not fatigue', () => {
+    expect(plateauAdvice(plateau('programming'))).toMatch(/capacity/i)
+    expect(plateauAdvice(plateau('programming'))).not.toMatch(/fatigue/i)
+  })
+
+  it('admits it does not know why when nothing logged says', () => {
+    expect(plateauAdvice(plateau('unknown'))).toMatch(/nothing logged/i)
+    expect(plateauAdvice(plateau('unknown'))).not.toMatch(/capacity|fatigue/i)
   })
 })
