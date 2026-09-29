@@ -7345,7 +7345,12 @@ function renderHeroExtras(){
   if(sub){
     const vol7=Math.round(volByDate.filter(s=>daysAgo(s.date)<=6).reduce((a,s)=>a+s.kg,0));
     const label=streakText();
-    sub.innerHTML = (label?'<b>'+escapeHtml(label)+'</b> &nbsp;·&nbsp; ':'')+'<b>'+vol7.toLocaleString()+'</b> '+STATE.unit+' last 7 days';
+    /* .heroSub b {color:var(--signal)} is a bare descendant rule — it
+       colours ANY <b> in here, so the gate has to be at the point the
+       <b> itself gets emitted, the same principle as the other ten sites,
+       just applied here instead of a class literal. A week with zero
+       volume is not a highlight. */
+    sub.innerHTML = (label?'<b>'+escapeHtml(label)+'</b> &nbsp;·&nbsp; ':'')+(vol7>0?'<b>'+vol7.toLocaleString()+'</b>':vol7.toLocaleString())+' '+STATE.unit+' last 7 days';
   }
   const ms=$('#miniStats');
   if(ms){

@@ -74,7 +74,7 @@ describe('gold/mint/up is never applied to a value with no condition on it', () 
      the right thing to colour gold, versus the neutral "Best" beside it?
      Leon's call. */
   const ALLOWLIST = new Set<number>([
-    11034, // drawE1rmTrend "Now"
+    11039, // drawE1rmTrend "Now"
   ])
 
   it('has no unconditional gold/mint/up outside the allowlist', () => {
