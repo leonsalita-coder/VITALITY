@@ -19,9 +19,15 @@ const ex = (id: string, over: Record<string, unknown> = {}) => ({
   log: [null, null, null, null], muscles: ['chest'], ...over,
 })
 
+/* A fixed week after the history below (2026-09-12), not the wall clock.
+   trimSession does not read `now` today — every test here passes with
+   NaN in it — so this changes nothing now; it stops the fixtures drifting
+   away from "now" the day it starts to. */
+const NOW = new Date(2026, 8, 19, 12).getTime()
+
 const ctx = (over: Partial<TrimContext> = {}): TrimContext => ({
   exercises: [], minutes: 30, history: {}, deloadStates: {},
-  underBandMuscles: [], staleMuscles: [], now: Date.now(), ...over,
+  underBandMuscles: [], staleMuscles: [], now: NOW, ...over,
 })
 
 describe('a sixty-minute session trimmed to thirty', () => {

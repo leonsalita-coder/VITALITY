@@ -282,7 +282,7 @@ describe('it never enters lift volume or records', () => {
   })
 
   it('cannot produce a PR — a candidate is weight and reps, which it has neither of', () => {
-    expect(classifyPR([], entry() as never, Date.now()).kind).toBeNull()
+    expect(classifyPR([], entry() as never, new Date(2026, 8, 19).getTime()).kind).toBeNull()
   })
 
   it('leaves a real lift’s record exactly as it was', () => {

@@ -134,7 +134,7 @@ describe('imported history is refused', () => {
     const reading = run(`
       (function(){
         ${reset};
-        var t = Date.now();
+        var t = new Date('2026-09-01T18:00:00').getTime();
         STATE.history.bench = [{ date:'2026-09-01', kg:200, sets:[
           { w:200, r:5, at:t, atEstimated:true },
           { w:200, r:5, at:t+90000, atEstimated:true },
