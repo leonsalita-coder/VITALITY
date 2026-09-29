@@ -243,3 +243,36 @@ describe('it is a cause, not a deload trigger', () => {
     expect(plateauAdvice(detectPlateau(steady, {})!)).not.toMatch(/rest longer/i)
   })
 })
+
+describe('the edges of what counts as rest', () => {
+  it('counts a gap of exactly MAX_REST_SECONDS — only LONGER is not rest', () => {
+    const r = restTaken(timed('2026-09-01', 185, MAX_REST_SECONDS, 2))
+    expect(r.hasObservedTiming).toBe(true)
+    expect(r.gaps).toEqual([MAX_REST_SECONDS])
+    // control: one second more and it is a phone call, not rest
+    expect(restTaken(timed('2026-09-01', 185, MAX_REST_SECONDS + 1, 2)).gaps).toEqual([])
+  })
+
+  it('does not read two sets stamped the same second as zero rest', () => {
+    /* A double tap or a duplicated row. Zero is not a rest anyone took,
+       and letting it in would halve a median and fake a compression. */
+    const r = restTaken(timed('2026-09-01', 185, 0, 2))
+    expect(r.hasObservedTiming).toBe(false)
+    expect(r.median).toBeNull()
+    // control: the same pair a minute apart is read
+    expect(restTaken(timed('2026-09-01', 185, 60, 2)).median).toBe(60)
+  })
+
+  it('reads nothing from a day marked off, however it was stamped', () => {
+    const off = { ...timed('2026-09-01', 185, 90, 3), off: true }
+    expect(restTaken(off).hasObservedTiming).toBe(false)
+    // control: the same sets on a training day are read
+    expect(restTaken({ ...off, off: false }).median).toBe(90)
+  })
+
+  it('takes a missing entry as nothing timed rather than throwing', () => {
+    /* The signature accepts null; callers pass whatever history holds. */
+    expect(restTaken(null)).toEqual({ gaps: [], median: null, hasObservedTiming: false })
+    expect(restTaken(undefined).hasObservedTiming).toBe(false)
+  })
+})

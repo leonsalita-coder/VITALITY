@@ -115,3 +115,33 @@ sentence — `null` → `''`, and fatigue / programming / unknown each getting
 their own advice (L423, L427, L432).
 
 Fixture shape: nothing masked by shape.
+
+---
+
+## timing — 8 → 4
+
+**Real gaps closed (4):** a gap of exactly `MAX_REST_SECONDS` counting as
+rest ("longer than this is not rest", L106 `<=`); two sets stamped the same
+second not reading as zero rest (L106 `> 0`) — a zero would halve a median
+and fake a compression; a day marked `off` yielding no timing, and
+`restTaken(null)` returning the empty reading instead of throwing (L86, two
+mutants; the signature explicitly accepts null).
+
+**Left (4) — equivalent, proven** over 2,500 generated histories (21,116
+comparisons of `restTaken`, `restTrend`, `hasObservedTiming`, and the
+downstream `detectPlateau` + `plateauAdvice`), with timestamps that were
+missing, estimated, strings, `NaN`, `Infinity`, gaps of 0 / 0.4 s / exactly
+900 s / 900.4 s, null sets, warm-ups, off days and superset groups:
+
+- `L58` `&&` → `||` in `observedAt`: lets a `NaN`/`Infinity` stamp through,
+  but the gap it produces is non-finite and fails the range check, and the
+  next gap measured from it is non-finite too — so the chain breaks exactly
+  where the original breaks it.
+- `L55` `if (!set)` removed: unreachable. `isWorkingSet` filters null sets
+  before `observedAt` ever sees one.
+- `L169` `!==` → `===`: inverts every grouped flag, and "does any differ from
+  the first" is invariant under inverting all of them.
+- `L181` `from > 0` → `>=`: `from` is a median of gaps that are each > 0, so
+  it is never 0.
+
+Fixture shape: nothing masked by shape.
