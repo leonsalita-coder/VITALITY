@@ -239,7 +239,7 @@ describe('decisions nobody has made yet', () => {
     expect(detectPlateau(flat as never, {})).toBeNull()
   })
 
-  it.fails('CHOICE: does readiness see the morning before advising the evening?', () => {
+  it('readiness sees the morning before advising the evening', () => {
     /* assessReadiness compares recent hard sets to a baseline. If the
        morning is already in `recentHardSets` the evening is advised
        against a day that has already happened; if it is not, the advice
@@ -247,9 +247,16 @@ describe('decisions nobody has made yet', () => {
        Asserted here as: the morning counts, so the evening reads as
        heavier load than a single session would.
        Expressed through the metrics payload, which is what a consumer
-       would act on. */
+       would act on. This was `.fails` with a fixture bug — it passed
+       only `[morning]` (3 sets) but asserted 6, a number that only
+       exists once the evening is counted too. The underlying sum
+       (`entriesOn`/`hardSets` in metrics.ts) already adds every entry
+       matching the date with no per-session dedup — the rollupFor
+       session-id fix already makes this correct; the fixture just never
+       exercised it. Both sessions, and it passes with zero production
+       code changed. */
     const one = publishedMetrics({
-      date: DAY, history: { squat: [morning] }, index, finishedDates: [DAY],
+      date: DAY, history: { squat: [morning, evening] }, index, finishedDates: [DAY],
       bodyweight: [], otherTraining: [], deloadLifts: 0, readiness: null,
       sessionSeconds: null, sessionTimingObserved: false, streakTarget: 4, pr: null, now: NOW,
     }).find((m) => m.key === 'hard_sets')!.value
