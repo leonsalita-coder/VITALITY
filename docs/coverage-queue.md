@@ -145,3 +145,37 @@ missing, estimated, strings, `NaN`, `Infinity`, gaps of 0 / 0.4 s / exactly
   it is never 0.
 
 Fixture shape: nothing masked by shape.
+
+---
+
+## analysis — 7 → 3
+
+**Real gaps closed (4):** a session on the seventh day of a trailing week
+(ages 13, 20, …) dropping out of "your recent average" (L198 `<=`); a muscle
+whose weekly share rounds to 0 sets being reported "got 0 hard sets, under
+the band" (L249, two mutants); and `analyse` silently dropping the athlete's
+other training before the load read (L371), which removes volume-ramp
+findings for a lifter whose conditioning history predates their lifting.
+
+**MASKED BY FIXTURE SHAPE — L249 (both mutants).** The first equivalence run
+(1,500 generated histories) said 0 differences. The generator gave every lift
+ONE secondary muscle, and `normalizeShares` rescales a lone secondary to
+100% — so no muscle could ever total less than half a set, and the
+`sets <= 0` guard was unreachable *in that fixture shape*. Re-run with a
+1%/99% secondary split: 312 of 1,500 differ. The value was always reachable;
+the shape hid it. This is the third shape-masked finding I know of in this
+queue's history (the brief puts the running total at 2 of 55 before tonight).
+
+**Left (3) — equivalent, and provable by arithmetic** rather than only by
+the driver (which also found 0 differences in 1,500 histories):
+
+- `L154` `>` → `>=`: when the dates are equal, assigning `last = row.date`
+  writes the value it already holds.
+- `L311` `left > right` → `>=`: this branch runs only when one side is
+  under 1 set, and the pair gate before it requires `left + right >= 20`,
+  so the sides can never tie inside it.
+- `L308` `max < MIN_STRONG` → `<=`: **the `MIN_STRONG = 6` gate is dead as
+  configured.** `left + right >= MIN_TOTAL (20)` already forces
+  `max(left, right) >= 10`, so a max of 6 can never reach it. Not a test gap —
+  a gate that cannot fire. Worth a decision: either it should be larger than
+  `MIN_TOTAL / 2`, or it should go.

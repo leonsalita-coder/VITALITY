@@ -504,3 +504,52 @@ describe('the line between a ratio and an empty side', () => {
     expect(found.some((f) => /almost none of quads/.test(f.text))).toBe(true)
   })
 })
+
+describe('the edges the week and the band are drawn on', () => {
+  it('counts a session on the seventh day of a trailing week toward the average', () => {
+    /* Trailing weeks are ages 7-13 and 14-20, inclusive at both ends. The
+       only sessions sit on the last day of each, so dropping that day
+       would leave no average at all and no finding. */
+    const history = { squat: [sess(13, 10), sess(20, 10), sess(1, 2)] }
+    const found = weeklySets(history, INDEX, NOW).map((f) => f.text)
+    expect(found).toContain('Quads got 2 hard sets this week, well under your recent average of 10.')
+  })
+
+  it('does not call a muscle under-trained on a share that rounds to zero sets', () => {
+    /* An authored split with an uneven secondary list: 1% biceps. Two
+       presses put 0.005 of a set on biceps, which reads as 0 — that is
+       not "got 0 hard sets, under the band", it is not having trained it.
+       (A lone secondary is renormalised to 100%, which is why a fixture
+       with one secondary per lift can never reach this.) */
+    const index = indexFrom({
+      press: {
+        primary: [{ muscle: 'chest', share: 1 }],
+        secondary: [{ muscle: 'biceps', share: 0.01 }, { muscle: 'triceps', share: 0.99 }],
+      },
+    })
+    const found = weeklySets({ press: [sess(1, 2)] }, index, NOW, { trainingAge: 'intermediate' })
+    // control: the age-profile band is live here and does report under-volume
+    expect(found.some((f) => /^Chest got 2 hard sets this week, under the/.test(f.text))).toBe(true)
+    expect(found.some((f) => /Biceps/.test(f.text))).toBe(false)
+    expect(found.some((f) => /got 0 hard sets/.test(f.text))).toBe(false)
+  })
+})
+
+describe('analyse hands other training to the load read', () => {
+  /* Other training enters the per-muscle load read through the span of
+     history it covers: a lifter who only started logging lifts a week
+     ago, but has months of conditioning on record, has a usable norm. */
+  const history = { bench: [sess(1, 8), sess(3, 8), sess(5, 8)] }
+  const otherTraining = [40, 33, 26, 19, 12].map((back) => ({
+    date: ago(back), activity: 'conditioning', minutes: 45, intensity: 7,
+  }))
+
+  it('reports the same load findings volumeRamp gives with that training', () => {
+    const withOther = volumeRamp(history, INDEX, NOW, otherTraining as never)
+    // control: the other training really changes the load read here
+    expect(withOther).not.toEqual(volumeRamp(history, INDEX, NOW))
+    const ramps = analyse(history, INDEX, NOW, { otherTraining: otherTraining as never })
+      .filter((f) => f.kind === 'volume_ramp')
+    expect(ramps).toEqual(withOther)
+  })
+})
