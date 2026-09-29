@@ -170,6 +170,21 @@ Notes:
   baseline is a hard failure, not a shrug — a comprehensive gate that
   tolerates an unpinned mode isn't comprehensive.
 
+### Reading a green test
+
+A green test here is a claim about the test, not about the code. This
+repo has produced the same failure four times now: the `verify:full`
+mutation ratchet pinned to `1` and committed corrupt in the very commit
+titled "make the ratchet able to fail"; a scorer that counted lethal
+mutations as survivors; an unpinned mode printing "not gating" while
+still exiting `0`; and a `devicePixelRatio` cap that was correct in
+*value* and unverifiable from outside because it was read once at
+closure init rather than per call, so the unit test asserting the cap
+passed against code that never actually re-applied it. The habit that
+keeps catching these: before trusting a green test, ask what would have
+to be true for it to stay green while the code underneath it is wrong —
+then go check that specific thing, rather than reading green as "done."
+
 ## 7. Design system / style-lint
 
 Tokens live in `:root` in `public/tiles/train.html` — nowhere else.
