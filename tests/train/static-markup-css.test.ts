@@ -203,6 +203,31 @@ describe('makeConstellation resize() pins the CSS box, independent of the backin
     expect(canvas.width).toBe(900) // 300 * min(4, 3)
     expect(canvas.height).toBe(450) // 150 * min(4, 3)
   })
+
+  it('reads devicePixelRatio again on every resize, not just once at instantiation', () => {
+    /* The other cases above each construct a FRESH instance per DPR, so
+       they only ever exercise the value devicePixelRatio held at
+       instantiation time. This is the one that pins resize-TIME reads: a
+       single instance, one devicePixelRatio change with nothing
+       reconstructed, driven through the same path the tile actually
+       uses to re-run resize() (the window resize listener) rather than
+       calling any internal function directly. */
+    const canvas: any = stubCanvas(56, 56)
+    let onResize: (() => void) | undefined
+    const fakeWindow: any = {
+      devicePixelRatio: 1,
+      matchMedia: () => ({ matches: false }),
+      addEventListener: (_event: string, handler: () => void) => { onResize = handler },
+      removeEventListener: () => {},
+    }
+    makeConstellation(fakeWindow)(canvas, { count: 3 })
+    expect(canvas.width).toBe(56) // 56 * 1
+
+    fakeWindow.devicePixelRatio = 3
+    expect(onResize).toBeTypeOf('function')
+    onResize!()
+    expect(canvas.width).toBe(168) // 56 * 3, not 56 still — the stale-closure bug this guards against
+  })
 })
 
 describe('every class/id live in static markup has a matching rule (Test B)', () => {
