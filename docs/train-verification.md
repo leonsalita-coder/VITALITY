@@ -41,7 +41,7 @@ switched off within a week and then protects nothing.
 | --- | --- | --- |
 | `mutate` | 123/192 (64%) | **69** across 29 modules |
 | `callsites` | 55/75 (73%) | **20** unguarded call sites |
-| `fuzz` | 20/20 | **0** |
+| `fuzz` | — | **unpinned** — see [fuzz-hours.md](fuzz-hours.md) |
 | `lint` | — | **69** absence assertions |
 
 These are meant to fall. Lower one with `--bless`; raising one has to be
@@ -61,9 +61,10 @@ returning `undefined`, and checks something goes red. A guard satisfiable by
 code merely *existing* is asserting existence, not reachability. This is the
 class that produced four of the seven rows above.
 
-**`fuzz`** — runs every date-touching test at 00:30, 01:30, 06:30, 12:30 and
-23:30, across New York, London, Sydney and UTC. A date test written at one
-time of day, in one zone, is a test written where it cannot fail.
+**`fuzz`** — re-runs every date-touching test in New York, London, Sydney and
+UTC. A date test written in one zone is a test written where it cannot fail.
+It does **not** vary the time of day: an earlier version claimed five hours
+but never applied them (see [fuzz-hours.md](fuzz-hours.md)).
 
 **`lint`** — flags absence assertions (`toEqual([])`, `toBeNull()`) made
 against a fixture the test **built itself**, with no paired assertion proving

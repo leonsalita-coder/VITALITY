@@ -1,7 +1,7 @@
 {
-  "_note": "Survivor counts the gate refuses to let RISE. Lower one with --bless. `mutate` is null — deliberately UNPINNED, not missing: it is measured but not gating, pending the post-migration full sweep. Every number available today is pre-harness-fix (492 and 379 were both produced before a failed SUITE counted as a kill), and the 1 it held until now was corruption from a partial --bless that survived into fcb730e. Do not re-pin it to an old figure.",
+  "_note": "Survivor counts the gate refuses to let RISE. Lower one with --bless. `mutate` is null — deliberately UNPINNED, not missing: it is measured but not gating, pending the post-migration full sweep. Every number available today is pre-harness-fix (492 and 379 were both produced before a failed SUITE counted as a kill), and the 1 it held until now was corruption from a partial --bless that survived into fcb730e. Do not re-pin it to an old figure. `fuzz` is null for a related reason: its 0 was counted over 20 runs labelled with five hours of the day, but the hour (MUTATE_HOUR) was never read by anything, so it was 4 zones run 5 times each. The hours are gone; the count is unpinned until a fuzz run whose meaning matches its labels produces one. Do not bless it back to 0 or to any figure from the hour-labelled runs. See docs/fuzz-hours.md.",
   "lint": 51,
   "callsites": 20,
-  "fuzz": 0,
+  "fuzz": null,
   "mutate": null
 }

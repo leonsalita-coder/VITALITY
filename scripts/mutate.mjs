@@ -520,11 +520,16 @@ function modeCallsites(opts) {
 }
 
 /* ---------------------------------------------------------------- *
- * MODE: fuzz — a DST test at noon has twelve hours of slack
+ * MODE: fuzz — the date-touching tests, re-run in four time zones
  * ---------------------------------------------------------------- */
 
+/* Zones only. There used to be an HOURS list here, passed to the suite as
+   MUTATE_HOUR — and nothing ever read it, so each zone ran five identical
+   times under five hour labels that described nothing. The time of day a
+   run happens at is whatever the wall clock says. See
+   docs/fuzz-hours.md for why the hours were removed rather than wired up,
+   and why the fuzz count is unpinned. */
 const ZONES = ['America/New_York', 'Europe/London', 'Australia/Sydney', 'UTC']
-const HOURS = ['00:30', '01:30', '06:30', '12:30', '23:30']
 
 function modeFuzz(opts) {
   let dated = testFiles().filter((f) => /Date|day\(|localMidnight|rollingWindow|dateKey/.test(readFileSync(f, 'utf8')))
@@ -532,24 +537,18 @@ function modeFuzz(opts) {
 
   const survivors = []
   let considered = 0
-  const total = ZONES.length * HOURS.length
+  const total = ZONES.length
   for (const zone of ZONES) {
-    /* The hour is supplied to the suite rather than faked here: a test
-       that reads the clock will read this one. Tests that pass `now`
-       explicitly are unaffected, which is the point — they are the ones
-       already immune. */
-    for (const hour of HOURS) {
-      considered++
-      const r = runTests(dated, { minFiles: dated.length, env: { TZ: zone, MUTATE_HOUR: hour } })
-      if (!r.ok) return harnessFailure(`fuzz ${zone} ${hour}: ${r.reason}`)
-      /* Lethal, not merely `failed`: a timezone that stops a test file
-         LOADING is as time-dependent as one that makes an assertion go
-         red, and reporting only the latter would miss it. */
-      if (r.lethal) {
-        survivors.push({ file: `${zone} @ ${hour}`, line: 0, id: 'time-dependent', failed: r.failed })
-      }
-      progress('fuzz', considered, total)
+    considered++
+    const r = runTests(dated, { minFiles: dated.length, env: { TZ: zone } })
+    if (!r.ok) return harnessFailure(`fuzz ${zone}: ${r.reason}`)
+    /* Lethal, not merely `failed`: a timezone that stops a test file
+       LOADING is as time-dependent as one that makes an assertion go
+       red, and reporting only the latter would miss it. */
+    if (r.lethal) {
+      survivors.push({ file: zone, line: 0, id: 'time-dependent', failed: r.failed })
     }
+    progress('fuzz', considered, total)
   }
   return { considered, killed: considered - survivors.length, survivors }
 }
