@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
+import * as acorn from 'acorn'
 import { splitCss } from '../../scripts/style-lint.mjs'
 
 /**
@@ -16,15 +17,14 @@ import { splitCss } from '../../scripts/style-lint.mjs'
  * Two different tests, because it's really two different bugs wearing one
  * symptom:
  *
- *   Test A catches an intrinsically-sized element (canvas/img/svg/iframe/
- *   video) that carries a literal oversized `width` attribute in the
- *   STATIC markup with nothing to constrain its rendered CSS box. This
- *   historical bug's attribute was set by JS at runtime (reflected onto the
- *   live DOM, which is what a browser inspector shows, but never present in
- *   the file on disk) — so it does not itself trip on this file's markup.
- *   It stays, self-tested against a synthetic sample, as a guard against a
- *   FUTURE component that ships with a hardcoded oversized attribute
- *   directly in markup.
+ *   Test A drives the actual mechanism directly: resize() setting a
+ *   backing-store size without pinning the CSS size back down. An earlier
+ *   version of this test guarded a literal oversized `width` ATTRIBUTE in
+ *   the static markup instead — based on a misreading of the live DOM.
+ *   canvas.width/height are reflected IDL attributes, so `canvas.width=600`
+ *   set by JS is indistinguishable, once inspected, from `width="600"`
+ *   authored in the file — there was never a literal attribute on disk, so
+ *   that version of the test had no regression value here.
  *
  *   Test B catches the actual shape of this bug and would have caught it
  *   directly: a class or id that's live in the tile's markup with NO rule
@@ -133,51 +133,75 @@ describe('cssRules / selector matching — self-test', () => {
   })
 })
 
-describe('intrinsically-sized elements are constrained (Test A)', () => {
-  const html = readFileSync(TILE, 'utf8')
-  const { css } = splitCss(html)
-  const rules = cssRules(css)
-  const dom = new JSDOM(outsideEngine(html))
-  const candidates = [...dom.window.document.querySelectorAll('canvas, img, svg, iframe, video')]
+/**
+ * Extracts `function makeConstellation(...){...}`'s own source text from
+ * whichever inline <script> block in the tile defines it, via a real parse
+ * (acorn) rather than brace-counting — the function's body has plenty of
+ * string literals with stray-looking punctuation, and a parser doesn't
+ * care.
+ */
+function extractFunctionSource(html: string, name: string): string {
+  for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+    const code = m[1]
+    let ast: any
+    try { ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'script' }) } catch { continue }
+    for (const node of ast.body) {
+      if (node.type === 'FunctionDeclaration' && node.id?.name === name) return code.slice(node.start, node.end)
+    }
+  }
+  throw new Error(`function ${name} not found in any <script> block of the tile`)
+}
 
-  it('has candidates to check — an empty list would pass everything below', () => {
-    expect(candidates.length).toBeGreaterThan(0)
+/**
+ * Runs the real, unmodified makeConstellation source in a throwaway sandbox
+ * — no JSDOM, no layout engine, because resize()'s bug and fix are pure
+ * arithmetic on whatever getBoundingClientRect() and devicePixelRatio say,
+ * and a stub canvas object supplies both directly. requestAnimationFrame is
+ * stubbed to never fire, so frame() (which needs a real 2D context) never
+ * runs; resize() runs synchronously inside makeConstellation() itself.
+ */
+function loadMakeConstellation(html: string) {
+  const src = extractFunctionSource(html, 'makeConstellation')
+  const factory = new Function('window', 'requestAnimationFrame', 'cancelAnimationFrame', `${src}\nreturn makeConstellation;`)
+  return (fakeWindow: {
+    devicePixelRatio: number
+    matchMedia: () => { matches: boolean }
+    addEventListener: () => void
+    removeEventListener: () => void
+  }) => factory(fakeWindow, () => 0, () => {})
+}
+
+function stubCanvas(cssWidth: number, cssHeight: number) {
+  return {
+    width: 0,
+    height: 0,
+    style: {} as Record<string, string>,
+    getContext: () => new Proxy({}, { get: () => () => undefined }),
+    getBoundingClientRect: () => ({ width: cssWidth, height: cssHeight }),
+  }
+}
+
+describe('makeConstellation resize() pins the CSS box, independent of the backing store (Test A, replaced)', () => {
+  const html = readFileSync(TILE, 'utf8')
+  const makeConstellation = loadMakeConstellation(html)
+
+  it.each([1, 2, 3, 4])('at devicePixelRatio %d, the CSS box stays 56×56 and the backing store is capped at 3×', (dpr) => {
+    const canvas: any = stubCanvas(56, 56)
+    makeConstellation({ devicePixelRatio: dpr, matchMedia: () => ({ matches: false }), addEventListener: () => {}, removeEventListener: () => {} })(canvas, { count: 3 })
+    expect(canvas.style.width).toBe('56px')
+    expect(canvas.style.height).toBe('56px')
+    const cap = Math.min(dpr, 3)
+    expect(canvas.width).toBe(Math.round(56 * cap))
+    expect(canvas.height).toBe(Math.round(56 * cap))
   })
 
-  function isConstrained(el: Element): boolean {
-    const style = el.getAttribute('style') || ''
-    if (/width\s*:/.test(style)) return true
-    const id = el.getAttribute('id')
-    const classes = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean)
-    return rules.some((r) => /width\s*:/.test(r.body) && r.selectors.some((s) =>
-      (id != null && selectorTargetsId(s, id)) || classes.some((c) => selectorTargetsClass(s, c))))
-  }
-
-  it('every element whose width attribute exceeds 120 has something constraining its CSS width', () => {
-    /* The control, in the SAME test as the absence check below: prove
-       isConstrained() can say both yes and no before trusting it to say
-       "no offenders" about the real file. Without this, an offenders list
-       that's empty because the CHECK is broken reads identical to one
-       that's empty because the file is actually fine — precisely the
-       failure mode "absence-without-control" exists to catch. The
-       coachFab canvas's real 600×300 was set by JS at runtime (reflected
-       onto the live DOM, which is what a browser inspector shows) and was
-       never a literal attribute on disk — so this file currently has NO
-       element that fits Test A's pattern, which is why the synthetic
-       sample carries the proof instead. */
-    const unconstrained = new JSDOM('<canvas id="c" width="600"></canvas>').window.document.querySelector('canvas')!
-    expect(isConstrained(unconstrained)).toBe(false)
-    const constrained = new JSDOM('<canvas id="c" width="600" style="width:56px"></canvas>').window.document.querySelector('canvas')!
-    expect(isConstrained(constrained)).toBe(true)
-
-    const offenders = candidates
-      .filter((el) => {
-        const w = parseFloat(el.getAttribute('width') || '')
-        return Number.isFinite(w) && w > 120
-      })
-      .filter((el) => !isConstrained(el))
-      .map((el) => el.outerHTML.slice(0, 80))
-    expect(offenders).toEqual([])
+  it('does the same for a non-square box, at a DPR above the cap', () => {
+    const canvas: any = stubCanvas(300, 150)
+    makeConstellation({ devicePixelRatio: 4, matchMedia: () => ({ matches: false }), addEventListener: () => {}, removeEventListener: () => {} })(canvas, { count: 3 })
+    expect(canvas.style.width).toBe('300px')
+    expect(canvas.style.height).toBe('150px')
+    expect(canvas.width).toBe(900) // 300 * min(4, 3)
+    expect(canvas.height).toBe(450) // 150 * min(4, 3)
   })
 })
 
