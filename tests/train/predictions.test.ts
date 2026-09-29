@@ -65,6 +65,27 @@ describe('scoring one prediction', () => {
     expect(scorePrediction(plank, { date: '2026-09-19', kg: 0, sets: [{ kind: 'time', s: 60 }] })).toBe('hit')
     expect(scorePrediction(plank, { date: '2026-09-19', kg: 0, sets: [{ kind: 'time', s: 40 }] })).toBe('missed_high')
   })
+
+  it('calls a hold too LIGHT at the same margin reps use, scaled to seconds', () => {
+    /* Reps: EASY_MARGIN past target is too light, and exactly the margin
+       counts (see 'is missed LOW when it was far too easy'). Seconds use
+       five seconds per rep of margin, with the same inclusive edge. */
+    const plank = pred({ weight: null, reps: null, seconds: 60 })
+    const held = (s: number) => ({ date: '2026-09-19', kg: 0, sets: [{ kind: 'time' as const, s }] })
+    expect(scorePrediction(plank, held(60 + EASY_MARGIN * 5))).toBe('missed_low')
+    expect(scorePrediction(plank, held(60 + EASY_MARGIN * 5 - 1))).toBe('hit')
+  })
+
+  it('scores a distance lift in metres, including too light', () => {
+    /* Nothing covered distance at all. Too light is 20% past the target,
+       inclusive, matching the other two kinds' inclusive edges. */
+    const carry = pred({ weight: null, reps: null, metres: 400 })
+    const went = (m: number) => ({ date: '2026-09-19', kg: 0, sets: [{ kind: 'distance' as const, m }] })
+    expect(scorePrediction(carry, went(400))).toBe('hit')
+    expect(scorePrediction(carry, went(399))).toBe('missed_high')
+    expect(scorePrediction(carry, went(479))).toBe('hit')
+    expect(scorePrediction(carry, went(480))).toBe('missed_low')
+  })
 })
 
 describe('a prediction is written once', () => {
@@ -90,6 +111,26 @@ describe('a prediction is written once', () => {
     recordPrediction(store, pred({ id: 'squat' }))
     recordPrediction(store, pred({ date: '2026-09-20' }))
     expect(Object.keys(store).length).toBe(3)
+  })
+
+  it('refuses a prediction with no lift or no session date, and writes nothing', () => {
+    /* Either one missing makes a key like "2026-09-19:" that no lift will
+       ever be scored against — a phantom row inflating nothing but the
+       store. Each is refused on its own, not only when both are missing. */
+    const store: Record<string, Prediction> = {}
+    expect(recordPrediction(store, pred({ id: '' }))).toBe(false)
+    expect(recordPrediction(store, pred({ date: '' }))).toBe(false)
+    expect(store).toEqual({})
+    // control: the same store does take a complete one
+    expect(recordPrediction(store, pred())).toBe(true)
+    expect(Object.keys(store)).toEqual(['2026-09-19:bench'])
+  })
+
+  it('refuses rather than throws when there is no store or no prediction', () => {
+    /* The tile calls this with whatever STATE.predictions holds, which
+       can be absent on a first boot. */
+    expect(recordPrediction(null as never, pred())).toBe(false)
+    expect(recordPrediction({}, null as never)).toBe(false)
   })
 })
 
@@ -127,6 +168,25 @@ describe('accuracy over a window', () => {
     const acc = accuracyOver(withSkip, history)
     expect(acc.total).toBe(4)
     expect(acc.notAttempted).toBe(1)
+  })
+
+  it('scores only predictions on or after `since`, the day itself included', () => {
+    /* The tile passes a since-date to get "lately" (train.html accuracyNow).
+       09-03 is the boundary: it is in, 09-01 is out. */
+    const acc = accuracyOver(store, history, { since: '2026-09-03' })
+    expect(acc.total).toBe(3)   // 09-03, 09-05, 09-07
+    expect(acc.hit).toBe(2)     // 09-05 was the miss
+    // control: without it, the 09-01 hit counts too
+    expect(accuracyOver(store, history).total).toBe(4)
+  })
+
+  it('has nothing to say about which way it is wrong when it never was', () => {
+    const allHits = Object.fromEntries(scored.filter((_, i) => i !== 2).map(({ p }) => [`${p.date}:${p.id}`, p]))
+    const acc = accuracyOver(allHits, history)
+    // control: there was a record, and all of it was right
+    expect(acc.total).toBe(3)
+    expect(acc.rate).toBe(1)
+    expect(acc.whenWrong).toBeNull()
   })
 
   it('is empty rather than perfect with nothing scored', () => {
@@ -222,6 +282,53 @@ describe('the feedback is gated hard', () => {
     expect(acc.total).toBeGreaterThan(MIN_SCORED_FOR_FEEDBACK)
     expect(acc.rate).toBe(1)
     expect(progressionDamping(acc)).toBeNull()
+  })
+
+  /* A record built to order: `hit` hits, `high` too heavy, `low` too light. */
+  const record = (hit: number, high: number, low: number) => {
+    const store: Record<string, Prediction> = {}
+    const history: Record<string, unknown[]> = { bench: [] }
+    const reps = [...Array(hit).fill(5), ...Array(high).fill(2), ...Array(low).fill(5 + EASY_MARGIN)]
+    reps.forEach((r, i) => {
+      const date = `2026-08-${String(i + 1).padStart(2, '0')}`
+      store[`${date}:bench`] = pred({ date })
+      ;(history.bench as unknown[]).push({ ...entry([{ w: 200, r }]), date })
+    })
+    return accuracyOver(store, history as never)
+  }
+
+  it('moves at exactly the sample gate, not one after it', () => {
+    /* "Scored predictions needed before the feedback may change anything":
+       ten is enough. */
+    const acc = record(0, MIN_SCORED_FOR_FEEDBACK, 0)
+    expect(acc.total).toBe(MIN_SCORED_FOR_FEEDBACK)
+    expect(progressionDamping(acc)).not.toBeNull()
+  })
+
+  it('leaves a decent record alone even when its misses are all high', () => {
+    /* 8 of 12 right is 67%, above the 60% line: the direction of the
+       misses must not be reached at all. */
+    const acc = record(8, 4, 0)
+    expect(acc.missedHigh).toBe(4)   // control: every miss really is high
+    expect(acc.rate).toBeGreaterThan(0.6)
+    expect(progressionDamping(acc)).toBeNull()
+  })
+
+  it('treats exactly a 60% hit rate as not poor', () => {
+    /* POOR_RATE is the rate BELOW which progression eases off. */
+    const acc = record(6, 4, 0)
+    expect(acc.rate).toBe(0.6)
+    expect(acc.missedHigh).toBe(4)
+    expect(progressionDamping(acc)).toBeNull()
+    // control: one fewer hit, one more miss, and it does ease off
+    expect(progressionDamping(record(5, 5, 0))).not.toBeNull()
+  })
+
+  it('eases off when exactly 60% of the misses are high', () => {
+    /* MOSTLY_HIGH is the share of misses that must be high: 60% qualifies. */
+    const acc = record(0, 6, 4)
+    expect(acc.missedHigh / (acc.missedHigh + acc.missedLow)).toBe(0.6)
+    expect(progressionDamping(acc)).not.toBeNull()
   })
 
   it('does not ease off for being too CONSERVATIVE', () => {
