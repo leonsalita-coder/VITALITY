@@ -185,6 +185,23 @@ keeps catching these: before trusting a green test, ask what would have
 to be true for it to stay green while the code underneath it is wrong —
 then go check that specific thing, rather than reading green as "done."
 
+A related habit: guards should assert outcomes, not source shapes.
+`static-markup-css.test.ts`'s Test B and a retired gold/mint lint both
+asked "what string is in the source" — a class literal, a JS template —
+and both missed a live bug for exactly that reason: `.addLift`'s CSS was
+missing because it was emitted from a JS template Test B never scanned,
+and `.heroSub b`'s zero-volume gold came from a CSS descendant rule with
+no class literal for the lint to find. `computed-color-guard.test.ts`
+replaced the lint by reading `getComputedStyle` on the real rendered
+page instead — indifferent to how a colour arrives, because it never
+looks at how the colour arrives. It works only because of one coupling,
+which it asserts as its own first, loudest check rather than assuming:
+JSDOM never resolves `var()` to an `rgb()` value, so this only works
+because `scripts/style-lint.mjs` forbids a raw hex outside `:root` —
+if that rule is ever relaxed, the guard doesn't fail, it goes *blind* to
+that element, which is the worked example of a guard that has to check
+its own premise, not just the thing it was written to check.
+
 ## 7. Design system / style-lint
 
 Tokens live in `:root` in `public/tiles/train.html` — nowhere else.

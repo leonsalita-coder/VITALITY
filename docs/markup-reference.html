@@ -948,7 +948,8 @@
   .cal.hot .cd.hotcell { opacity:1; transform:scale(1.2); }
   .calTotal { position:relative; flex:none; width:42px; height:109px; border-radius:8px; background:var(--e2); border:1px solid var(--hair-strong); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; margin-top:17px; transition:border-color var(--d2) var(--ease-out), background var(--d2) var(--ease-out); }
   .calTotal.hot { border-color:color-mix(in srgb, var(--signal) 55%, black); background:rgba(110,231,183,.08); }
-  .calTotal .ctNum { font-family:var(--mono); font-weight:700; font-size:var(--fs-caption); color:var(--signal); }
+  .calTotal .ctNum { font-family:var(--mono); font-weight:700; font-size:var(--fs-caption); color:var(--text); }
+  .calTotal .ctNum.mint { color:var(--signal); }
   .calTotal .ctLbl { font-family:var(--mono); font-size:var(--fs-micro); letter-spacing:.05em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:1.3; }
   .calPop { position:absolute; right:calc(100% + 8px); top:50%; transform:translateY(-50%) scale(.94); z-index:5; width:132px; background:var(--e3); border:1px solid var(--hair-strong); border-radius:var(--r-sm); padding:9px 10px 8px; opacity:0; pointer-events:none; transition:opacity var(--d2) var(--ease-out), transform var(--d2) var(--ease-out); box-shadow:0 14px 30px -14px rgba(0,0,0,.6); }
   .calPop.on { opacity:1; transform:translateY(-50%) scale(1); }
@@ -5962,7 +5963,7 @@
           </div>
         </div>
         <div class="calTotal" id="calTotal">
-          <div class="ctNum">122.4k</div>
+          <div class="ctNum mint">122.4k</div>
           <div class="ctLbl">lb</div>
           <div class="calPop" id="calPop">
             <div class="cpCap">growth this quarter</div>
@@ -6177,7 +6178,7 @@
           &lt;/div&gt;
         &lt;/div&gt;
         &lt;div class="calTotal" id="calTotal"&gt;
-          &lt;div class="ctNum"&gt;122.4k&lt;/div&gt;
+          &lt;div class="ctNum mint"&gt;122.4k&lt;/div&gt;
           &lt;div class="ctLbl"&gt;lb&lt;/div&gt;
           &lt;div class="calPop" id="calPop"&gt;
             &lt;div class="cpCap"&gt;growth this quarter&lt;/div&gt;
