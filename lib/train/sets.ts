@@ -262,8 +262,16 @@ export function* readableEntries(
        every caller: a row with no sessionId is exactly as old as this
        field, and its date IS its only identity. Yielded as a copy —
        this is a read, and mutating the caller's own stored array on
-       the way past it would be a write nobody asked for. */
-    yield entry.sessionId ? entry : { ...entry, sessionId: entry.date }
+       the way past it would be a write nobody asked for.
+       Prefixed `legacy:`, not the bare date: a live session's own id
+       can fall back to its date too (train.html's curSession(), for a
+       session already open when this field shipped), and two
+       DIFFERENT unrelated things both defaulting to the same bare
+       string is exactly the collision this field exists to prevent —
+       just moved from "no sessionId" to "two things synthesizing the
+       same one". The namespace makes that structurally impossible
+       instead of merely unlikely. */
+    yield entry.sessionId ? entry : { ...entry, sessionId: `legacy:${entry.date}` }
   }
 }
 

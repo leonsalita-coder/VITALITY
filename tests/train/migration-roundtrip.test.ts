@@ -121,16 +121,32 @@ beforeAll(async () => {
   run = (e: string) => dom.window.eval(e)
 })
 
-it('stamps sessionId = date on every pre-existing row, losslessly', () => {
+it('stamps sessionId = legacy:date on every pre-existing row, losslessly', () => {
   const rows = JSON.parse(run(`JSON.stringify(STATE.history)`))
   let count = 0
   for (const id of Object.keys(rows)) {
     for (const row of rows[id]) {
       count++
-      expect(row.sessionId, `${id} ${row.date}`).toBe(row.date)
+      expect(row.sessionId, `${id} ${row.date}`).toBe(`legacy:${row.date}`)
     }
   }
   expect(count).toBe(Object.values(RAW_HISTORY).reduce((n, rows) => n + (rows as never[]).length, 0))
+})
+
+it('a synthesized id can never equal a real one', () => {
+  /* The collision this whole prefix exists to close: a legacy row's
+     synthesized id and a live session's real, generated id must be
+     structurally disjoint, not merely different in this one fixture.
+     newSessionId() is Date.now().toString(36) + random base36 chars —
+     asserted directly against the real function, not reasoned about. */
+  const liveId = run('newSessionId()')
+  expect(liveId).not.toMatch(/^legacy:/)
+  const rows = JSON.parse(run(`JSON.stringify(STATE.history)`))
+  for (const id of Object.keys(rows)) {
+    for (const row of rows[id]) {
+      expect(row.sessionId).not.toBe(liveId)
+    }
+  }
 })
 
 it('BEFORE vs AFTER: every derived metric is byte-identical post-migration', () => {

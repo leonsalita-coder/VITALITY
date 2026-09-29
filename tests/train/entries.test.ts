@@ -19,8 +19,9 @@ describe('rows that can be read at all', () => {
   const ok = { date: '2026-09-19', kg: 100, sets: [{ w: 100, r: 5 }] }
   /* What a well-formed row comes back AS: readableEntries stamps a
      sessionId on anything that lacks one (see 'the migration' below),
-     so every expected shape here carries it. */
-  const okStamped = { ...ok, sessionId: ok.date }
+     so every expected shape here carries it. Prefixed `legacy:` — see
+     that section for why the bare date isn't safe to default to. */
+  const okStamped = { ...ok, sessionId: `legacy:${ok.date}` }
 
   it('yields a well-formed row', () => {
     expect([...readableEntries([ok])]).toEqual([okStamped])
@@ -51,7 +52,7 @@ describe('rows that can be read at all', () => {
        training information of its own. */
     const rest = { ...ok, off: true }
     expect([...readableEntries([rest, ok], { includeOff: true })])
-      .toEqual([{ ...rest, sessionId: rest.date }, okStamped])
+      .toEqual([{ ...rest, sessionId: `legacy:${rest.date}` }, okStamped])
   })
 
   it('handles a missing list without complaint', () => {
@@ -87,9 +88,18 @@ describe('rows that can be read at all', () => {
  * without needing its own `?? date` fallback.
  */
 describe('the migration', () => {
-  it('stamps sessionId = date on a row that has none', () => {
+  it('stamps sessionId = legacy:date on a row that has none', () => {
     const [entry] = [...readableEntries([{ date: '2026-09-19', kg: 100 }])]
-    expect(entry.sessionId).toBe('2026-09-19')
+    expect(entry.sessionId).toBe('legacy:2026-09-19')
+  })
+
+  it('never produces an id a real session could also generate', () => {
+    /* newSessionId() (train.html) is Date.now().toString(36) + random
+       base36 chars — it can never start with "legacy:". Asserted here,
+       structurally, so the two id spaces staying disjoint isn't just
+       true today by coincidence. */
+    const [entry] = [...readableEntries([{ date: '2026-09-19', kg: 100 }])]
+    expect(entry.sessionId).toMatch(/^legacy:/)
   })
 
   it('leaves a real sessionId untouched', () => {

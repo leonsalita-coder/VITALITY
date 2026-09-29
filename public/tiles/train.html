@@ -1616,7 +1616,7 @@ var TrainEngine = (() => {
       if (!entry || typeof entry !== "object") continue;
       if (typeof entry.date !== "string" || !entry.date) continue;
       if (entry.off && !opts.includeOff) continue;
-      yield entry.sessionId ? entry : { ...entry, sessionId: entry.date };
+      yield entry.sessionId ? entry : { ...entry, sessionId: `legacy:${entry.date}` };
     }
   }
   function workingSets(entry) {
@@ -6729,13 +6729,18 @@ function migrateDeloadOverrides(){
 /* A row written before session ids existed has no way to tell a second
    same-day session apart from the first — which is exactly the bug this
    whole feature closes. True by construction, every such row gets its
-   OWN date as its session id: that is the only identity it ever had,
-   and it groups the row with every other row on that date exactly as
-   history already behaved. Run once here rather than trusted to every
-   comparison site — a snapshot restored after an eviction, or a JSON
-   backup restored mid-session, both land in STATE.history through a
-   DIFFERENT path than an ordinary boot, and either one skipping this
-   would silently reopen the collision on whatever it brought back. */
+   own date as the BASE of its session id — prefixed `legacy:`, not the
+   bare date, because curSession() below can ALSO fall back to its own
+   bare date, and two different unrelated things defaulting to the same
+   string is the same collision this field exists to prevent, just moved
+   one level up. Groups every such row with every OTHER legacy row on
+   that date exactly as history already behaved, without also being
+   mistakable for a live session that happens to share the date. Run
+   once here rather than trusted to every comparison site — a snapshot
+   restored after an eviction, or a JSON backup restored mid-session,
+   both land in STATE.history through a DIFFERENT path than an ordinary
+   boot, and either one skipping this would silently reopen the
+   collision on whatever it brought back. */
 function migrateHistorySessionIds(){
   const history = STATE.history;
   if(!history || typeof history!=='object') return;
@@ -6744,7 +6749,7 @@ function migrateHistorySessionIds(){
     if(!Array.isArray(rows)) continue;
     for(const row of rows){
       if(row && typeof row==='object' && !row.sessionId && typeof row.date==='string'){
-        row.sessionId = row.date;
+        row.sessionId = 'legacy:'+row.date;
       }
     }
   }
@@ -7145,11 +7150,16 @@ function curSession(){
     STATE.session = { date:today, off:false, warmup:[], cooldown:[], ex:[], id:newSessionId() };
   }
   /* Migration: a session already in progress when this shipped has no id
-     yet. Default it to today's date, matching how an unstamped HISTORY
-     row is read (sessionId ?? date) — so a session continued across a
-     reload keeps replacing its own rows in place exactly as it always
-     did, rather than being read as colliding with itself. */
-  if(!STATE.session.id) STATE.session.id = today;
+     yet. Default it to `legacy:`+today's date — matching the SAME
+     prefix an unstamped HISTORY row gets (readableEntries, sets.ts) and
+     migrateHistorySessionIds' own fallback above — so a session
+     continued across a reload keeps replacing its own already-migrated
+     rows in place exactly as it always did, rather than being read as
+     colliding with itself. Bare `today` was tried first and rejected:
+     it is indistinguishable from a real, unrelated legacy row that
+     happens to share today's date, which is the exact collision this
+     whole feature exists to close, just reopened one level up. */
+  if(!STATE.session.id) STATE.session.id = 'legacy:'+today;
   return STATE.session;
 }
 function sortedEx(session){ return session.ex.map((e,i)=>({e,i})).sort((a,b)=> (b.e.pinned-a.e.pinned)).map(o=>o.e); }
