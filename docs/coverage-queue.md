@@ -51,3 +51,49 @@ misses, which must stop at the rate gate before direction is considered.
   requires ≥ 60% of misses high.
 
 Fixture shape: nothing here was masked by shape rather than value.
+
+---
+
+## weekly — 19 → 14
+
+**Real gaps closed (5):** a `NaN`/`Infinity` night in vitals was averaged in
+and silently dropped the finding (L216); a weightless set counted as a best
+set of zero and halved the week's e1RM reading (L163 `>` → `>=`); a week of
+only high-rep work read as "best sets down 100%" (L166); an all-negative
+bodyweight record produced "strength per pound up" (L226, two mutants). Each
+test has a control showing the same fixture fires once the bad value is gone.
+
+**Left (14) — all equivalent, proven** against 3,000 generated weekly contexts
+through `weeklyChange` (varied volume, load, sleep, recovery, rest, bodyweight,
+other training, deload/layoff/import flags, and hostile values: `NaN`/`Infinity`
+vitals, zero/negative bodyweight, weightless and >10-rep sets, weeks with
+unfinished sessions), plus 3,000 more with targeted zero/negative bodyweight
+for the L226 group:
+
+- `L134, L144, L173, L180, L189, L196, L217` empty-reading guards removed:
+  with nothing in the window the code below computes `mean([]) = 0` and
+  `samples: 0`, which is `NOTHING` field for field, and the samples gate
+  refuses it identically.
+- `L201` same, except the unguarded path reports `estimated: true`; that flag
+  is only read after the samples gate, which a zero-sample reading never
+  passes.
+- `L98` `weeks > 0` → `>=`: dead branch. Every window is 7 or 28 days.
+- `L388` product `> 0` → `>= 0`: the product cannot be zero there — both
+  deltas already cleared `moved()` with strictly positive minimums.
+- `L226` first `||` → `&&`: with no e1RM samples it computes `samples: 0`
+  and the gate refuses it.
+- **Equivalent only through `deltaOf`** (flagged, not buried): `L226 <=` → `<`
+  (bodyweight exactly 0) and both `L237` mutants (no finished sessions)
+  divide by zero. The resulting `Infinity`/`NaN` reaches `deltaOf`, which
+  returns `change: null` for non-finite input, so `moved()` refuses it
+  exactly as it refuses the original's empty reading. That guard is itself
+  pinned (`windows.test.ts:109-111`), but these three are equivalent BECAUSE
+  of it, not on their own.
+
+*What I got wrong first:* I argued the negative-bodyweight mutants equivalent
+("both deltas go negative, so the opposite-direction gate refuses"). The
+random driver agreed — but only because a random week rarely has a negative
+MEAN. A targeted driver with every reading negative produced
+"Strength per pound up 8% in a week you averaged -162 lb". Both now killed.
+
+Fixture shape: nothing here was masked by shape rather than value.

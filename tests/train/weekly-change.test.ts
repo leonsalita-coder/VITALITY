@@ -793,3 +793,75 @@ describe('tonnage is the metric that catches a deload', () => {
     expect(f?.outcome.current).toBe(6750)
   })
 })
+
+describe('readings that must be refused rather than averaged in', () => {
+  /* Each of these is data the reader is written to refuse. Every test
+     reads it through a finding, and each carries a control showing the
+     same fixture does produce the finding once the bad value is gone —
+     so "no finding" can only mean the refusal, not a fixture that never
+     fired. */
+
+  it('skips a night recorded as NaN or Infinity instead of poisoning the week', () => {
+    /* A tracker that fails to sync can write NaN; one bad night must not
+       turn the week's mean into NaN and silently drop the finding. */
+    const build = (extra: unknown[]) => weeklyChange(ctx({
+      history: { bench: weekly(20, 24) },
+      vitals: [...vitalsOf('sleepHours', 9, 8), ...extra] as WeeklyContext['vitals'],
+    }))
+    const clean = build([])
+    expect(clean?.hypothesis).toBe('sleep_output')   // control
+    const polluted = build([{ date: day(2), sleepHours: NaN }, { date: day(3), sleepHours: Infinity }])
+    expect(polluted?.hypothesis).toBe('sleep_output')
+    expect(polluted?.driver?.current).toBe(clean?.driver?.current)
+  })
+
+  it('does not count a weightless set as a best set of zero', () => {
+    /* A bodyweight movement logged with no load says nothing about a
+       one-rep max. Averaged in as zero it would halve the week's
+       strength reading the moment someone added pull-ups. */
+    const build = (withPullups: boolean) => weeklyChange(ctx({
+      history: {
+        bench: [
+          ...[1, 2, 3, 4].flatMap((w) => [setsAt(w * 7, 185, [5, 5]), setsAt(w * 7 + 2, 185, [5, 5])]),
+          setsAt(1, 205, [5]), setsAt(3, 205, [5]),
+        ],
+        ...(withPullups ? { pullup: [setsAt(1, 0, [8, 8]), setsAt(3, 0, [8, 8])] } : {}),
+      },
+      vitals: vitalsOf('recovery', 80, 60),
+    }))
+    expect(build(false)?.outcome.current).toBeCloseTo(239.2, 1)   // control: 205x5
+    expect(build(true)?.outcome.current).toBeCloseTo(239.2, 1)
+  })
+
+  it('reads a week of only high-rep work as no strength data, not a collapse', () => {
+    /* Every set is past the ten-rep cap, so there is no one-rep max to
+       estimate. That is an absence of evidence — reporting it as best
+       sets down 100% would be the app inventing a crash. */
+    const withWeek = (weekSets: Array<{ w: number; r: number }>) => weeklyChange(ctx({
+      history: {
+        bench: [
+          ...[1, 2, 3, 4].flatMap((w) => [setsAt(w * 7, 185, [5, 5]), setsAt(w * 7 + 2, 185, [5, 5])]),
+          { date: day(1), kg: 185, sets: weekSets },
+          { date: day(3), kg: 185, sets: weekSets },
+        ],
+      },
+      vitals: vitalsOf('recovery', 42, 60),
+    }))
+    // control: a genuinely weaker week on the same poor recovery IS reported
+    expect(withWeek([{ w: 150, r: 5 }])?.hypothesis).toBe('recovery_e1rm')
+    expect(withWeek([{ w: 185, r: 12 }, { w: 185, r: 15 }])).toBeNull()
+  })
+
+  it('refuses a bodyweight at or below zero rather than dividing by it', () => {
+    /* A mistyped or corrupted weight. The ratio flips sign with the
+       divisor, so an all-negative record would otherwise report
+       "strength per pound up" off a body that weighs -190 lb. */
+    const build = (entries: unknown[]) => weeklyChange(ctx({
+      history: { bench: weekly(6, 6) },
+      bodyweight: entries as WeeklyContext['bodyweight'],
+    }))
+    expect(build(bwOf(190, 180))?.hypothesis).toBe('bodyweight_relative_strength')   // control
+    expect(build(bwOf(-190, -180))?.hypothesis).not.toBe('bodyweight_relative_strength')
+    expect(build(bwOf(0, 180))?.hypothesis).not.toBe('bodyweight_relative_strength')
+  })
+})
