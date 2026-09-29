@@ -1044,6 +1044,21 @@
   .formStep .n { font-family:var(--mono); font-size:var(--fs-label); color:var(--signal); width:22px; flex:none; }
   .formStep .t { font-size:var(--fs-body); font-weight:500; line-height:1.45; }
 
+  /* .addLift itself had no rule at all — the same defect as .coachFab, a
+     missing primitive rather than a design decision. With nothing
+     authored, it rendered as raw UA ButtonFace: measured in a real
+     browser at rgb(239,239,239) background, #000 text/border — 17.93
+     contrast against the page, 33% louder than .finishBtn's 13.52 on
+     --signal. It is a SECONDARY action (this button, "Take a photo" and
+     "From library" all share this class) and must not outrank the
+     primary CTA, so it takes the neutral/elevated treatment .settingsBtn
+     already uses (--e2 + a hairline border) rather than --signal. --e2
+     against --e0 measures ~1.09 contrast — the border, not a bright
+     fill, is what reads as a button here, exactly as it already does for
+     .settingsBtn elsewhere in this same tile. */
+  .addLift { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:18px 14px 16px; background:var(--e2); border:2px solid var(--hair-strong); border-bottom-width:4px; border-radius:var(--r-md); color:var(--muted); cursor:pointer; transform-origin:bottom; transition:background var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .addLift:hover { background:var(--e3); }
+  .addLift:active { transform:scaleY(.93) translateY(1px); border-bottom-width:1px; }
   .addLiftRing { width:42px; height:42px; border-radius:50%; border:2px solid rgba(110,231,183,.4); border-bottom-width:4px; transform-origin:bottom; display:grid; place-items:center; color:var(--signal); transition:background var(--d2), transform var(--d1) var(--spring), box-shadow var(--d3), border-bottom-width var(--d1) var(--spring); }
   .addLiftRing svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; }
   .addLiftLabel { font-family:var(--sans); font-weight:600; font-size:var(--fs-caption); color:var(--signal); }
@@ -7337,7 +7352,7 @@ function renderHeroExtras(){
     const totalVol=Math.round(volByDate.reduce((a,s)=>a+s.kg,0));
     ms.innerHTML =
       '<div class="miniCard"><b>'+fd.length+'</b><span>Sessions</span></div>'
-      + '<div class="miniCard"><b class="gold">'+streak+'</b><span>wk streak</span></div>'
+      + '<div class="miniCard"><b>'+streak+'</b><span>wk streak</span></div>'
       + '<div class="miniCard"><b>'+(totalVol>=1000?(totalVol/1000).toFixed(1)+'k':totalVol)+'</b><span>'+STATE.unit+' lifted</span></div>';
   }
 }
@@ -9948,7 +9963,11 @@ function drawStats(e){
   const best=real.length?Math.max(...real.map(s=>s.kg)):0;
   const w30=real.filter(s=>daysAgo(s.date)<=30); const d30=w30.length>=2?r1(w30[w30.length-1].kg-w30[0].kg):0;
   const hstats=$('#hstats');
-  hstats.innerHTML='<div class="stat"><div class="k">Sessions</div><div class="v">'+real.length+'</div></div><div class="stat"><div class="k">Last 30 days</div><div class="v up">'+(d30>=0?'+':'')+d30+' '+STATE.unit+'</div></div><div class="stat"><div class="k">Best</div><div class="v gold">'+best+' '+STATE.unit+'</div></div>';
+  /* Colour gated on the same value it colours: exactly zero is not a gain
+     (d30>0, not >=0) and a "best" is only a real one when there is a
+     session to have taken it from (real.length, the same guard already
+     used above to compute `best` itself). */
+  hstats.innerHTML='<div class="stat"><div class="k">Sessions</div><div class="v">'+real.length+'</div></div><div class="stat"><div class="k">Last 30 days</div><div class="v'+(d30>0?' up':'')+'">'+(d30>0?'+':'')+d30+' '+STATE.unit+'</div></div><div class="stat"><div class="k">Best</div><div class="v'+(real.length?' gold':'')+'">'+best+' '+STATE.unit+'</div></div>';
   animateCounts(hstats);
 }
 function drawTable(e, all){
@@ -10807,19 +10826,24 @@ function renderOverviewCards(){
   const volBuckets=weeklyBuckets(volByDate, WEEKS, e=>e.kg);
   const hrBuckets=weeklyBuckets(STATE.sessionDurations||[], WEEKS, e=>(e.minutes||0)/60);
   const sessDelta=sessBuckets[WEEKS-1]-sessBuckets[WEEKS-2];
+  /* Colour is gated on the SAME value the card displays, not applied per
+     card-type — gold/mint are achievement colours, and a 0 is never an
+     achievement. Captured once each so the gate and the displayed number
+     can't drift apart. */
+  const sessCount=(STATE.finishedDates||[]).length, streak=currentStreak(), longest=longestStreak(), prCount=totalPRsAllTime();
   const cards=[
-    { n:(STATE.finishedDates||[]).length, l:'Sessions', c:'mint', chart:sessBuckets,
+    { n:sessCount, l:'Sessions', c:sessCount>0?'mint':'', chart:sessBuckets,
       desc: sessDelta!==0 ? '<b>'+(sessDelta>0?'+':'')+sessDelta+'</b> vs last week' : 'same as last week' },
     /* Hours trained, exercises tracked and sessions-per-week-all-time are
        gone. Nobody changes what they do because of them, and every card is
        surface to maintain forever. What is left either predicts progress
        or rewards the behaviour that produces it. */
-    { n:currentStreak(), l:'Week streak', c:'gold', desc:'weeks at '+weeklyTarget()+'+ sessions' },
-    { n:longestStreak(), l:'Longest run', c:'gold', desc:'weeks at '+weeklyTarget()+'+ sessions' },
-    { n:totalPRsAllTime(), l:'Personal records', c:'gold' },
-    { n:totalVol.toLocaleString(), l:'Total '+STATE.unit+' lifted', c:'mint', chart:volBuckets },
+    { n:streak, l:'Week streak', c:streak>0?'gold':'', desc:'weeks at '+weeklyTarget()+'+ sessions' },
+    { n:longest, l:'Longest run', c:longest>0?'gold':'', desc:'weeks at '+weeklyTarget()+'+ sessions' },
+    { n:prCount, l:'Personal records', c:prCount>0?'gold':'' },
+    { n:totalVol.toLocaleString(), l:'Total '+STATE.unit+' lifted', c:totalVol>0?'mint':'', chart:volBuckets },
   ];
-  el.innerHTML = cards.map(c=>'<div class="ovCard"><div class="ovNum '+c.c+'">'+c.n+'</div><div class="ovLbl">'+c.l+'</div>'
+  el.innerHTML = cards.map(c=>'<div class="ovCard"><div class="ovNum'+(c.c?' '+c.c:'')+'">'+c.n+'</div><div class="ovLbl">'+c.l+'</div>'
     +(c.desc?'<div class="ovDesc">'+c.desc+'</div>':'')
     +(c.chart?ovChartHTML(c.chart):'')
     +'</div>').join('');
@@ -11257,14 +11281,14 @@ function drawVolumeChart(){
   drawAggChart(list, statsRangeKey, STATE.unit);
   const total=r1(list.reduce((a,s)=>a+s.kg,0));
   const avg=list.length? r1(total/list.length):0;
-  $('#statsRow').innerHTML='<div class="stat"><div class="k">Days logged</div><div class="v">'+list.length+'</div></div><div class="stat"><div class="k">Avg / day</div><div class="v up">'+avg+'</div></div><div class="stat"><div class="k">Total</div><div class="v gold">'+Math.round(total)+'</div></div>';
+  $('#statsRow').innerHTML='<div class="stat"><div class="k">Days logged</div><div class="v">'+list.length+'</div></div><div class="stat"><div class="k">Avg / day</div><div class="v'+(avg>0?' up':'')+'">'+avg+'</div></div><div class="stat"><div class="k">Total</div><div class="v'+(total>0?' gold':'')+'">'+Math.round(total)+'</div></div>';
 }
 function drawExerciseChart(id){
   const all=(STATE.history[id]||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
   const list=all.filter(s=>!s.off && daysAgo(s.date)<=RANGES[statsRangeKey]);
   drawAggChart(list, statsRangeKey, STATE.unit);
   const best=list.length?Math.max(...list.map(s=>s.kg)):0;
-  $('#statsRow').innerHTML='<div class="stat"><div class="k">Sessions</div><div class="v">'+list.length+'</div></div><div class="stat"><div class="k">Best</div><div class="v gold">'+best+' '+STATE.unit+'</div></div><div class="stat"><div class="k">Lift</div><div class="v" style="font-size:var(--fs-body)">'+escapeHtml((STATE.exerciseNames&&STATE.exerciseNames[id])||id)+'</div></div>';
+  $('#statsRow').innerHTML='<div class="stat"><div class="k">Sessions</div><div class="v">'+list.length+'</div></div><div class="stat"><div class="k">Best</div><div class="v'+(list.length?' gold':'')+'">'+best+' '+STATE.unit+'</div></div><div class="stat"><div class="k">Lift</div><div class="v" style="font-size:var(--fs-body)">'+escapeHtml((STATE.exerciseNames&&STATE.exerciseNames[id])||id)+'</div></div>';
 }
 const CAL_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const CAL_WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -11342,7 +11366,8 @@ function drawSessionsCal(){
   });
   renderCalQuarter();
   cap.textContent='';
-  $('#statsRow').innerHTML='<div class="stat"><div class="k">Week streak</div><div class="v gold">'+currentStreak()+'</div></div><div class="stat"><div class="k">Total sessions</div><div class="v">'+(STATE.finishedDates||[]).length+'</div></div><div class="stat"><div class="k">Lifts tracked</div><div class="v">'+Object.keys(STATE.exerciseNames||{}).length+'</div></div>';
+  const streak=currentStreak();
+  $('#statsRow').innerHTML='<div class="stat"><div class="k">Week streak</div><div class="v'+(streak>0?' gold':'')+'">'+streak+'</div></div><div class="stat"><div class="k">Total sessions</div><div class="v">'+(STATE.finishedDates||[]).length+'</div></div><div class="stat"><div class="k">Lifts tracked</div><div class="v">'+Object.keys(STATE.exerciseNames||{}).length+'</div></div>';
 }
 function renderCalQuarter(){
   const plot=$('#statsPlot'); if(!plot || plot.querySelector('#calTitle')===null) return;

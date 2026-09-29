@@ -1044,6 +1044,21 @@
   .formStep .n { font-family:var(--mono); font-size:var(--fs-label); color:var(--signal); width:22px; flex:none; }
   .formStep .t { font-size:var(--fs-body); font-weight:500; line-height:1.45; }
 
+  /* .addLift itself had no rule at all — the same defect as .coachFab, a
+     missing primitive rather than a design decision. With nothing
+     authored, it rendered as raw UA ButtonFace: measured in a real
+     browser at rgb(239,239,239) background, #000 text/border — 17.93
+     contrast against the page, 33% louder than .finishBtn's 13.52 on
+     --signal. It is a SECONDARY action (this button, "Take a photo" and
+     "From library" all share this class) and must not outrank the
+     primary CTA, so it takes the neutral/elevated treatment .settingsBtn
+     already uses (--e2 + a hairline border) rather than --signal. --e2
+     against --e0 measures ~1.09 contrast — the border, not a bright
+     fill, is what reads as a button here, exactly as it already does for
+     .settingsBtn elsewhere in this same tile. */
+  .addLift { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:18px 14px 16px; background:var(--e2); border:2px solid var(--hair-strong); border-bottom-width:4px; border-radius:var(--r-md); color:var(--muted); cursor:pointer; transform-origin:bottom; transition:background var(--d2) var(--ease-out), border-color var(--d2) var(--ease-out), transform var(--d1) var(--spring), border-bottom-width var(--d1) var(--spring); }
+  .addLift:hover { background:var(--e3); }
+  .addLift:active { transform:scaleY(.93) translateY(1px); border-bottom-width:1px; }
   .addLiftRing { width:42px; height:42px; border-radius:50%; border:2px solid rgba(110,231,183,.4); border-bottom-width:4px; transform-origin:bottom; display:grid; place-items:center; color:var(--signal); transition:background var(--d2), transform var(--d1) var(--spring), box-shadow var(--d3), border-bottom-width var(--d1) var(--spring); }
   .addLiftRing svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; }
   .addLiftLabel { font-family:var(--sans); font-weight:600; font-size:var(--fs-caption); color:var(--signal); }
