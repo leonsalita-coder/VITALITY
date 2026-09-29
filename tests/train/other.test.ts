@@ -474,3 +474,18 @@ describe('the guarantees the two-a-day design rests on', () => {
     })
   })
 })
+
+describe('the note counts what it was told, and no more', () => {
+  it('names a single session without "plus 0 more"', () => {
+    const one = assessReadiness(base({ otherLoad: recentOtherLoad([entry({ minutes: 120, intensity: 9 })], TODAY) }))
+    expect(one.reason).toMatch(/told me about/i)   // control: the note is there
+    expect(one.reason).not.toMatch(/plus \d+ more/)
+  })
+
+  it('counts the others when there are some', () => {
+    const two = assessReadiness(base({
+      otherLoad: recentOtherLoad([entry({ minutes: 120, intensity: 9 }), entry({ date: back(2), minutes: 30, intensity: 5 })], TODAY),
+    }))
+    expect(two.reason).toMatch(/plus 1 more/)
+  })
+})

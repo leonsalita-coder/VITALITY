@@ -258,3 +258,63 @@ in `sameAsLastTime`. `usable` already keeps only entries with at least one
 working set, and `last` is one of them, so `sets` is never empty. Confirmed
 over 4,000 generated histories (warm-ups, zero-rep and missed sets, timed
 sets, null sets, off days, missing `sets`, `excludeDate`): 0 differences.
+
+---
+
+## readiness — 5 → 1
+
+**Real gaps closed (4):** each recovery constant is defined "below this", and
+no test sat exactly on one — at exactly `REST_FLOOR` (35) the call is reduced
+volume, not rest; at exactly `LOW_RECOVERY` (55) it is eased weight, not cut
+volume; at exactly `MODERATE_RECOVERY` (70) it is normal (L123, L144, L165).
+And a single self-reported session produced "…, plus 0 more." in the note the
+athlete reads (L197 `>` → `>=`).
+
+**Left (1) — equivalent:** `L118` the silence guard removed. With no
+recovery, no load and no other training, every rule below is skipped and the
+function falls through to `{ ...SILENT, confidence: 'inferred' }` — which is
+`SILENT`, field for field. Confirmed over 4,000 generated contexts
+(null/undefined/NaN recovery, zero baselines, active deloads, capped rest,
+other training present and absent): 0 differences. The guard is a readability
+early-return, not a behaviour.
+
+---
+
+## Summary
+
+| module | before | after | real gaps closed | left, and why |
+| --- | --- | --- | --- | --- |
+| predictions | 20 | 3 | 17 | 2 equivalent · 1 unspecified tie-break (needs a decision) |
+| weekly | 19 | 14 | 5 | 14 equivalent (3 of them only through `deltaOf`) |
+| deload | 11 | 0 | 11 | — |
+| timing | 8 | 4 | 4 | 4 equivalent |
+| analysis | 7 | 3 | 4 | 3 equivalent (one exposes a dead gate: `MIN_STRONG`) |
+| load | 6 | 5 | 1 | 5 equivalent |
+| streaks | 6 | 4 | 2 | 4 equivalent |
+| session | 5 | 1 | 4 | 1 unreachable guard |
+| readiness | 5 | 1 | 4 | 1 equivalent |
+| **total** | **87** | **35** | **52** | 34 equivalent · 1 needs a decision |
+
+The brief listed deload at 10; the sweep found 11 on the current tree.
+
+**Not single digits: weekly (14).** All 14 are proven equivalent. Getting it
+lower would mean pinning dead branches or internals — a test that asserts the
+mutation, which is the ratchet gaming itself.
+
+**Masked by fixture shape: 2 tonight.** analysis L249 (a lone secondary
+muscle is renormalised to 100%, hiding zero-rounding shares) and load L169
+(random schedules never make the EWMA land exactly on 4; a steady weekly
+lifter does). One more near-miss was masked by *value* distribution rather
+than shape: weekly's negative-bodyweight pair, which a random week almost
+never averages below zero.
+
+## How "proven equivalent" was checked
+
+A scratch tool (not committed — it lives outside the repo) bundles
+`lib/train/index.ts` twice with esbuild, once as written and once with the
+harness's own mutation applied at the harness's own byte offset, then runs
+the same generated inputs through both — calling the real downstream
+consumer (e.g. `weeklyChange`, `detectPlateau`, the tile's accuracy line)
+from the same bundle — and diffs the JSON. "0 differ" is evidence on those
+inputs, not a proof; where an argument exists it is given beside the number,
+and twice tonight the number was wrong until the fixture shape changed.

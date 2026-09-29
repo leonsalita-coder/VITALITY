@@ -161,3 +161,24 @@ describe('precedence', () => {
       .toBe('normal')
   })
 })
+
+describe('each recovery band starts exactly at its constant', () => {
+  /* Every constant is defined as "below this". A reading sitting exactly
+     on one belongs to the band above it — the gentler call. */
+
+  it('does not advise rest at exactly REST_FLOOR', () => {
+    const r = assessReadiness(ctx({ recovery: REST_FLOOR }))
+    expect(r.verdict).toBe('reduced_volume')
+    expect(r.setsFactor).toBe(0.6)
+  })
+
+  it('does not cut volume at exactly LOW_RECOVERY', () => {
+    expect(assessReadiness(ctx({ recovery: LOW_RECOVERY })).verdict).toBe('reduced_intensity')
+  })
+
+  it('does not ease weight at exactly MODERATE_RECOVERY', () => {
+    const r = assessReadiness(ctx({ recovery: MODERATE_RECOVERY }))
+    expect(r.verdict).toBe('normal')
+    expect(r.confidence).toBe('measured')   // control: the reading was used, not ignored
+  })
+})
