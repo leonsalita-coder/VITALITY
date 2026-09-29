@@ -179,3 +179,36 @@ the driver (which also found 0 differences in 1,500 histories):
   `max(left, right) >= 10`, so a max of 6 can never reach it. Not a test gap —
   a gate that cannot fire. Worth a decision: either it should be larger than
   `MIN_TOTAL / 2`, or it should go.
+
+---
+
+## load — 6 → 5
+
+**Real gap closed (1):** `chronic >= MIN_CHRONIC_LOAD` → `>` (L169). A lifter
+doing exactly four hard sets every week has a chronic load of exactly 4.0,
+which is the stated minimum and must count as usable.
+
+**MASKED BY FIXTURE SHAPE.** 3,000 generated contexts found 0 differences,
+because randomly scheduled sessions never produce a perfectly steady weekly
+rate — and a perfectly steady rate is the only way the EWMA lands exactly on
+4. The shape that exposes it (same sets, same weekday, every week) is the
+most ordinary real lifter there is. A hand-built steady fixture: 4 sets →
+usable in the original, not in the mutant.
+
+*Also a mistake of mine, recorded:* line 169 has two `>=`. I first hand-tested
+the other one (`observedDays >= MIN_CHRONIC_DAYS`, already pinned at
+`load.test.ts:551-557`), got a difference, and briefly concluded the random
+driver was wrong. It was not; I had the wrong operator. The harness offset
+(6307) identified the right one.
+
+**Left (5) — equivalent, structurally** (and 0 differences over 6,000
+comparisons of `acuteChronic` and `loadFindings`):
+
+- `L188`, `L194` `>` → `>=`: assigning `oldest = age` when they are already
+  equal.
+- `L261`, `L295` `>` → `>=` on `SANE_BAND[1]`: the band check just above each
+  is inclusive (`ratio <= SANE_BAND[1]` → continue / return null), so a ratio
+  exactly on the upper edge never reaches the direction word.
+- `L157` `age >= span` → `>`: at `age === span` the mutant writes
+  `series[-1]`, a non-index property. `weeklyRate` and `ewma` iterate by
+  index up to `length`, so it is never read.

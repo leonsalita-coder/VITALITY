@@ -683,3 +683,28 @@ describe('other training that is not there at all', () => {
     expect(loadFindings(partial)).toEqual([])
   })
 })
+
+describe('the chronic-load floor includes its own boundary', () => {
+  /* MIN_CHRONIC_LOAD is four hard sets a week. A lifter doing exactly
+     four, every week, on the same day, is the plainest steady history
+     there is: the rolling weekly rate is 4 on every day of the span, so
+     the chronic figure is exactly 4 — enough, not one short. Irregular
+     fixtures never land on the boundary, which is why nothing caught it. */
+  const weeklyAt = (sets: number) => ({
+    bench: [55, 48, 41, 34, 27, 20, 13, 6].map((back) => ({
+      date: day(back), kg: 100, sets: Array.from({ length: sets }, () => ({ w: 100, r: 8 })),
+    })),
+  })
+
+  it('reads four sets a week, steadily, as a usable baseline', () => {
+    const chest = acuteChronic(ctx({ history: weeklyAt(MIN_CHRONIC_LOAD) })).byMuscle.chest!
+    expect(chest.chronic).toBe(MIN_CHRONIC_LOAD)
+    expect(chest.usable).toBe(true)
+  })
+
+  it('refuses three', () => {
+    const chest = acuteChronic(ctx({ history: weeklyAt(MIN_CHRONIC_LOAD - 1) })).byMuscle.chest!
+    expect(chest.chronic).toBe(MIN_CHRONIC_LOAD - 1)
+    expect(chest.usable).toBe(false)
+  })
+})
