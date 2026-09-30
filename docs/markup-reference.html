@@ -114,7 +114,12 @@
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   ::selection { background:var(--signal); color:var(--signal-ink); }
   html { background:var(--e0); }
-  body { margin:0; min-height:100dvh; padding:0 0 calc(56px + env(safe-area-inset-bottom)); background:var(--e0); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+  /* Bottom padding reserves the coach FAB's full footprint (56px tall,
+     16px bottom offset, 16px clearance above it = 88px) so nothing the
+     page ever scrolls to its true end with can come to rest underneath
+     the fixed FAB. A fixed element floating over scrolling content is
+     correct; only content settling under it is the bug. */
+  body { margin:0; min-height:100dvh; padding:0 0 calc(88px + env(safe-area-inset-bottom)); background:var(--e0); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
   button { font-family:inherit; cursor:pointer; }
   button:disabled { cursor:default; }
   .num { font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
@@ -1036,6 +1041,12 @@
   .hmCell.l3 { background:var(--hm3); border-color:transparent; }
   .hmCell.l4 { background:var(--hm4); border-color:transparent; }
   .hmCell.today { box-shadow:0 0 0 2px var(--signal); }
+  /* The tapped-and-open cell, not --signal — today already owns that
+     ring, and two signal rings on the same grid undoes the point of the
+     neutral ramp. today's own ring wins when the two coincide (below),
+     rather than the two box-shadows fighting over the same property. */
+  .hmCell.selected { box-shadow:0 0 0 2px var(--hair-strong); }
+  .hmCell.today.selected { box-shadow:0 0 0 2px var(--signal); }
   /* Missed: a planned weekday (lib/train/routine.ts's RoutineAssignment)
      with nothing logged. The difference from an ordinary rest cell is
      SHAPE, not hue — the fill and hairline are UNCHANGED (decision 4's
@@ -1066,7 +1077,7 @@
      Taken out of grid flow (position:absolute) so it extends into the
      4px gap without moving any other cell or changing the grid's own
      42px+4px rhythm. */
-  .hmHit { position:absolute; left:50%; top:50%; width:44px; height:44px; transform:translate(-50%,-50%); padding:0; margin:0; border:none; background:none; cursor:default; }
+  .hmHit { position:absolute; left:50%; top:50%; width:44px; height:44px; transform:translate(-50%,-50%); padding:0; margin:0; border:none; background:none; cursor:pointer; }
   .hmLegend { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); line-height:var(--lh-micro); }
   /* Swatches reuse .hmCell's own l1–l4/missing/.hmRecord rules verbatim
      (same classes, same selectors) rather than restating any of their

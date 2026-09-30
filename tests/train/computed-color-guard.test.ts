@@ -190,7 +190,15 @@ const SCAN_SRC = `(function(){
 /** Every render path that touches one of the eleven sites fixed for this
  * bug class, plus the history popup (openHistory — the real entry point;
  * drawStats() alone throws, since #hstats only exists once the popup
- * shell openHistory builds is mounted). */
+ * shell openHistory builds is mounted), plus the heatmap's day-breakdown
+ * popup (openSessionAt) — its PR star reuses the SAME --gold token the
+ * original eleven sites did, and none of the six scenes above ever open
+ * it, so without this one it would be entirely unscanned: a green run
+ * here would prove nothing about it. ago(3) is every fixture's own
+ * session date (oneSessionFixture's only entry, genuinePrFixture's PR
+ * entry) — emptyFixture has no session there at all, so this call opens
+ * nothing (an ordinary rest day, no routine assigned), which is fine:
+ * the scan finds nothing new to check, not a false pass. */
 const SCENES = [
   `renderHeroExtras(); renderOverviewCards(); renderStreak();`,
   `openHistory({id:'squat', name:'Squat'});`,
@@ -198,6 +206,7 @@ const SCENES = [
   `statsView={id:'__volume'}; drawStatsSection();`,
   `statsView={id:'__sessions'}; drawStatsSection();`,
   `statsView={id:'__heatmap'}; drawStatsSection();`,
+  `openSessionAt('${ago(3)}');`,
 ]
 
 describe('PRECONDITION — this guard is only meaningful while colours are all var()', () => {

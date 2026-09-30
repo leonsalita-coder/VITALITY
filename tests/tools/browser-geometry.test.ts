@@ -296,25 +296,6 @@ const readHitBoxOverlaps = () => page.evaluate(() => {
     if (!groups.has(container)) groups.set(container, [])
     groups.get(container)!.push(el)
   })
-  /* button.addLift × #coachFab: REAL, found by this exact check —
-     not excluded because it's inert (unlike #vt-backdrop above). The
-     fixed, always-on-screen coach FAB (bottom-right, 56x56) overlaps
-     the dynamically-created "Add a lift" button (train.html:7560, the
-     one at the bottom of an exercise list) by roughly 27x56px whenever
-     that list is short enough to land there — a real dead zone, taps
-     in it silently go to the FAB. Deliberately NOT fixed in this pass:
-     .addLift is a reused base rule across three different buttons (two
-     photo-picker buttons via .photoBtnRow .addLift{flex:1} use it too),
-     it has no width of its own, and closing the gap means either
-     shrinking that shared rule — unaudited effect on the photo buttons
-     — or reserving a permanent keep-clear gutter for anything that can
-     scroll under a position:fixed element, which is a real design
-     question, not a one-line fix. Flagged to the user rather than
-     silently patched or silently ignored; this exclusion names the
-     exact pair so any OTHER, different overlap involving either
-     element still fails. */
-  const KNOWN_DEFERRED_PAIRS = new Set(['#coachFab.coachFab × button.addLift'])
-
   const overlaps: string[] = []
   for (const group of groups.values()) {
     const rects = group.map((el) => el.getBoundingClientRect())
@@ -323,9 +304,7 @@ const readHitBoxOverlaps = () => page.evaluate(() => {
         const a = rects[i], b = rects[j]
         if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) {
           const [descA, descB] = [describe(group[i]), describe(group[j])].sort()
-          const pair = `${descA} × ${descB}`
-          if (KNOWN_DEFERRED_PAIRS.has(pair)) continue
-          overlaps.push(pair)
+          overlaps.push(`${descA} × ${descB}`)
         }
       }
     }

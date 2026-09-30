@@ -105,7 +105,12 @@
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   ::selection { background:var(--signal); color:var(--signal-ink); }
   html { background:var(--e0); }
-  body { margin:0; min-height:100dvh; padding:0 0 calc(56px + env(safe-area-inset-bottom)); background:var(--e0); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+  /* Bottom padding reserves the coach FAB's full footprint (56px tall,
+     16px bottom offset, 16px clearance above it = 88px) so nothing the
+     page ever scrolls to its true end with can come to rest underneath
+     the fixed FAB. A fixed element floating over scrolling content is
+     correct; only content settling under it is the bug. */
+  body { margin:0; min-height:100dvh; padding:0 0 calc(88px + env(safe-area-inset-bottom)); background:var(--e0); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
   button { font-family:inherit; cursor:pointer; }
   button:disabled { cursor:default; }
   .num { font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
@@ -1027,6 +1032,12 @@
   .hmCell.l3 { background:var(--hm3); border-color:transparent; }
   .hmCell.l4 { background:var(--hm4); border-color:transparent; }
   .hmCell.today { box-shadow:0 0 0 2px var(--signal); }
+  /* The tapped-and-open cell, not --signal — today already owns that
+     ring, and two signal rings on the same grid undoes the point of the
+     neutral ramp. today's own ring wins when the two coincide (below),
+     rather than the two box-shadows fighting over the same property. */
+  .hmCell.selected { box-shadow:0 0 0 2px var(--hair-strong); }
+  .hmCell.today.selected { box-shadow:0 0 0 2px var(--signal); }
   /* Missed: a planned weekday (lib/train/routine.ts's RoutineAssignment)
      with nothing logged. The difference from an ordinary rest cell is
      SHAPE, not hue — the fill and hairline are UNCHANGED (decision 4's
@@ -1057,7 +1068,7 @@
      Taken out of grid flow (position:absolute) so it extends into the
      4px gap without moving any other cell or changing the grid's own
      42px+4px rhythm. */
-  .hmHit { position:absolute; left:50%; top:50%; width:44px; height:44px; transform:translate(-50%,-50%); padding:0; margin:0; border:none; background:none; cursor:default; }
+  .hmHit { position:absolute; left:50%; top:50%; width:44px; height:44px; transform:translate(-50%,-50%); padding:0; margin:0; border:none; background:none; cursor:pointer; }
   .hmLegend { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); line-height:var(--lh-micro); }
   /* Swatches reuse .hmCell's own l1–l4/missing/.hmRecord rules verbatim
      (same classes, same selectors) rather than restating any of their
@@ -7560,6 +7571,17 @@ function renderBody(){
   const add=document.createElement('button'); add.className='addLift';
   add.innerHTML='<span class="addLiftRing">'+svg('<path d="M12 5v14M5 12h14"/>')+'</span><span class="addLiftLabel">Add a lift</span>';
   add.onclick=()=> openSwap(null);
+  /* Instance-only, not the shared .addLift rule (.photoBtnRow's two
+     buttons use that same class and must not shrink): with a short
+     exercise list this button can land at the exact screen position
+     #coachFab always floats over (fixed, bottom-right, 56px + 16px
+     inset — measured live: a real ~27x56px overlap, a dead zone where
+     taps silently went to the FAB, not this button). body's own bottom
+     padding can't fix it — this button sits mid-page, not at the
+     document's true end, so nothing after it can pull it up. Reserving
+     --sp6 (32px) of right clearance keeps its own box out of the FAB's
+     footprint regardless of how short the list is. */
+  add.style.marginRight='var(--sp6)';
   wrap.appendChild(add);
   renderChecklist('#cooldownSlot', session.cooldown, 'cool', 'Cooldown');
   renderFinish(session);
@@ -9273,7 +9295,7 @@ function openPop(html, onMount){
   escHandler=ev=>{ if(ev.key==='Escape') closePop(); }; document.addEventListener('keydown',escHandler);
   if(onMount) onMount(scrim);
 }
-function closePop(){ $('#popRoot').innerHTML=''; if(escHandler){ document.removeEventListener('keydown',escHandler); escHandler=null; } }
+function closePop(){ $('#popRoot').innerHTML=''; if(escHandler){ document.removeEventListener('keydown',escHandler); escHandler=null; } const sel=document.querySelector('.hmCell.selected'); if(sel) sel.classList.remove('selected'); }
 const popHead = (eyebrow,title)=> '<div class="popHead"><div><div class="eyebrow">'+eyebrow+'</div><div class="popTitle">'+title+'</div></div><button class="popX" aria-label="Close">'+svg('<path d="M6 6l12 12M18 6L6 18"/>',' fill="none" stroke="currentColor"')+'</button></div>';
 
 /* ---- settings popup — just appearance for now ---------------------- */
@@ -11111,26 +11133,60 @@ function pointHTML(x, y, date, label, cls){
 function wirePoints(plot){
   plot.querySelectorAll('.sPoint').forEach(b=> b.onclick=()=>openSessionAt(b.dataset.date));
 }
-/* Opens what was actually logged on that day, across every lift. */
+/* Marks/clears the heatmap cell (if one is on screen for this date) as
+   selected — a neutral --hair-strong ring, NEVER --signal: today already
+   owns that, and two signal things on one grid breaks the rule the whole
+   neutral-ramp decision protected. .hmCell.today.selected keeps today's
+   own ring when the two coincide, rather than fighting over one box-shadow. */
+function selectHeatmapCell(date){
+  const hit=document.querySelector('.hmBody .hmHit[data-date="'+date+'"]');
+  const cell=hit&&hit.closest('.hmCell');
+  if(cell) cell.classList.add('selected');
+}
+/* Opens what was actually logged on that day, across every lift — or, for
+   a day with nothing logged, what the day actually was. "Silence is a
+   state": an ordinary rest day (today, or any day with no routine
+   assignment for its weekday) opens nothing at all, exactly as tapping a
+   chart point with no data here always has. A MISSED day (a planned
+   weekday, STATE.routineDays, with nothing logged) is not silence — it is
+   knowable and gets said, plainly, the same distinction the heatmap's own
+   struck-cell mark already draws. */
 function openSessionAt(date){
   const rows=[];
   Object.keys(STATE.history||{}).forEach(id=>{
-    (STATE.history[id]||[]).forEach(entry=>{
-      if(entry.date!==date || entry.off) return;
+    const full=(STATE.history[id]||[]).filter(x=>!x.off).slice().sort((a,b)=>a.date.localeCompare(b.date));
+    full.forEach(entry=>{
+      if(entry.date!==date) return;
       const sets=TrainEngine.workingSets(entry);
       if(!sets.length) return;
-      rows.push({ name:(STATE.exerciseNames||{})[id]||id, entry, sets });
+      rows.push({ id, name:(STATE.exerciseNames||{})[id]||id, entry, sets, full });
     });
   });
-  if(!rows.length) return;
-  openPop(popHead(fmtDate(date),'That session')
-    + '<div class="swapList">'+rows.map(r=>{
-        const kind=TrainEngine.entryKind(r.entry);
-        const detail = kind==='time' ? TrainEngine.topWorkingSeconds(r.entry)+'s'
-          : kind==='distance' ? TrainEngine.topWorkingMetres(r.entry)+'m'
-          : TrainEngine.topWorkingWeight(r.entry)+' '+STATE.unit;
-        return '<div class="swapItem"><span class="nm">'+escapeHtml(r.name)+'</span><span class="mu">'+r.sets.length+' × '+detail+'</span></div>';
-      }).join('')+'</div>');
+  if(rows.length){
+    const vol=r1((heatmapVolumeLevels().map[date])||0);
+    selectHeatmapCell(date);
+    openPop(popHead(fmtDate(date),'That session')
+      + '<div class="stats"><div class="stat"><div class="k">Volume</div><div class="v"><span class="num">'+vol+'</span> '+STATE.unit+'</div></div></div>'
+      + '<div class="swapList">'+rows.map(r=>{
+          const kind=TrainEngine.entryKind(r.entry);
+          const pr=entryIsPR(r.id, r.entry, r.full);
+          const setLine=s=> kind==='time' ? '<span class="num">'+(s.s||0)+'</span>s'
+            : kind==='distance' ? '<span class="num">'+(s.m||0)+'</span>m'
+            : '<span class="num">'+(s.w||0)+'</span> '+STATE.unit+'×<span class="num">'+(s.r||0)+'</span>';
+          return '<div class="swapItem">'
+            + (pr?'<span class="best-w" aria-label="record">'+svg('<path d="M12 3.5l2.5 5.1 5.6.8-4 3.9 1 5.6L12 16.9 6.9 18.9l1-5.6-4-3.9 5.6-.8z"/>')+'</span>':'')
+            + '<span class="nm">'+escapeHtml(r.name)+'</span>'
+            + '<span class="mu">'+r.sets.map(setLine).join(', ')+'</span>'
+            + '</div>';
+        }).join('')+'</div>');
+    return;
+  }
+  const [y,m,d]=date.split('-').map(Number);
+  const weekday=new Date(y,m-1,d).getDay();
+  if(!heatmapMissedDates({}, [date]).has(date)) return; // ordinary rest (or today) — silence, nothing opens
+  const routine=(STATE.routines||[]).find(r=>r.id===(STATE.routineDays||{})[weekday]);
+  selectHeatmapCell(date);
+  openPop(popHead(fmtDate(date),'Missed')+'<p class="emptyHist">'+escapeHtml(routine?routine.name:'A planned day')+' was scheduled — nothing logged.</p>');
 }
 /* THE default chart: estimated 1RM over time for one lift. */
 function drawE1rmTrend(){
@@ -11538,6 +11594,31 @@ function heatmapMissedDates(map, dates){
   });
   return planned;
 }
+/* Does this ONE entry (one exercise's session on one date) carry a
+   record? The per-entry core of heatmapPrDates() below, split out so
+   the day-breakdown popup (openSessionAt) can ask the SAME question
+   about a single lift — reusing the exact classifyPR-calling mechanics,
+   not a second record definition — instead of re-deriving it. `full` is
+   that exercise's own off-filtered, date-sorted history (as
+   heatmapPrDates() already builds it); `entry` must be a member of it. */
+function entryIsPR(id, entry, full){
+  const i=full.indexOf(entry);
+  if(i<0) return false;
+  const exLike={id};
+  const e1rmValid=e1rmValidFor(exLike);
+  const kind=kindFor(exLike);
+  const assistedFlag=flagFor(exLike,'assisted');
+  const historyUpToHere=full.slice(0,i+1);
+  const [y,m,d]=entry.date.split('-').map(Number);
+  const now=new Date(y,m-1,d,12).getTime();
+  return (entry.sets||[]).some(set=>{
+    const candidate={
+      kind: set.kind||kind, weight:set.w, reps:set.r, seconds:set.s, metres:set.m,
+      assisted: set.assisted||assistedFlag, warmup:set.warmup, fail:set.fail, e1rmValid,
+    };
+    return TrainEngine.classifyPR(historyUpToHere, candidate, now).kind!==null;
+  });
+}
 /* Every date carrying a record, driven from the SAME classifyPR the live
    session's PR badge already uses (train.html:7272's prFor) — not a
    second record definition. Walked historically: for each exercise, each
@@ -11551,25 +11632,9 @@ function heatmapPrDates(){
   const prDays=new Set();
   Object.keys(STATE.history||{}).forEach(id=>{
     const full=(STATE.history[id]||[]).filter(x=>!x.off).slice().sort((a,b)=>a.date.localeCompare(b.date));
-    if(!full.length) return;
-    const exLike={id};
-    const e1rmValid=e1rmValidFor(exLike);
-    const kind=kindFor(exLike);
-    const assistedFlag=flagFor(exLike,'assisted');
-    full.forEach((entry,i)=>{
+    full.forEach(entry=>{
       if(prDays.has(entry.date)) return; // already marked from another exercise this same day
-      const historyUpToHere=full.slice(0,i+1);
-      const [y,m,d]=entry.date.split('-').map(Number);
-      const now=new Date(y,m-1,d,12).getTime();
-      (entry.sets||[]).some(set=>{
-        const candidate={
-          kind: set.kind||kind, weight:set.w, reps:set.r, seconds:set.s, metres:set.m,
-          assisted: set.assisted||assistedFlag, warmup:set.warmup, fail:set.fail, e1rmValid,
-        };
-        const result=TrainEngine.classifyPR(historyUpToHere, candidate, now);
-        if(result.kind!==null){ prDays.add(entry.date); return true; }
-        return false;
-      });
+      if(entryIsPR(id, entry, full)) prDays.add(entry.date);
     });
   });
   return prDays;
@@ -11599,7 +11664,7 @@ function renderHeatmap(){
   const head=CAL_WD.map(w=>'<div class="hmWd">'+w+'</div>').join('');
   const body=cells.map(c=>
     '<div class="hmCell'+(c.level?' l'+c.level:'')+(c.isToday?' today':'')+(c.missed?' missed':'')+'" data-vol="'+(map[c.key]||0)+'">'
-    + '<button class="hmHit" data-date="'+c.key+'" aria-label="'+fmtDate(c.key)+(c.record?', record':'')+'"></button>'
+    + '<button class="hmHit" data-date="'+c.key+'" aria-label="'+fmtDate(c.key)+(c.record?', record':'')+(c.missed?', missed':'')+'"></button>'
     + (c.record?'<span class="hmRecord" data-vol="'+(map[c.key]||0)+'"></span>':'')
     + '</div>'
   ).join('');
@@ -11610,6 +11675,10 @@ function renderHeatmap(){
     + '<span class="hmLegendGap"></span><span class="hmCell missed hmLegendSwatch"></span>Missed'
     + '<span class="hmLegendGap"></span><span class="hmCell l2 hmLegendSwatch"><span class="hmRecord" data-vol="1"></span></span>Record</div>';
   plot.innerHTML='<div class="hmHead">'+head+'</div><div class="hmBody">'+body+'</div>'+legend;
+  /* Why the cells are buttons: open the day breakdown for whatever that
+     cell actually was — openSessionAt() already knows how to render a
+     session, a miss, or nothing at all (rest), keyed only on the date. */
+  plot.querySelectorAll('.hmHit').forEach(b=> b.onclick=()=>openSessionAt(b.dataset.date));
 }
 function drawSessionsCal(){
   const plot=$('#statsPlot'), cap=$('#statsCap');
