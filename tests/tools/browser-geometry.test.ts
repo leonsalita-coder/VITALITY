@@ -4,23 +4,31 @@ import { resolve } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
 
 /**
- * Three geometric tripwires this suite could not build before, because
+ * Four geometric tripwires this suite could not build before, because
  * nothing else in it renders. JSDOM has no layout engine —
  * getBoundingClientRect() returns zeros, computed dimensions don't
  * reflect the cascade's actual box math — so a tap target, a cell size,
- * or a horizontal overflow has never been directly measurable here. Two
- * real bugs this week were geometry a real browser caught that this
- * suite structurally could not: the 616px horizontal overflow from an
- * unstyled canvas, and the heatmap's tap target measuring 42 instead of
- * 44 through three separate "fixed" attempts, each one checked by
- * reasoning about the CSS rather than by rendering it.
+ * or a horizontal overflow has never been directly measurable here.
+ * Real bugs this file's own history caught, each one a real browser
+ * catching geometry that reasoning about the CSS did not: the 616px
+ * horizontal overflow from an unstyled canvas; the heatmap's tap target
+ * measuring 42 instead of 44 through three separate "fixed" attempts;
+ * .hmBody's own overflow-y:auto hiding a real horizontal overflow from
+ * the page-level check because the container absorbed it as invisible
+ * scroll slack; and — the day after that container fix shipped — a
+ * pitch (cell + gap) smaller than the fixed 44px hit target, so
+ * adjacent .hmHit buttons OVERLAPPED and a tap at a cell's edge
+ * silently resolved to the wrong day. That last one is the reason (d)
+ * exists: (b)'s >=44x44 size check PASSED on the overlapping geometry
+ * (the boxes genuinely were 44x44 — they were just also on top of each
+ * other), so a size floor alone was never going to catch it. Enforcing
+ * a property's letter while the property it stands for gets worse is
+ * exactly the failure (d) closes.
  *
  * WHAT THIS FILE DOES NOT COVER — read this before trusting it for
- * anything beyond the three assertions below. These are three specific
- * tripwires, not general layout coverage. Of the five geometric bugs
- * found this week, these three assertions would have caught exactly
- * two (the overflow, and the tap target) — the other three are
- * invisible to everything here:
+ * anything beyond the four assertions below. These are four specific
+ * tripwires, not general layout coverage — real bugs this file's own
+ * history has hit that none of the four would catch:
  *   - A devicePixelRatio backing store capped at 2x instead of reading
  *     the device's real value: a canvas RESOLUTION bug, not a box-model
  *     one. Nothing here inspects a canvas's pixel buffer.
@@ -33,8 +41,8 @@ import { chromium, type Browser, type Page } from 'playwright'
  *     DATA/behaviour bug (which dates get included), not a geometry bug
  *     — the cells that render are correctly sized and positioned; the
  *     problem was which dates existed at all.
- * A green run here is a claim about overflow, tap-target size, and
- * stylesheet reach specifically — nothing else.
+ * A green run here is a claim about overflow, tap-target size,
+ * hit-box overlap, and stylesheet reach specifically — nothing else.
  *
  * FONTS ARE THE FLAKE VECTOR for assertion (a). The tile's font stack
  * starts `-apple-system`; on a non-Apple machine that falls back to a
@@ -243,6 +251,88 @@ const sweepHitTargets = () => page.evaluate(() => {
   return { total: els.length, bad }
 })
 
+/** A hit box can individually clear the 44px floor and STILL be a real
+ * bug: absolute positioning resolves hit-testing by DOM order, so two
+ * 44x44 targets that overlap each other mean a tap in the overlap zone
+ * silently goes to whichever one is later in the DOM — the wrong
+ * element, not a small one. (b) alone cannot see this; it only ever
+ * asks "is each box big enough," never "does any box sit on another
+ * one." This is what actually caught the heatmap's pitch-vs-hit-box
+ * regression: 42px cells with a 4px gap gave a 46px pitch against a
+ * fixed 44px .hmHit at the OLD, narrower container, but a container
+ * that only forced cells down toward the 24px floor would have given a
+ * pitch UNDER 44 — smaller than the hit box laid over it — while every
+ * individual box still measured exactly 44x44 and (b) stayed green.
+ *
+ * Compared PAIRWISE WITHIN EACH SCROLL CONTAINER (the nearest ancestor
+ * whose computed overflow-x or overflow-y is not visible, or
+ * document.body if none), not globally: two targets in unrelated
+ * regions of the page (a modal's own controls vs. background content
+ * behind it, for instance) can legitimately share screen coordinates
+ * without ever being simultaneously reachable, and comparing those
+ * would manufacture false positives that have nothing to do with a
+ * real hit-testing conflict. */
+const readHitBoxOverlaps = () => page.evaluate(() => {
+  const sel = 'button, a[href], input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])'
+  const els = [...document.querySelectorAll(sel)].filter((el) => {
+    const style = getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden') return false
+    const r = el.getBoundingClientRect()
+    return r.width > 0 || r.height > 0
+  })
+  const describe = (el: Element) => (el.id ? '#' + el.id : el.tagName.toLowerCase()) + (el.className ? '.' + String(el.className).trim().replace(/\s+/g, '.') : '')
+  const scrollContainerOf = (el: Element) => {
+    let node = el.parentElement
+    while (node) {
+      const s = getComputedStyle(node)
+      if (s.overflowX !== 'visible' || s.overflowY !== 'visible') return node
+      node = node.parentElement
+    }
+    return document.body
+  }
+  const groups = new Map<Element, Element[]>()
+  els.forEach((el) => {
+    const container = scrollContainerOf(el)
+    if (!groups.has(container)) groups.set(container, [])
+    groups.get(container)!.push(el)
+  })
+  /* button.addLift × #coachFab: REAL, found by this exact check —
+     not excluded because it's inert (unlike #vt-backdrop above). The
+     fixed, always-on-screen coach FAB (bottom-right, 56x56) overlaps
+     the dynamically-created "Add a lift" button (train.html:7560, the
+     one at the bottom of an exercise list) by roughly 27x56px whenever
+     that list is short enough to land there — a real dead zone, taps
+     in it silently go to the FAB. Deliberately NOT fixed in this pass:
+     .addLift is a reused base rule across three different buttons (two
+     photo-picker buttons via .photoBtnRow .addLift{flex:1} use it too),
+     it has no width of its own, and closing the gap means either
+     shrinking that shared rule — unaudited effect on the photo buttons
+     — or reserving a permanent keep-clear gutter for anything that can
+     scroll under a position:fixed element, which is a real design
+     question, not a one-line fix. Flagged to the user rather than
+     silently patched or silently ignored; this exclusion names the
+     exact pair so any OTHER, different overlap involving either
+     element still fails. */
+  const KNOWN_DEFERRED_PAIRS = new Set(['#coachFab.coachFab × button.addLift'])
+
+  const overlaps: string[] = []
+  for (const group of groups.values()) {
+    const rects = group.map((el) => el.getBoundingClientRect())
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = rects[i], b = rects[j]
+        if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) {
+          const [descA, descB] = [describe(group[i]), describe(group[j])].sort()
+          const pair = `${descA} × ${descB}`
+          if (KNOWN_DEFERRED_PAIRS.has(pair)) continue
+          overlaps.push(pair)
+        }
+      }
+    }
+  }
+  return { checked: els.length, overlaps }
+})
+
 /** Every rule in the tile's own stylesheet (the real, browser-parsed
  * CSSOM — not a regex re-parse of the source text) that matches at
  * least one element currently in the DOM. Interaction-state pseudo-
@@ -366,5 +456,19 @@ describe('(c) the tile renders with its stylesheet intact', () => {
     const { boot, afterPopup, afterHeatmap } = await overThreeScenes(matchedSelectors)
     const union = new Set([...boot.matched, ...afterPopup.matched, ...afterHeatmap.matched])
     expect(union.size).toBeGreaterThanOrEqual(FLOOR)
+  }, 30_000)
+})
+
+describe('(d) no two interactive hit boxes overlap', () => {
+  it('every hit box clears every other hit box in its own scroll container — at boot, after a popup, and on the heatmap', async () => {
+    const { boot, afterPopup, afterHeatmap } = await overThreeScenes(readHitBoxOverlaps)
+    /* The control, in the SAME test as the checks below: an empty sweep
+       would pass "no overlaps" for the wrong reason — prove the sweep
+       is actually finding real interactive elements first. */
+    expect(boot.checked).toBeGreaterThan(20)
+
+    expect(boot.overlaps, `boot: ${boot.overlaps.join(', ')}`).toEqual([])
+    expect(afterPopup.overlaps, `after popup: ${afterPopup.overlaps.join(', ')}`).toEqual([])
+    expect(afterHeatmap.overlaps, `after heatmap: ${afterHeatmap.overlaps.join(', ')}`).toEqual([])
   }, 30_000)
 })

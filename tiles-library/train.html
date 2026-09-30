@@ -413,6 +413,14 @@
   .ovCard:hover::after { opacity:1; }
   .ovCard:hover { border-color:var(--hair-strong); transform:translateY(-3px) scale(1.02); box-shadow:0 16px 30px -18px rgba(0,0,0,.6); }
   .chart-card { margin-top:18px; border:1px solid var(--hair); border-radius:var(--r-lg); padding:18px 16px 14px; background:var(--e1); }
+  /* Full-bleed only when it holds the heatmap — see the .hmHead/.hmBody
+     comment below for the measured widths and why. Cancels .sheet's own
+     20px side padding (the card's border/background now reach .sheet's
+     inner edge instead of sitting inset from it) and shrinks the card's
+     OWN side padding from 16px to 8px, so the grid gets real width
+     without the card's frame disappearing — it's still a bordered card,
+     just a wider one, the way a calendar grid wants to be. */
+  .chart-card:has(.hmBody) { margin-left:-20px; margin-right:-20px; padding-left:8px; padding-right:8px; }
 
   /* 9 · sheet — 2 rules */
   .sheet { position:relative; width:100%; background:var(--e1); border:1px solid var(--hair); border-radius:var(--r-lg); padding:22px 20px 24px; margin-bottom:var(--sp4); opacity:0; transform:translateY(10px); animation:panelRise var(--d4) var(--ease-momentum) forwards; }
@@ -969,34 +977,43 @@
      interaction are later slices. A fixed 53-week trailing window, not
      data-extent — see renderHeatmap()'s own comment for why.
      ==================================================================== */
-  /* Column tracks are minmax(24px,42px), not a flat 42px: the tile's own
-     chrome (.shell/.sheet/.chart-card padding) leaves #statsPlot only
-     ~269px wide on a real 393px phone, and 7*42px+6*4px gap (318px)
-     does not fit inside that — a real, previously invisible overflow
-     (tests/tools/browser-geometry.test.ts's nested-container check
-     caught it: .hmBody's own overflow-y:auto silently promotes
-     overflow-x to auto too, per the CSS overflow spec, so the excess
-     was absorbed as invisible horizontal scroll slack, never a visible
-     scrollbar). 42px is the target and 24px is the decided hard floor
-     ("do not build a size below 24px") — minmax lets the track shrink
-     between those bounds to whatever the real container provides,
-     rather than a fixed number that assumes a width no build of this
-     tile actually has.
+  /* Column tracks are minmax(24px,42px), not a flat 42px — a container
+     narrower than 7*42px+6*4px gap (318px) must still not overflow, and
+     42px is the target with 24px the decided hard floor ("do not build
+     a size below 24px"), never a fixed number that assumes more room
+     than a given container actually has.
 
-     10px inline padding, on both rows: the tap target (.hmHit, below)
-     is a FIXED 44px regardless of cell size, by design (decision 5's
-     two-element pattern) — at the 24px floor that overhangs its own
-     cell by (44-24)/2 = 10px on every side, and the edge columns' own
-     overhang would otherwise bleed straight past the grid's outer edge
-     (clipped by overflow-x:hidden, or — before that was added —
-     silently widening scrollWidth past clientWidth again, the same
-     failure mode this whole comment opens with). The padding reserves
-     exactly that worst-case room inside the clipping boundary, so the
-     hit target always has space to render and stay tappable no matter
-     how far a cell has shrunk. */
-  .hmHead { display:grid; grid-template-columns:repeat(7,minmax(24px,42px)); gap:4px; justify-content:center; padding:0 10px; margin-bottom:8px; }
+     The container itself was widened, not just the cell size shrunk:
+     .chart-card:has(.hmBody) above breaks the heatmap's card out of
+     .sheet's 20px side padding specifically, because the real
+     constraint nothing previously encoded is PITCH (cell + gap) >= HIT
+     BOX SIZE — with a fixed 44px .hmHit and this 4px gap that means
+     cells >= 40px, needing >= 304px of content width, and the original
+     ~269px #statsPlot (before this container fix — .shell/.sheet/
+     .chart-card padding all stacked against it) could never clear that,
+     whatever the cell size. A 42px cell with a plain 42px pitch there
+     wasn't a slightly-small tap target, it was neighbouring .hmHit
+     buttons OVERLAPPING by several px — a hit test at the edge of one
+     cell silently resolved to the NEXT day (or the same weekday a week
+     later, vertically), a wrong-day bug measured live and worse than
+     the undersized-target bug it replaced. See
+     tests/tools/browser-geometry.test.ts's "(d) no two hit boxes
+     overlap" for the invariant that now guards this directly, instead
+     of a bare >=44x44 size check that reads as passing right up to the
+     moment boxes start overlapping.
+
+     Real, measured result on the widened container: #statsPlot reaches
+     325px, cells resolve to the full 42px target (the grid's own cap,
+     not a compromise), pitch is 46px — a clear 2px gap between every
+     adjacent .hmHit on both axes, not just clearing the >=44 floor.
+     The 2px inline padding here is a small fixed edge inset, not a
+     floor-case overhang reservation: at a 42px cell the tap target
+     only overhangs its own cell by (44-42)/2 = 1px, so this is comfortable
+     room, not the tight worst-case math the previous, narrower
+     container needed. */
+  .hmHead { display:grid; grid-template-columns:repeat(7,minmax(24px,42px)); gap:4px; justify-content:center; padding:0 2px; margin-bottom:8px; }
   .hmWd { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:var(--lh-micro); }
-  .hmBody { display:grid; grid-template-columns:repeat(7,minmax(24px,42px)); gap:4px; justify-content:center; max-height:60vh; padding:0 10px; overflow-x:hidden; overflow-y:auto; }
+  .hmBody { display:grid; grid-template-columns:repeat(7,minmax(24px,42px)); gap:4px; justify-content:center; max-height:60vh; padding:0 2px; overflow-x:hidden; overflow-y:auto; }
   /* .hmCell is the GRID ITEM — sized by its column track (24-42px, see
      above), untouched by the tap-target requirement below. It carries
      the VISUAL fill/border only; it is not itself the interactive
