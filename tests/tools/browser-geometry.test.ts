@@ -117,7 +117,12 @@ async function overThreeScenes<T>(measure: () => Promise<T>): Promise<{ boot: T;
   await page.evaluate(() => { if (typeof (window as any).closePop === 'function') (window as any).closePop() })
   await page.waitForTimeout(100)
 
-  await page.evaluate(() => { (window as any).statsView = { id: '__heatmap' }; (window as any).drawStatsSection() })
+  /* statsView is `let`-declared at the tile's script top level, so it
+     never attaches to `window` — assigning `(window as any).statsView`
+     sets an unrelated property and silently does nothing to the real
+     variable drawStatsSection() closes over. The only real way in is
+     the same one a user has: click the actual "Grid" chip. */
+  await page.evaluate(() => (document.querySelector('[data-id="__heatmap"]') as HTMLElement)?.click())
   await page.waitForTimeout(100)
   const afterHeatmap = await measure()
 
@@ -128,6 +133,93 @@ const readOverflow = () => page.evaluate(() => ({
   scrollWidth: document.documentElement.scrollWidth,
   clientWidth: document.documentElement.clientWidth,
 }))
+
+/** The page-level check above reads documentElement.scrollWidth, which
+ * is blind to overflow trapped inside a scrolling container: once an
+ * element establishes its own scrollable box (any overflow-x/-y other
+ * than visible — .hmBody sets overflow-y:auto, which the CSS overflow
+ * spec computes to overflow-x:auto too, since a used value of visible
+ * paired with a non-visible sibling axis is not allowed), that box
+ * absorbs its own children's overflow and never bubbles up to make the
+ * document itself wider. The heatmap is the newest, most layout-heavy
+ * thing in the tile and the one region living inside such a container —
+ * exactly the part (a) cannot see.
+ *
+ * The promotion rule is symmetric, though: .chipRow authors only
+ * overflow-x:auto (an intentional horizontal-scrolling tab strip, hidden
+ * scrollbar) and gets its own overflow-y silently promoted to auto by
+ * the very same spec rule — so computed style alone cannot tell
+ * ".hmBody, promoted sideways by accident" from ".chipRow, scrolling
+ * sideways on purpose." A scrollWidth > clientWidth is exactly what
+ * makes .chipRow work; asserting equality there would fail a working
+ * feature, not catch a bug. So this checks which axis was actually
+ * AUTHORED in the stylesheet (the declared longhand on the matching
+ * rule, before promotion) rather than the computed value: only an
+ * element whose declared overflow-x is itself 'auto' or 'scroll' — a
+ * real, intentional horizontal-panning container — is treated as
+ * "this axis scrolling on purpose." Declaring overflow-x:hidden does
+ * NOT exempt an element: hidden means "this must never overflow
+ * sideways," which is exactly the claim this check exists to verify —
+ * a hidden container whose content still scrollWidth's past its own
+ * clientWidth is silently clipping a real bug, not a feature. (This
+ * distinction matters concretely: .hmBody itself now declares
+ * overflow-x:hidden, having been the actual container this check first
+ * caught overflowing — excluding "anything with overflow-x declared at
+ * all" would exempt it from its own fix and this test could never
+ * catch a regression there again.) */
+const readNestedOverflow = () => page.evaluate(() => {
+  const xScrollSelectors: string[] = []
+  const isScrollValue = (v: string) => v === 'auto' || v === 'scroll'
+  for (const sheet of document.styleSheets) {
+    let rules: CSSRuleList
+    try { rules = sheet.cssRules } catch { continue }
+    ;(function walk(list: any) {
+      for (const r of list) {
+        if (r.selectorText) {
+          if (r.style && isScrollValue(r.style.overflowX)) {
+            xScrollSelectors.push(...String(r.selectorText).split(',').map((s: string) => s.trim()).filter(Boolean))
+          }
+        } else if (r.cssRules) walk(r.cssRules) // a true grouping rule (@media, …) — CSSStyleRule itself now always exposes a (usually empty) cssRules for CSS Nesting, so selectorText must be checked first or every leaf rule is mistaken for a container and skipped
+      }
+    })(rules)
+  }
+  const authoredHorizontalScroll = (el: Element) => {
+    if (isScrollValue((el as HTMLElement).style.overflowX)) return true
+    return xScrollSelectors.some((sel) => { try { return el.matches(sel) } catch { return false } })
+  }
+
+  /* #vt-backdrop: the fixed, full-viewport decorative mountain/particle
+     layer — its own overflow:hidden already clips it, it's
+     aria-hidden and pointer-events:none (nothing to click, nothing
+     visible beyond its edge), and spawnParticles() places each
+     particle at a RANDOM left% plus a randomized ±15px drift
+     transform, so how far any given boot's particles reach past the
+     edge is intentionally non-deterministic. Asserting exact equality
+     here would just make the test flaky over cosmetic, invisible,
+     unclickable content — not catch a real geometry bug. Named
+     explicitly, the same way the coachFab orphan-hook allowlist in
+     static-markup-css.test.ts names its exclusions, rather than a
+     broad heuristic that could hide something that does matter. */
+  const INERT_DECORATIVE_IDS = new Set(['vt-backdrop'])
+
+  const offenders: string[] = []
+  let checked = 0
+  document.querySelectorAll('*').forEach((el) => {
+    if (INERT_DECORATIVE_IDS.has(el.id)) return
+    const style = getComputedStyle(el)
+    if (style.overflowX === 'visible') return
+    if (authoredHorizontalScroll(el)) return // e.g. .chipRow — horizontal scroll is the point, not a bug
+    checked++
+    if (el.scrollWidth !== el.clientWidth) {
+      offenders.push(
+        (el.id ? '#' + el.id : el.tagName.toLowerCase()) +
+        (el.className ? '.' + String(el.className).trim().replace(/\s+/g, '.') : '') +
+        ` (scrollWidth=${el.scrollWidth}, clientWidth=${el.clientWidth})`
+      )
+    }
+  })
+  return { checked, offenders }
+})
 
 /** Every interactive element's real hit box, at the page's CURRENT
  * state. Not derived from declarations (scripts/measure-targets.mjs
@@ -198,6 +290,19 @@ describe('(a) no horizontal overflow at 393px', () => {
     expect(afterPopup.scrollWidth, 'after opening and closing a popup').toBe(afterPopup.clientWidth)
     expect(afterHeatmap.scrollWidth, 'after opening the heatmap').toBe(afterHeatmap.clientWidth)
   }, 30_000)
+
+  it('the same holds inside every scrolling container, not just the page — closes the .hmBody blind spot', async () => {
+    const { boot, afterPopup, afterHeatmap } = await overThreeScenes(readNestedOverflow)
+    /* The control: prove the sweep actually found a real scrolling
+       container on the heatmap scene (.hmBody itself, at minimum) —
+       a walk that matched zero elements would pass "no offenders" for
+       the wrong reason. */
+    expect(afterHeatmap.checked, 'non-visible-overflow-x containers found on the heatmap scene').toBeGreaterThan(0)
+
+    expect(boot.offenders, `boot: ${boot.offenders.join(', ')}`).toEqual([])
+    expect(afterPopup.offenders, `after popup: ${afterPopup.offenders.join(', ')}`).toEqual([])
+    expect(afterHeatmap.offenders, `after heatmap: ${afterHeatmap.offenders.join(', ')}`).toEqual([])
+  }, 30_000)
 })
 
 describe('(b) every interactive element clears the 44px tap-target minimum — a RATCHET, not a gate', () => {
@@ -236,12 +341,17 @@ describe('(c) the tile renders with its stylesheet intact', () => {
      because a rule either reaches something on one of these screens or
      it doesn't; summing would double-count nothing meaningful. Floor
      chosen from a real measurement, not a guess: the union across
-     these three scenes measured 156 (out of 470 total selectors in the
-     stylesheet) on the tile as it stands today. 120 is comfortably
-     below that — real margin for which exact selectors match without
-     the floor itself drifting — and nowhere near what a near-total
-     deletion would produce (a handful of :root-only rules, effectively
-     0 matched). */
+     these three scenes measured 171 (out of 473 total selectors in the
+     stylesheet) on the tile as it stands today — re-measured after
+     fixing overThreeScenes()'s heatmap switch (it was setting
+     `window.statsView`, a no-op against the tile's actual `let
+     statsView`, so every earlier number here was measured without the
+     heatmap ever really rendering; clicking the real "Grid" chip does
+     reach it, and the union rose from 156 once it did). 120 is
+     comfortably below that — real margin for which exact selectors
+     match without the floor itself drifting — and nowhere near what a
+     near-total deletion would produce (a handful of :root-only rules,
+     effectively 0 matched). */
   const FLOOR = 120
 
   it('checks a meaningful number of selectors', async () => {

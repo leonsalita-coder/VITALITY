@@ -112,33 +112,43 @@ satisfies "reads in greyscale" by construction, provided the shape
 distinction is genuinely visible without color — worth a real greyscale
 render check once built, not just an assumption from the design.
 
-**Signal scarcity — decided, not the elevation ramp.** The grid is a
-low-opacity tint ramp of the single `--signal` hue. **Full-strength
-`--signal` appears only on the top intensity band** — across a year,
-five to ten days actually wear it at full strength; everything else is
-a lower-opacity tint of the same hue, which is what keeps "signal is
-scarce" true at 365-cell scale rather than diluting it into ambient
-color. The `--e0`–`--e4` elevation ramp was considered and rejected: that
-range is too narrow to read as a *scale* against a near-black
-background — it's built for depth/layering, not for encoding a
-continuous quantity, and forcing it to do both would make neither
-legible.
+**Signal scarcity — SUPERSEDED, not just decided.** This paragraph
+originally settled on a low-opacity tint ramp of `--signal`,
+full-strength only on the top band. **A later decision (decision 2 of
+the five that unblocked the first build) overrode this outright: the
+ramp is `--hm1`–`--hm4`, a new, wholly neutral four-step ramp — not a
+signal tint at any opacity.** `--signal` is spent exactly once per
+grid, on *today*, via a box-shadow ring — a time marker, not an
+intensity one, deliberately on a different CSS property so it can never
+collide with the value-colour guard (`computed-color-guard.test.ts`).
+The reasoning that motivated the ORIGINAL choice — keep signal
+meaningfully scarce at hundreds-of-cells scale — still holds; decision 2
+just answered it more strictly than a low-opacity tint could: zero
+tint anywhere in the ramp is stricter scarcity than "tinted, but
+faintly." The elevation-ramp rejection immediately below is unaffected
+by this — `--e0`–`--e4` was rejected as a data-encoding ramp regardless
+of which OTHER ramp replaced it, and `--hm1`–`--hm4` was built new for
+the reason this paragraph already gives.
 
-**Rest vs. missed — proposed:** `STATE.finishedDates` (trained) and each
-weekday's `streakTarget` (the athlete's own stated weekly target,
-`lib/tiles/weights.ts`-adjacent / `weeklyTarget()` in the tile) together
-already distinguish "the athlete said this is a planned rest pattern" —
-no, they don't, directly: `finishedDates` says *trained or not*, and
-`off:true` on a session (a rest day, per `session.ts`'s `sessionState`)
-is a **decision the athlete made**, already distinct from an **empty
-day** (`not_started`) per the existing `sessionState`/`contributionOf`
-logic (`lib/train/session.ts`). So this is **already derivable, not
-new**: a day is `rest` when its session has `off:true`, `missed` when it
-has neither a logged session nor an explicit rest flag and fell on a day
-the weekly target implies training was expected. Rendered as a quiet,
-non-scolding mark — proposed: a small neutral dot or outline distinct
-from both "trained" and "rest," at low visual weight. **Open decision:**
-the exact mark.
+**Rest vs. missed — decided and built, on a different mechanism than
+proposed here.** This paragraph originally proposed deriving "missed"
+from `weeklyTarget()`/`streakTarget` — a stated sessions-*per-week*
+COUNT, with no concept of which specific day. **What was actually built
+uses `STATE.routineDays` instead** (`lib/train/routine.ts`'s
+`RoutineAssignment` — a real, athlete-editable weekday-to-routine map,
+confirmed wired into the live tile via `applyRoutine()`'s pre-fill
+path, not dead code). This is a stricter, more specific signal than the
+original proposal: `weeklyTarget()` only ever says "how many," never
+"which ones," so a `streakTarget`-based "missed" mark would have to
+guess which weekdays a count-only target implied — `routineDays` names
+the days directly, with no guessing. A weekday with no routine
+assigned is a free day, exactly as `lib/train/routine.ts`'s own doc
+comment states, and reads identically to an ordinary rest day. The mark
+itself is decided too, not still open: a 1.5px diagonal `--fail` line
+over the cell's existing hairline-and-no-fill, shape rather than hue —
+confirmed to survive greyscale by computing standard luminance for
+`--fail` against the page background (~149 vs ~3 on a 0–255 scale, a
+wide margin) rather than assumed from the colour choice alone.
 
 ---
 
@@ -283,17 +293,51 @@ simultaneous per-lift states.
 
 ## §5 — Zoom
 
-**Entirely new — today's `.cal` is quarter-only, full stop.** Year,
-month, and week views don't exist in any form to extend.
+**Superseded by the built first slice — this section as originally
+written described a shrink-to-fit model that was never built and is
+now known not to be the right one.** The original plan: a fixed
+viewport, cells shrinking from 13px (quarter) down to ~4px (year) to
+fit more days in the same pixel budget, the way today's `.cal` shrinks
+per quarter page. **What actually shipped (decision 1, then confirmed
+by §10's probe and the built cell) is the opposite mechanism: more time
+in view means more scrolling, not smaller cells — cell size does not
+respond to how much history is loaded.**
 
-Cost is mostly in §1's derivation: `acuteChronicSeries` needs to run
-efficiently at whatever the widest zoom (year, or multi-year per §17)
-requires, since the per-day EWMA pass is the expensive part regardless
-of how many cells are actually rendered. Proposed approach: compute the
-series once for the full requested range on zoom/period change, and let
-zoom purely re-render from that cached series rather than re-deriving
-per zoom level — a rendering-layer concern, not a new data concern,
-once `acuteChronicSeries` exists.
+Cell size DOES still vary, but along a different, narrower axis than
+either the original proposal or the first cut of this rewrite assumed:
+CSS grid column tracks are `minmax(24px,42px)`, not a flat 42px, because
+the tile's own chrome (`.shell`/`.sheet`/`.chart-card` padding) leaves
+real phones with less width than 7×42px+gaps needs — a genuine
+horizontal overflow that `tests/tools/browser-geometry.test.ts`'s
+nested-scroll-container check caught directly (measured: 269px real
+content width against 393px viewport, on a build that assumed ~318px
+was available). So "42px, do not build a size below 24px" is a real
+*range* the grid resolves into per the container it actually gets, not
+a constant used everywhere — 42px is the ceiling, 24px is the floor
+that must never be crossed, and the true rendered size in between is
+whatever the real device's content width divides into. This is
+still not the shrink-to-fit model above: it responds to the viewport's
+own width once, at layout time, not to how many days/weeks are loaded —
+that axis genuinely is fixed, per the paragraph above.
+
+This isn't a smaller change than it looks — it retires "zoom" as this
+section originally meant it. There is no pixel budget being fit into,
+so there is no shrink-to-fit level to pick. What the first slice
+actually built is a single **fixed trailing window** (53 weeks,
+`HM_WINDOW_WEEKS` in `renderHeatmap()`) — not yet a variable range a
+person can widen or narrow at all. **"Zoom," if the word is kept going
+forward, means something different now: which time range is loaded and
+scrollable, at the one fixed cell size** — a week view and a year view
+differ in how much history is fetched and how far the grid scrolls, not
+in how large a cell is. Whether that's worth calling "zoom" at all, or
+just "range," is an open naming question, not a design one — the
+geometry itself is decided.
+
+`acuteChronicSeries` (§1) is unaffected by this change: it still needs
+to run once per requested range rather than per visible cell, for
+exactly the cost reason originally stated — the per-day EWMA pass is
+the expensive part regardless of how many cells render, and that's true
+whether the range is fixed (as built) or eventually made variable.
 
 ---
 
@@ -401,31 +445,49 @@ scale — directly connects to §10.
 
 ## §10 — What degrades at which zoom
 
-Honest accounting, not a guarantee:
+**Superseded by §5's correction — there is no longer a "which zoom" for
+things to degrade AT.** This section originally answered "what's still
+legible as cells shrink from 13px down to ~4px." Cells don't shrink
+*with time range* now; every cell in a given render is the same size
+regardless of how far back it sits or how far someone has scrolled to
+reach it — the axis this section originally worried about (zooming out
+to see more history) genuinely doesn't exist in the shipped geometry.
+(A cell CAN still be smaller than 42px — see §5's correction — but only
+because the real device's content width forced it there at layout time,
+never because of how much is loaded or how far scrolled. That's a
+different variable than the one this section is about.) Filed here as
+record of the correction, not deleted, since the next person reading
+§1's still-open channel questions (shape, two-a-day split, overlay
+mark, note indicator) needs to know this constraint no longer applies
+to any of them.
 
-- **Year (~365 cells, ~4px each per the spec's own estimate):** color
-  intensity survives (it's the whole cell). Shape/fill distinction
-  (§1's second channel) is very likely **not legible** at 4px — a filled
-  vs. outlined square is a marginal distinction even at 13px (today's
-  cell size), let alone 4px. Overlay marks, note indicators, and the
-  two-a-day split treatment are almost certainly invisible at this
-  scale. **What carries the signal instead at year zoom: the arc
-  sentence and the phase band** — both operate at the period level, not
-  the cell level, so they're unaffected by cell size. This is the
-  honest answer the spec asked for, not a guarantee that quietly fails:
-  **at year zoom, only color intensity and (per §3) the phase band
-  underneath are reliably legible; everything else is real but
-  effectively decorative at that scale, and shouldn't be relied on to
-  communicate anything the arc sentence or phase band doesn't also say.**
-- **Quarter (today's existing scale, 13px):** shape/fill distinction and
-  the two-a-day split are legible (today's cells are already this size).
-  Overlay marks and note indicators need testing at real scale before
-  claiming they work — proposed, not confirmed.
-- **Month/week:** cells large enough that every channel proposed above
-  should be legible; the open question shifts from "does it fit" to
-  "is five simultaneous signals overwhelming even when each is
-  individually visible" — a design judgment call for whoever reviews
-  the built component, not something resolvable in a spec.
+**What's actually true now, in its place:** every channel §1 and §9
+describe is evaluated at the ONE cell size a given render uses (42px
+down to a 24px floor depending on real container width, with a fixed
+44px tap target laid over it regardless — decisions 3 and 5). The
+probe's 13px/4px comparison is no longer the relevant question, because
+4px never happens. The still-open, still-honest question from §9
+survives unchanged, just with its scale fixed per-render rather than
+variable by design: **is five simultaneous signals overwhelming at
+cell scale, even with none of them individually illegible?** — a
+crowding question, not a legibility-at-small-size one. Two of those five channels are now
+built and can be checked directly rather than estimated: the missed
+mark (a diagonal `--fail` line, confirmed via computed luminance to
+survive greyscale — see the commit that added it) and the record dot
+(a 7px `--gold` circle, unconditional on cell size since it's a fixed
+pixel dimension, not a scaled one). The remaining three (shape/fill for
+met-vs-not, the two-a-day split, the overlay mark) are still open and
+still worth the probe's original scrutiny — just against a single,
+per-render cell size now (24-42px depending on the real device, never
+the old range down to 4px, and never varying with scroll depth or time
+range within one render).
+
+If a future pass reintroduces a genuinely different, SMALLER geometry
+(§17's years-as-rows/months-as-columns is the one already named for
+that), the legibility question this section originally asked becomes
+relevant again, for THAT geometry specifically — but that's a new
+section to write when that geometry is built, not a revival of this
+one's shrink-to-fit numbers, which don't transfer.
 
 ---
 
@@ -609,56 +671,68 @@ single-session-per-backdated-day behavior anywhere in the suite.
 
 ## §17 — More than one year
 
-Not designed as an afterthought: zoom (§5) already treats year as one
-level among several, and `acuteChronicSeries` (§1) is range-based rather
-than quarter-bound, so nothing in §1 or §5 assumes a single-year
-boundary.
+**Partly superseded by §5's correction — the REASONING here still
+holds, but its trigger condition needs restating.** The original
+argument was: cells shrink to illegibility well before a multi-year
+range needs them to (leaning on §10's now-corrected shrink-to-fit
+numbers), so beyond one year the view has to become a coarser geometry
+rather than keep shrinking cells. Cells no longer shrink at all — the
+built grid scrolls instead — so "illegibility from shrinking" can't be
+the trigger anymore, because that failure mode doesn't exist in the
+shipped mechanism. A very long history doesn't make the CELLS
+illegible; it makes the SCROLL long.
 
-**Decided: paging between years, not a continuous zoom-out — and a year
-is the widest DAY grid, full stop.** Beyond one year, the view is not
-"the same grid, smaller cells" (§10 already establishes that cells
-shrink to illegibility well before a multi-year range would need them
-to) — it becomes **a different geometry entirely**: years as rows,
-months as columns, one cell per month — the shape a contribution/
-returns-style calendar already uses for exactly this reason. Reached by
-**zooming out past the year**, not by cramming more days into the same
-pixel budget. This means the zoom axis (§5) isn't strictly "the same
-object at different scales" all the way out — it's "the same object,
-day-granularity, from week through year, and then a second, coarser
-representation beyond that," which is worth stating plainly rather than
-implying one continuous geometry that doesn't actually hold at every
-level.
+**The decision itself — years as rows, months as columns, one cell per
+month, reached by paging rather than continuous scroll, past some
+threshold — is still the right shape, just for a different reason: past
+some length, day-grain scrolling becomes a scroll-depth/orientation
+problem (how does someone find "eight months ago" in a list that's
+grown to several thousand cells) rather than a pixel-size problem.**
+That's a real, separate argument for the same conclusion, not the one
+originally written down — worth having for its own sake before this is
+built, not inherited by accident from a paragraph that no longer
+applies. The first slice doesn't hit this yet: it renders exactly one
+fixed 53-week window, not a paged or continuously-growing range, so
+there's no current scroll-depth problem to solve. This stays open for
+whenever the window becomes variable (§5).
 
-**Does the arc sentence span years?** — mechanically yes (it's already
-period-agnostic per §4), but a multi-year arc sentence needs its own
-candidate shapes (a 3-year "steady climb" sentence reads very
-differently from a 1-quarter one) — not attempted here since it's a new
-writing problem, not a data problem, and better done once the
-single-year version is built and its voice is proven. Still open, and
-narrower now that the geometry above is decided: what does the arc
-sentence say about a *month-cell* view rather than a *day-cell* one?
+**Does the arc sentence span years?** — unaffected by any of the
+above, still open, still exactly as it was: mechanically yes (period-
+agnostic per §4), but a multi-year arc sentence needs its own candidate
+shapes (a 3-year "steady climb" sentence reads very differently from a
+1-quarter one), better done once the single-year version's voice is
+proven. Narrower now that the years-as-rows geometry above is decided:
+what does the arc sentence say about a *month-cell* view rather than a
+*day-cell* one?
 
 ---
 
 ## Open decisions, collected
 
-Ten of the original fourteen are now settled: 28-day gate, phase-band
-aggregation, signal scarcity, closing the backdated bug, dropping
+Eleven of the original fourteen are now settled: 28-day gate, phase-band
+aggregation, signal scarcity (superseded to a stricter answer than
+originally decided — see §1), closing the backdated bug, dropping
 `cooldown` as a fifth state, dropping session start time, empty-layer
 degradation (same rule as the 28-day gate), the year-view threshold
 (same moment as the colour gate), the two-session edit question (list
-both in the breakdown, no picker), and paging vs. continuous zoom-out
-(paging, plus a decided multi-year geometry change past one year).
+both in the breakdown, no picker), paging vs. continuous zoom-out
+(paging, plus a decided multi-year geometry change past one year), and
+the "rest vs. missed" mark — decided AND built (§1: `STATE.routineDays`
+for which days are planned, a struck diagonal `--fail` line for missed),
+not merely decided in writing.
 
-**Five collapse into one probe, per the instruction not to guess them
-from the spec:**
+**Four collapse into one probe, per the instruction not to guess them
+from the spec — one fewer than before, since "rest vs. missed" moved
+into the settled list above:**
 
 - §1 — exact shape/fill vocabulary for "met target vs. not."
 - §1 — exact two-a-day split-cell treatment.
-- §1 / §2 — exact "rest vs. missed" and "gap in connected data" marks.
+- §2 — exact "gap in connected data" mark.
 - §2 — exact overlay mark, and whether it's always-on or its own toggle.
 - §9 / §10 — which of the (up to five) simultaneous per-cell signals
-  actually survive contact with a real cell.
+  actually survive contact with a real cell — now against the single,
+  per-render cell size (24-42px depending on the device) §10 corrects
+  to, not a range down to 4px.
 
 See "The signal-survival probe," below — built, not spec'd, because
 legibility at 13px (and ~4px) isn't something a document can settle.

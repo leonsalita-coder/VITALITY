@@ -537,17 +537,21 @@ ${sec('calendar', '18 · The calendar', 'Rounded per tests/tools/recovered-primi
   </div>
 `)}
 
-${sec('heatmap', '18b · The heatmap (first slice)', 'docs/plans/heatmap.md — grid shell only, volume-bucketed, a fixed 53-week trailing window (not data extent — a fresh account still renders a full, honest year of quiet cells). --hm1–--hm4 is a NEW ramp (not elevation), neutral by design; --signal appears exactly once, on today, regardless of that day’s own value. Rest/no-data is drawn (hairline outline, no fill), never dimmed. .hmCell (42px, the visual) and .hmHit (44px, the real tap target — inset:-1px, out of grid flow) are deliberately two elements; the legend’s swatches reuse .hmCell’s own l1–l4 rules rather than restating the ramp colours.', `
+${sec('heatmap', '18b · The heatmap (first slice)', 'docs/plans/heatmap.md — grid shell, volume-bucketed, a fixed 53-week trailing window (not data extent — a fresh account still renders a full, honest year of quiet cells). --hm1–--hm4 is a NEW ramp (not elevation), neutral by design; --signal appears exactly once, on today, regardless of that day’s own value. Rest/no-data is drawn (hairline outline, no fill), never dimmed. .hmCell (42px, the visual) and .hmHit (44px, the real tap target — inset:-1px, out of grid flow) are deliberately two elements. Missed (a planned weekday, lib/train/routine.ts’s RoutineAssignment, with nothing logged) is a shape difference on an otherwise-unchanged rest cell, never a recolouring — a diagonal --fail line, not a fill. Record (--gold dot, top-right) is driven from classifyPR, the same function the live session’s PR badge already uses. The legend’s swatches reuse .hmCell’s own rules rather than restating any colour.', `
   ${(() => {
-    const cell = (cls, date) => `<div class="hmCell${cls}"><button class="hmHit" aria-label="${date}"></button></div>`
-    const row1 = ['', ' l1', ' l2', ' l3', ' l4', ' today', ' l2 today']
-    const row2 = ['', '', ' l1', ' l3', '', ' l4', ' l2']
+    const cell = (cls, date, inner = '') => `<div class="hmCell${cls}"><button class="hmHit" aria-label="${date}"></button>${inner}</div>`
+    const record = '<span class="hmRecord" data-vol="1"></span>'
+    const row1 = [' missed', ' l1', ' l2', ' l3', ' l4', ' today', ' l2 today']
+    const row2 = ['', '', ' l1', ' missed', '', ' l4', ' l2']
+    const row2inner = [null, null, null, null, null, null, record]
     return `<div class="hmHead" style="width:max-content">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((w) => `<div class="hmWd">${w}</div>`).join('')}</div>`
       + `<div class="hmBody" style="width:max-content;max-height:none;grid-template-rows:repeat(2,42px)">`
       + row1.map((c, i) => cell(c, `Sample ${i + 1}`)).join('')
-      + row2.map((c, i) => cell(c, `Sample ${i + 8}`)).join('')
+      + row2.map((c, i) => cell(c, `Sample ${i + 8}`, row2inner[i] || '')).join('')
       + `</div>`
-      + `<div class="hmLegend">Less<span class="hmCell hmLegendSwatch"></span><span class="hmCell l1 hmLegendSwatch"></span><span class="hmCell l2 hmLegendSwatch"></span><span class="hmCell l3 hmLegendSwatch"></span><span class="hmCell l4 hmLegendSwatch"></span>More</div>`
+      + `<div class="hmLegend">Less<span class="hmCell hmLegendSwatch"></span><span class="hmCell l1 hmLegendSwatch"></span><span class="hmCell l2 hmLegendSwatch"></span><span class="hmCell l3 hmLegendSwatch"></span><span class="hmCell l4 hmLegendSwatch"></span>More`
+      + `<span class="hmLegendGap"></span><span class="hmCell missed hmLegendSwatch"></span>Missed`
+      + `<span class="hmLegendGap"></span><span class="hmCell l2 hmLegendSwatch">${record}</span>Record</div>`
   })()}
 `)}
 

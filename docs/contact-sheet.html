@@ -969,18 +969,65 @@
      interaction are later slices. A fixed 53-week trailing window, not
      data-extent — see renderHeatmap()'s own comment for why.
      ==================================================================== */
-  .hmHead { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; margin-bottom:8px; }
+  /* Column tracks are minmax(24px,42px), not a flat 42px: the tile's own
+     chrome (.shell/.sheet/.chart-card padding) leaves #statsPlot only
+     ~269px wide on a real 393px phone, and 7*42px+6*4px gap (318px)
+     does not fit inside that — a real, previously invisible overflow
+     (tests/tools/browser-geometry.test.ts's nested-container check
+     caught it: .hmBody's own overflow-y:auto silently promotes
+     overflow-x to auto too, per the CSS overflow spec, so the excess
+     was absorbed as invisible horizontal scroll slack, never a visible
+     scrollbar). 42px is the target and 24px is the decided hard floor
+     ("do not build a size below 24px") — minmax lets the track shrink
+     between those bounds to whatever the real container provides,
+     rather than a fixed number that assumes a width no build of this
+     tile actually has.
+
+     10px inline padding, on both rows: the tap target (.hmHit, below)
+     is a FIXED 44px regardless of cell size, by design (decision 5's
+     two-element pattern) — at the 24px floor that overhangs its own
+     cell by (44-24)/2 = 10px on every side, and the edge columns' own
+     overhang would otherwise bleed straight past the grid's outer edge
+     (clipped by overflow-x:hidden, or — before that was added —
+     silently widening scrollWidth past clientWidth again, the same
+     failure mode this whole comment opens with). The padding reserves
+     exactly that worst-case room inside the clipping boundary, so the
+     hit target always has space to render and stay tappable no matter
+     how far a cell has shrunk. */
+  .hmHead { display:grid; grid-template-columns:repeat(7,minmax(24px,42px)); gap:4px; justify-content:center; padding:0 10px; margin-bottom:8px; }
   .hmWd { font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); text-align:center; line-height:var(--lh-micro); }
-  .hmBody { display:grid; grid-template-columns:repeat(7,42px); gap:4px; justify-content:center; max-height:60vh; overflow-y:auto; }
-  /* .hmCell is the GRID ITEM — 42px, exactly decision 5's own geometry,
-     untouched by the tap-target requirement below. It carries the
-     VISUAL fill/border only; it is not itself the interactive element. */
-  .hmCell { position:relative; width:42px; height:42px; border:1px solid var(--hair); border-radius:var(--r-sm); background:none; aspect-ratio:1; }
+  .hmBody { display:grid; grid-template-columns:repeat(7,minmax(24px,42px)); gap:4px; justify-content:center; max-height:60vh; padding:0 10px; overflow-x:hidden; overflow-y:auto; }
+  /* .hmCell is the GRID ITEM — sized by its column track (24-42px, see
+     above), untouched by the tap-target requirement below. It carries
+     the VISUAL fill/border only; it is not itself the interactive
+     element. No explicit width/height: the default stretch alignment
+     fills the track's inline size, and aspect-ratio:1 derives height
+     from that so the cell stays square at whatever size the track
+     actually resolves to. */
+  .hmCell { position:relative; border:1px solid var(--hair); border-radius:var(--r-sm); background:none; aspect-ratio:1; }
   .hmCell.l1 { background:var(--hm1); border-color:transparent; }
   .hmCell.l2 { background:var(--hm2); border-color:transparent; }
   .hmCell.l3 { background:var(--hm3); border-color:transparent; }
   .hmCell.l4 { background:var(--hm4); border-color:transparent; }
   .hmCell.today { box-shadow:0 0 0 2px var(--signal); }
+  /* Missed: a planned weekday (lib/train/routine.ts's RoutineAssignment)
+     with nothing logged. The difference from an ordinary rest cell is
+     SHAPE, not hue — the fill and hairline are UNCHANGED (decision 4's
+     "silence is a state" still applies to the cell itself; this is an
+     overlay on top of it, not a recolouring of it) — a thin diagonal
+     line, drawn as a gradient rather than a border so its width is exact
+     (1.5px, not a rounded border-width) and independent of the cell's
+     own border. --fail converts to a mid-grey (~149 on the 0-255 scale)
+     against the cell's near-black fallback (~3) — real, high-contrast
+     separation confirmed by computing standard luminance for both, not
+     assumed from the hue alone. */
+  .hmCell.missed::after { content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(-45deg, transparent calc(50% - .75px), var(--fail) calc(50% - .75px) calc(50% + .75px), transparent calc(50% + .75px)); }
+  /* Record: a day containing a PR, driven from classifyPR (see
+     heatmapPrDates()) — never a second record definition. Sits ON the
+     fill, not replacing it, so the volume level still reads underneath;
+     pointer-events:none so it never steals a tap from .hmHit beneath it. */
+  .hmRecord { position:absolute; top:2px; right:2px; width:7px; height:7px; border-radius:50%; background:var(--gold); pointer-events:none; }
   /* .hmHit is the real <button>, a fixed 44×44 centred on its parent —
      NOT inset:-1px, which was measured live (varying the border 0/1/3px
      and watching the hit box come back 44/42/38) to resolve against
@@ -994,12 +1041,13 @@
      4px gap without moving any other cell or changing the grid's own
      42px+4px rhythm. */
   .hmHit { position:absolute; left:50%; top:50%; width:44px; height:44px; transform:translate(-50%,-50%); padding:0; margin:0; border:none; background:none; cursor:default; }
-  .hmLegend { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); line-height:var(--lh-micro); }
-  /* Swatches reuse .hmCell's own l1–l4 rules verbatim (same classes, same
-     selectors) rather than restating --hm1–--hm4 here — this size-only
-     override cannot drift out of sync with the real cells' colour
-     because it never states a colour of its own. */
-  .hmLegendSwatch { width:11px; height:11px; flex:none; border-radius:3px; }
+  .hmLegend { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px; margin-top:12px; font-family:var(--mono); font-size:var(--fs-micro); font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); line-height:var(--lh-micro); }
+  /* Swatches reuse .hmCell's own l1–l4/missing/.hmRecord rules verbatim
+     (same classes, same selectors) rather than restating any of their
+     colours here — this size-only override cannot drift out of sync
+     with the real cells because it never states a colour of its own. */
+  .hmLegendSwatch { position:relative; width:11px; height:11px; flex:none; border-radius:3px; }
+  .hmLegendGap { width:4px; flex:none; }
 
   /* ====================================================================
      RECOVERED — the remaining 59, lifted from 731e891 in six groups
@@ -1497,8 +1545,8 @@
   </div>
 </section>
 
-<section class="cs-sec" id="heatmap"><h2>18b · The heatmap (first slice)</h2><p class="cs-note">docs/plans/heatmap.md — grid shell only, volume-bucketed, a fixed 53-week trailing window (not data extent — a fresh account still renders a full, honest year of quiet cells). --hm1–--hm4 is a NEW ramp (not elevation), neutral by design; --signal appears exactly once, on today, regardless of that day’s own value. Rest/no-data is drawn (hairline outline, no fill), never dimmed. .hmCell (42px, the visual) and .hmHit (44px, the real tap target — inset:-1px, out of grid flow) are deliberately two elements; the legend’s swatches reuse .hmCell’s own l1–l4 rules rather than restating the ramp colours.</p>
-  <div class="hmHead" style="width:max-content"><div class="hmWd">Sun</div><div class="hmWd">Mon</div><div class="hmWd">Tue</div><div class="hmWd">Wed</div><div class="hmWd">Thu</div><div class="hmWd">Fri</div><div class="hmWd">Sat</div></div><div class="hmBody" style="width:max-content;max-height:none;grid-template-rows:repeat(2,42px)"><div class="hmCell"><button class="hmHit" aria-label="Sample 1"></button></div><div class="hmCell l1"><button class="hmHit" aria-label="Sample 2"></button></div><div class="hmCell l2"><button class="hmHit" aria-label="Sample 3"></button></div><div class="hmCell l3"><button class="hmHit" aria-label="Sample 4"></button></div><div class="hmCell l4"><button class="hmHit" aria-label="Sample 5"></button></div><div class="hmCell today"><button class="hmHit" aria-label="Sample 6"></button></div><div class="hmCell l2 today"><button class="hmHit" aria-label="Sample 7"></button></div><div class="hmCell"><button class="hmHit" aria-label="Sample 8"></button></div><div class="hmCell"><button class="hmHit" aria-label="Sample 9"></button></div><div class="hmCell l1"><button class="hmHit" aria-label="Sample 10"></button></div><div class="hmCell l3"><button class="hmHit" aria-label="Sample 11"></button></div><div class="hmCell"><button class="hmHit" aria-label="Sample 12"></button></div><div class="hmCell l4"><button class="hmHit" aria-label="Sample 13"></button></div><div class="hmCell l2"><button class="hmHit" aria-label="Sample 14"></button></div></div><div class="hmLegend">Less<span class="hmCell hmLegendSwatch"></span><span class="hmCell l1 hmLegendSwatch"></span><span class="hmCell l2 hmLegendSwatch"></span><span class="hmCell l3 hmLegendSwatch"></span><span class="hmCell l4 hmLegendSwatch"></span>More</div>
+<section class="cs-sec" id="heatmap"><h2>18b · The heatmap (first slice)</h2><p class="cs-note">docs/plans/heatmap.md — grid shell, volume-bucketed, a fixed 53-week trailing window (not data extent — a fresh account still renders a full, honest year of quiet cells). --hm1–--hm4 is a NEW ramp (not elevation), neutral by design; --signal appears exactly once, on today, regardless of that day’s own value. Rest/no-data is drawn (hairline outline, no fill), never dimmed. .hmCell (42px, the visual) and .hmHit (44px, the real tap target — inset:-1px, out of grid flow) are deliberately two elements. Missed (a planned weekday, lib/train/routine.ts’s RoutineAssignment, with nothing logged) is a shape difference on an otherwise-unchanged rest cell, never a recolouring — a diagonal --fail line, not a fill. Record (--gold dot, top-right) is driven from classifyPR, the same function the live session’s PR badge already uses. The legend’s swatches reuse .hmCell’s own rules rather than restating any colour.</p>
+  <div class="hmHead" style="width:max-content"><div class="hmWd">Sun</div><div class="hmWd">Mon</div><div class="hmWd">Tue</div><div class="hmWd">Wed</div><div class="hmWd">Thu</div><div class="hmWd">Fri</div><div class="hmWd">Sat</div></div><div class="hmBody" style="width:max-content;max-height:none;grid-template-rows:repeat(2,42px)"><div class="hmCell missed"><button class="hmHit" aria-label="Sample 1"></button></div><div class="hmCell l1"><button class="hmHit" aria-label="Sample 2"></button></div><div class="hmCell l2"><button class="hmHit" aria-label="Sample 3"></button></div><div class="hmCell l3"><button class="hmHit" aria-label="Sample 4"></button></div><div class="hmCell l4"><button class="hmHit" aria-label="Sample 5"></button></div><div class="hmCell today"><button class="hmHit" aria-label="Sample 6"></button></div><div class="hmCell l2 today"><button class="hmHit" aria-label="Sample 7"></button></div><div class="hmCell"><button class="hmHit" aria-label="Sample 8"></button></div><div class="hmCell"><button class="hmHit" aria-label="Sample 9"></button></div><div class="hmCell l1"><button class="hmHit" aria-label="Sample 10"></button></div><div class="hmCell missed"><button class="hmHit" aria-label="Sample 11"></button></div><div class="hmCell"><button class="hmHit" aria-label="Sample 12"></button></div><div class="hmCell l4"><button class="hmHit" aria-label="Sample 13"></button></div><div class="hmCell l2"><button class="hmHit" aria-label="Sample 14"></button><span class="hmRecord" data-vol="1"></span></div></div><div class="hmLegend">Less<span class="hmCell hmLegendSwatch"></span><span class="hmCell l1 hmLegendSwatch"></span><span class="hmCell l2 hmLegendSwatch"></span><span class="hmCell l3 hmLegendSwatch"></span><span class="hmCell l4 hmLegendSwatch"></span>More<span class="hmLegendGap"></span><span class="hmCell missed hmLegendSwatch"></span>Missed<span class="hmLegendGap"></span><span class="hmCell l2 hmLegendSwatch"><span class="hmRecord" data-vol="1"></span></span>Record</div>
 </section>
 
 <section class="cs-sec" id="overview"><h2>19 · Overview cards &amp; weekday bars</h2><p class="cs-note">Signal shows up twice here — .ovNum.mint and .wdFill’s gradient — flagged, not changed, in the same pass that ported these.</p>
